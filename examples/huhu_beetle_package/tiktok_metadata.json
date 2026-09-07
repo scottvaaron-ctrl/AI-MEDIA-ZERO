@@ -1,0 +1,19 @@
+{
+  "post_info_recommendation": {
+    "title": "Islands of New Zealand: The Huhu Beetle\n\nAI-narrated, sourced explainer. Sources in comments/bio.\n#NewZealand #HuhuBeetle #Ecology #Insects #Biodiversity",
+    "privacy_level": "CHOOSE_IN_APP (TikTok requires the creator to pick this manually; no default)",
+    "disable_duet": false,
+    "disable_stitch": false,
+    "disable_comment": false,
+    "video_cover_timestamp_ms": 500,
+    "is_aigc": true,
+    "brand_content_toggle": false,
+    "brand_organic_toggle": false
+  },
+  "constraints": {
+    "max_caption_utf16": 2200,
+    "format": "mp4 h264 1080x1920 23-60fps <= 4GB",
+    "duration_limit": "creator max_video_post_duration_sec (query creator_info if using the API)"
+  },
+  "why_manual": "Unaudited TikTok API clients may only post SELF_ONLY to private accounts; the creator must preview, edit, select privacy, and consent."
+}

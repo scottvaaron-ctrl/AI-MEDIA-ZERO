@@ -19,7 +19,7 @@ authority, publishing permissions, and the kill switch.
 
 | Concern | Provider | Cost |
 |---|---|---|
-| LLM | `OllamaProvider` (any Ollama model, default `qwen3:4b`) | $0 |
+| LLM | `OllamaProvider` (any Ollama model, default `qwen3:8b`) | $0 |
 | Voice | `PiperTTSProvider` (local neural TTS, MIT voices) | $0 |
 | Visuals | `PillowCardProvider` + `WikimediaAssetProvider` (PD / CC0 / CC BY / CC BY-SA only) | $0 |
 | Render | `FFmpegRenderer` (1080x1920 H.264, burned captions) | $0 |
@@ -49,10 +49,10 @@ winget install --id Gyan.FFmpeg -e
 winget install --id Ollama.Ollama -e
 ```
 
-Close and reopen PowerShell so PATH updates. Then pull a local model (about 2.5 GB, one time):
+Close and reopen PowerShell so PATH updates. Then pull a local model (about 5 GB, one time; `qwen3:4b` at 2.5 GB also works but writes thinner scripts):
 
 ```powershell
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 ```
 
 Ollama runs in the background automatically after install (tray icon). If it is not running:
@@ -144,7 +144,7 @@ Task Scheduler → Create Basic Task → Daily → Action: `powershell.exe -File
 
 ```bash
 brew install ffmpeg ollama        # or apt install ffmpeg + the Ollama install script
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[all]"
 aimz init && aimz doctor --fix && aimz run
@@ -206,7 +206,7 @@ FFmpeg rendering via the bundled `imageio-ffmpeg` binary) runs in CI with no mod
 - [Platform compliance](docs/COMPLIANCE.md) · [Owner controls](docs/OWNER_CONTROLS.md)
 - [What is autonomous vs human-controlled](docs/AUTONOMY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](docs/ROADMAP.md) · [Funded V1 path](docs/FUNDED_V1.md)
-- [Dry-run report](docs/DRY_RUN.md)
+- [Dry-run report](docs/DRY_RUN.md) · [Example generated package](examples/huhu_beetle_package/)
 
 ## License
 

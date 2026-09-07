@@ -1,0 +1,223 @@
+{
+  "video_id": "vid_20260907T212125_ff373de4",
+  "title": "Islands of New Zealand: The Huhu Beetle",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "scenes": [
+    {
+      "idx": 0,
+      "start_s": 0.0,
+      "duration_s": 4.698,
+      "narration": "The huhu beetle is a longhorn beetle, reaching up to 5 cm in length.",
+      "caption": "Huhu Beetle Size",
+      "visual_type": "image",
+      "asset_id": "asset_20260907T212129_b5d152ff",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\cole-cerambycidae-prionoplus-reticularis_1eb221be.png",
+      "crop": "cover",
+      "zoom": "in",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "This video uses AI-generated narration and AI-assisted scripting. Sources are listed in the description.",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_00.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_00.png",
+      "caption_chunks": [
+        [
+          0.0,
+          4.098,
+          "The huhu beetle is a longhorn beetle, reaching up to 5 cm in length."
+        ]
+      ]
+    },
+    {
+      "idx": 1,
+      "start_s": 4.698,
+      "duration_s": 4.362,
+      "narration": "It is one of the largest beetles in New Zealand, found across the country.",
+      "caption": "Widespread in New Zealand",
+      "visual_type": "map",
+      "asset_id": "asset_20260907T212130_12a2a035",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\huhu-100-te-rongo-road-parua-bay-new-zea_98392e06.jpg",
+      "crop": "cover",
+      "zoom": "out",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_01.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_01.png",
+      "caption_chunks": [
+        [
+          0.0,
+          3.762,
+          "It is one of the largest beetles in New Zealand, found across the country."
+        ]
+      ]
+    },
+    {
+      "idx": 2,
+      "start_s": 9.06,
+      "duration_s": 6.272,
+      "narration": "Despite its size, it cannot eat as an adult, relying on its larval stage for survival.",
+      "caption": "Larval Stage",
+      "visual_type": "image",
+      "asset_id": "asset_20260907T212131_3e9f4392",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\huhu-grubs-jpg_87a321b9.jpg",
+      "crop": "cover",
+      "zoom": "in",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_02.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_02.png",
+      "caption_chunks": [
+        [
+          0.0,
+          2.949,
+          "Despite its size, it cannot eat as an adult,"
+        ],
+        [
+          3.199,
+          5.672,
+          "relying on its larval stage for survival."
+        ]
+      ]
+    },
+    {
+      "idx": 3,
+      "start_s": 15.332,
+      "duration_s": 6.899,
+      "narration": "As a larva, it can grow to 5 to 7 cm, living in dead wood and feeding on gymnosperms.",
+      "caption": "Larval Diet",
+      "visual_type": "text_card",
+      "asset_id": "asset_20260907T212132_817da9ac",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\cole-cerambycidae-prionoplus-reticularis_b3b044d9.png",
+      "crop": "cover",
+      "zoom": "out",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_03.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_03.png",
+      "caption_chunks": [
+        [
+          0.0,
+          3.274,
+          "As a larva, it can grow to 5 to 7 cm,"
+        ],
+        [
+          3.524,
+          6.299,
+          "living in dead wood and feeding on gymnosperms."
+        ]
+      ]
+    },
+    {
+      "idx": 4,
+      "start_s": 22.231,
+      "duration_s": 5.889,
+      "narration": "The larva is high in protein and fat, making it a food source for some New Zealanders.",
+      "caption": "Edible Larvae",
+      "visual_type": "text_card",
+      "asset_id": "asset_20260907T212134_9baf54fe",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\huhu-grubs-jpg_cdda2c5d.jpg",
+      "crop": "cover",
+      "zoom": "in",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_04.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_04.png",
+      "caption_chunks": [
+        [
+          0.0,
+          2.345,
+          "The larva is high in protein and fat,"
+        ],
+        [
+          2.595,
+          5.289,
+          "making it a food source for some New Zealanders."
+        ]
+      ]
+    },
+    {
+      "idx": 5,
+      "start_s": 28.119,
+      "duration_s": 6.44,
+      "narration": "Its life cycle and habitat reflect unique ecological adaptations to New Zealand’s environment.",
+      "caption": "Ecological Adaptations",
+      "visual_type": "image",
+      "asset_id": "asset_20260907T212136_cb4d77d4",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\catlins-153563873-jpeg_928345b0.jpg",
+      "crop": "cover",
+      "zoom": "out",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_05.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_05.png",
+      "caption_chunks": [
+        [
+          0.0,
+          5.84,
+          "Its life cycle and habitat reflect unique ecological adaptations to New Zealand's environment."
+        ]
+      ]
+    },
+    {
+      "idx": 6,
+      "start_s": 34.559,
+      "duration_s": 5.418,
+      "narration": "The beetle has a long history in New Zealand, with cultural and ecological significance.",
+      "caption": "Cultural Significance",
+      "visual_type": "text_card",
+      "asset_id": "asset_20260907T212137_3aafae0b",
+      "asset_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\assets\\des-helmore-making-finishing-touches-to_c75648ea.jpg",
+      "crop": "cover",
+      "zoom": "in",
+      "animation": "kenburns",
+      "transition": "cut",
+      "source": "",
+      "disclosure": "",
+      "notes": "",
+      "audio_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_06.wav",
+      "image_path": "C:\\Users\\scott\\Documents\\Agentic_Youtube\\data\\videos\\vid_20260907T212125_ff373de4\\scene_06.png",
+      "caption_chunks": [
+        [
+          0.0,
+          4.818,
+          "The beetle has a long history in New Zealand, with cultural and ecological significance."
+        ]
+      ]
+    }
+  ],
+  "total_duration_s": 39.977,
+  "disclosure_text": "This video uses AI-generated narration and AI-assisted scripting. Sources are listed in the description.",
+  "sources": [
+    {
+      "id": "src_20260907T204635_ecf9134d",
+      "title": "September 3 Wikipedia featured article",
+      "url": "https://en.wikipedia.org/wiki/Special:FeedItem/featured/20260903000000/en",
+      "source": "Wikipedia - Featured article"
+    }
+  ],
+  "attributions": [
+    "COLE Cerambycidae Prionoplus reticularis 1.png — Desmond W. Helmore — CC BY 4.0 — via Wikimedia Commons",
+    "Huhu, 100 Te Rongo Road, Parua Bay, New Zealand imported from iNaturalist photo 461529445.jpg — (c) garywwilson, some rights reserved (CC BY) — CC BY 4.0 — via Wikimedia Commons",
+    "Huhu grubs.jpg — schlott  Author is Charlotte Simmonds, who asks for attribution: \"if you use the picture somewhere with a photo credit,  — CC BY 2.0 — via Wikimedia Commons",
+    "Catlins (153563873).jpeg — David Willing — CC BY 3.0 — via Wikimedia Commons",
+    "Des Helmore making finishing touches to illustration of Huhu beetle, Oct 1982 - Archives 4 06.jpg — Department of Scientific and Industrial Research — CC BY 4.0 — via Wikimedia Commons"
+  ]
+}

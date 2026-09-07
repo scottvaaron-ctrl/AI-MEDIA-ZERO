@@ -28,7 +28,7 @@ class OllamaProvider(LLMProvider):
     def __init__(
         self,
         host: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:4b",
+        model: str = "qwen3:8b",
         timeout_s: int = 600,
         num_ctx: int = 8192,
         think: bool = False,

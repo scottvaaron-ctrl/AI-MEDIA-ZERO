@@ -114,7 +114,7 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         allow_paid_providers=_env_bool("ALLOW_PAID_PROVIDERS", False),
         llm_provider=_env("LLM_PROVIDER", "ollama").lower(),
         ollama_host=_env("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/"),
-        ollama_model=_env("OLLAMA_MODEL", "qwen3:4b"),
+        ollama_model=_env("OLLAMA_MODEL", "qwen3:8b"),
         ollama_fast_model=_env("OLLAMA_FAST_MODEL", ""),
         ollama_timeout_s=_env_int("OLLAMA_TIMEOUT_S", 600),
         ollama_num_ctx=_env_int("OLLAMA_NUM_CTX", 8192),

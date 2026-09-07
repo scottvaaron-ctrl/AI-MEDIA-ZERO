@@ -1,0 +1,40 @@
+1
+00:00:00,000 --> 00:00:04,098
+The huhu beetle is a longhorn beetle, reaching up to 5 cm in length.
+
+2
+00:00:04,698 --> 00:00:08,460
+It is one of the largest beetles in New Zealand, found across the country.
+
+3
+00:00:09,060 --> 00:00:12,009
+Despite its size, it cannot eat as an adult,
+
+4
+00:00:12,259 --> 00:00:14,732
+relying on its larval stage for survival.
+
+5
+00:00:15,332 --> 00:00:18,606
+As a larva, it can grow to 5 to 7 cm,
+
+6
+00:00:18,856 --> 00:00:21,631
+living in dead wood and feeding on gymnosperms.
+
+7
+00:00:22,231 --> 00:00:24,576
+The larva is high in protein and fat,
+
+8
+00:00:24,826 --> 00:00:27,520
+making it a food source for some New Zealanders.
+
+9
+00:00:28,119 --> 00:00:33,959
+Its life cycle and habitat reflect unique ecological adaptations to New Zealand's environment.
+
+10
+00:00:34,559 --> 00:00:39,377
+The beetle has a long history in New Zealand, with cultural and ecological significance.
+

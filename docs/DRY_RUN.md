@@ -83,3 +83,36 @@ Defects found by inspecting frames, and fixes:
 | Model calls per cycle | ~25–40 (qwen3:4b, GPU) |
 | Cycle wall time | 3–5 min |
 | Render time (26 s video) | 15.6 s |
+
+## Cycle 4 (qwen3:4b, 4m30s) — writer identified as the weak link
+
+Guards held (strategy v4, hook experiment running), but both scripts were rejected again: 49 words
+in four thin beats, critic sub-scores 2–4/10 ("feels like generic AI"), no payoff. This time the
+critic was right. **Fixes:** the script schema itself now requires at least 5 beats and 60 spoken
+words (a thin draft fails validation and the error is fed back to the model), and the default
+model was raised to `qwen3:8b` (free, ~5 GB, fits an 8 GB GPU).
+
+## Cycle 5 (qwen3:8b, 3m14s) — target output reached
+
+- 5 ideas, 2 selected; **1 script approved on its first draft** (107 words, 7 beats, critic 70,
+  fact-check `pass`, 4/4 claims supported); the other rejected for an unsupported year the model
+  would not drop (correct, conservative behaviour).
+- Rendered `Islands of New Zealand: The Huhu Beetle`: 37.6 s, 32 s render time. **All seven scenes
+  carry licensed photos** from Wikimedia Commons (CC BY 2.0/3.0/4.0), each with a stored
+  attribution line baked into the frame and listed in the description.
+- TikTok and YouTube packages written; strategy v5; usage-based spend still $0.00.
+- A copy of the package, a frame, the daily learning summary and the strategy memory after five
+  cycles are in [`examples/`](../examples/).
+
+## Known limitations observed
+
+- Script quality tracks the local model. `qwen3:4b` passes QA roughly one draft in six;
+  `qwen3:8b` passed on the first draft. Larger free models will do better still.
+- A single-sentence beat that contains an unsupported specific is not auto-removed (the beat would
+  be empty); the script is rejected instead. Safe, but wastes a production slot.
+- The 4B critic's headline scores are noisy; the sub-score blend mitigates but does not remove it.
+- Wikimedia search occasionally returns a related-but-off image (a scientist drawing a beetle, for
+  the "cultural significance" beat). Attribution is always correct; relevance is model-dependent.
+- Reddit RSS rate-limits back-to-back fetches; one Reddit feed is enabled by default.
+- No metrics exist until videos are posted and numbers are entered, so the strategy has not yet
+  changed a family's status in a real run; the offline test proves that path.

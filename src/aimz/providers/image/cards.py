@@ -225,12 +225,12 @@ class PillowCardProvider(ImageProvider):
             y = h - 210
             attribution = (spec.get("attribution") or "").strip()
             if attribution:
-                for line in textwrap.wrap(attribution, width=70)[:2]:
+                for line in textwrap.wrap(attribution, width=56)[:2]:
                     draw.text((80, y), line, font=small_font, fill=(210, 210, 210))
                     y += 36
             disclosure = (spec.get("disclosure") or "").strip()
             if disclosure:
-                for line in textwrap.wrap(disclosure, width=64)[:2]:
+                for line in textwrap.wrap(disclosure, width=56)[:2]:
                     draw.text((80, y), line, font=small_font, fill=(180, 180, 180))
                     y += 36
 
