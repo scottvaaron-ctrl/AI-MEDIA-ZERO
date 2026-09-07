@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>Video <span class="status-{{ v.status }}">{{ v.status }}</span></h3>
+    <h2 style="margin:4px 0">{{ v.title }}</h2>
+    <p class="muted">{{ v.resolution }} · {{ v.duration_s }}s · rendered in {{ v.production_seconds }}s · cost ${{ '%.2f'|format(v.production_cost_usd) }} · <a href="/scripts/{{ v.script_id }}">script</a></p>
+    {% if v.file_path %}<video controls src="/media/{{ v.id }}/video.mp4" poster="/media/{{ v.id }}/thumbnail.png"></video>{% endif %}
+    <p class="muted">{{ v.ai_disclosure }}</p>
+    {% if v.status in ['rendered', 'rejected'] %}
+    <form method="post" action="/videos/{{ v.id }}/decide" class="row">
+      <button name="decision" value="approve">Approve for publishing</button>
+      <button class="ghost" name="decision" value="reject">Reject</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h3>Publications</h3>
+    {% if pubs %}<table><tr><th>platform</th><th>mode</th><th>status</th><th>where</th></tr>
+    {% for p in pubs %}<tr><td>{{ p.platform }}</td><td>{{ p.mode }}</td><td class="status-{{ p.status }}">{{ p.status }}{% if p.last_error %}<br><span class="mono">{{ p.last_error[:200] }}</span>{% endif %}</td><td class="mono">{{ p.url or p.package_dir }}</td></tr>{% endfor %}</table>
+    {% else %}<p class="muted">not packaged yet</p>{% endif %}
+    <h3>Sources</h3>
+    <ul>{% for s in timeline.sources %}<li><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title }}</a> <span class="muted">({{ s.source }})</span></li>{% endfor %}</ul>
+    <h3>Attributions</h3>
+    <ul>{% for a in timeline.attributions %}<li class="muted">{{ a }}</li>{% endfor %}</ul>
+  </div>
+</div>
+<div class="card" style="margin-top:14px">
+  <h3>Timeline</h3>
+  <table><tr><th>#</th><th>start</th><th>dur</th><th>visual</th><th>caption</th><th>narration</th><th>asset</th></tr>
+  {% for sc in scenes %}<tr><td>{{ sc.idx }}</td><td>{{ sc.start_s }}</td><td>{{ sc.duration_s }}</td><td>{{ sc.visual_type }} / {{ sc.zoom }}</td><td>{{ sc.caption }}</td><td>{{ sc.narration }}</td><td class="muted">{{ sc.asset_id or '' }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

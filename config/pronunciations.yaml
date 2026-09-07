@@ -1,0 +1,14 @@
+# Pronunciation overrides for the local TTS voice. The left side is replaced
+# with the right side before synthesis (whole words, case-sensitive).
+overrides:
+  "AI": "A.I."
+  "GPU": "G.P.U."
+  "NASA": "Nassa"
+  "SQL": "sequel"
+  "GitHub": "Git Hub"
+  "Wikimedia": "Wiki-media"
+  "FFmpeg": "F F M peg"
+  "TikTok": "Tick Tock"
+  "vs.": "versus"
+  "e.g.": "for example"
+  "i.e.": "that is"

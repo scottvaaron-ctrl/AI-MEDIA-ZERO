@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Ideas ({{ ideas|length }})</h3>
+  <table>
+    <tr><th>status</th><th>score</th><th>family</th><th>hook</th><th>mode</th><th>title / premise</th><th>EIC notes</th></tr>
+    {% for i in ideas %}
+    <tr>
+      <td class="status-{{ i.status }}">{{ i.status }}</td><td>{{ '%.0f'|format(i.opportunity_score) }}</td><td>{{ i.content_family }}</td><td>{{ i.hook_type }}</td>
+      <td>{{ i.allocation_mode or '' }}{% if i.experiment_id %}<br><span class="muted">exp {{ i.experiment_arm }}</span>{% endif %}</td>
+      <td><b>{{ i.title }}</b><br><span class="muted">{{ i.premise[:220] }}</span><br><i>Hook: {{ i.hook[:160] }}</i></td>
+      <td class="muted">{{ i.eic_notes or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

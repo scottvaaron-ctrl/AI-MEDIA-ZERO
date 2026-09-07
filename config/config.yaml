@@ -1,0 +1,137 @@
+# AI Media Zero - operating configuration (owner-editable).
+# Secrets and the budget live in .env, never here.
+
+project:
+  name: AI Media Zero
+  timezone: America/Los_Angeles
+
+pipeline:
+  # How many fresh source items are handed to ideation per cycle.
+  research_items_per_cycle: 24
+  ideas_per_cycle: 8
+  # How many ideas the Editor-in-Chief may select for production per cycle.
+  selections_per_cycle: 2
+  # Max scripts produced per cycle (bounded by hardware time, not money).
+  max_productions_per_cycle: 2
+  max_revision_rounds: 2
+  # The Critic must score at least this (0-100) for a script to pass.
+  qa_pass_threshold: 60
+  # Days a source item stays "fresh" for trend-driven families.
+  freshness_window_days: 14
+
+allocation:
+  # Cold start: mostly exploration. Moves toward exploitation as evidence accumulates.
+  cold_start_explore_ratio: 0.70
+  min_explore_ratio: 0.25
+  # Measured videos per family before its performance estimate is trusted.
+  family_confidence_sample: 5
+  # Total measured videos before the exploration ratio may begin to decay.
+  decay_start_sample: 12
+  decay_full_sample: 60
+
+experiments:
+  default_min_sample_per_arm: 8
+  max_concurrent: 2
+  # Confidence required to conclude an experiment.
+  min_confidence: 0.85
+
+content:
+  short_form:
+    min_seconds: 20
+    max_seconds: 90
+    target_seconds: 45
+    resolution: [1080, 1920]
+    fps: 30
+  long_form:
+    enabled: false
+    min_seconds: 240
+    max_seconds: 900
+    resolution: [1920, 1080]
+  # Starting hypotheses only. The AI may retire all of these and add new ones.
+  starting_families:
+    - key: strange_business_history
+      label: Strange business history
+      description: Odd, surprising, or absurd episodes from the history of companies and commerce.
+    - key: corporate_failures
+      label: Corporate failures
+      description: How and why notable companies, products, or projects collapsed.
+    - key: forgotten_history
+      label: Forgotten history
+      description: Historically significant events and people that most viewers have never heard of.
+    - key: infrastructure_systems
+      label: Infrastructure and systems
+      description: How large systems (grids, ports, networks, supply chains) actually work and fail.
+    - key: science_history_explainers
+      label: Science and history explainers
+      description: Clear explanations of a scientific or historical mechanism with a concrete payoff.
+    - key: maps_data_stories
+      label: Maps and data stories
+      description: Stories told primarily through a map, chart, or dataset.
+    - key: institutional_stories
+      label: Institutional stories
+      description: The strange inner workings of governments, agencies, courts, and bureaucracies.
+    - key: internet_history
+      label: Internet history
+      description: Origins and turning points of websites, protocols, and online cultures.
+    - key: local_history
+      label: Local history
+      description: Hyper-specific place-based stories with a universal angle.
+    - key: unusual_historical_events
+      label: Unusual historical events
+      description: Bizarre, little-known, well-documented events.
+    - key: technology_history
+      label: Technology history
+      description: Where everyday technologies actually came from and why they won.
+  hook_types:
+    - numeric_hook
+    - question_hook
+    - contrarian_hook
+    - narrative_hook
+    - stakes_hook
+    - visual_hook
+
+publishing:
+  # Owner approval is required before anything leaves the machine.
+  require_owner_approval: true
+  ai_disclosure_text: "This video uses AI-generated narration and AI-assisted scripting. Sources are listed in the description."
+  youtube:
+    category_id: "27"   # Education
+    made_for_kids: false
+    contains_synthetic_media: true
+    default_tags: []
+  tiktok:
+    package_dir: ./data/packages/tiktok
+    recommend_ai_label: true
+
+safety:
+  elevated_review_topics:
+    - realistic depictions of real people
+    - altered real-world events
+    - medical claims
+    - legal claims
+    - financial advice
+    - politics or persuasion
+    - emergencies or disasters in progress
+    - allegations involving real, living people
+  banned_patterns:
+    - "you won't believe"
+    - "doctors hate"
+    - "wait for it"
+    - "like and subscribe"
+    - "broke the internet"
+    - "changed everything"
+    - "shocking truth"
+    - "nobody talks about"
+  # Content must cite at least this many distinct sources.
+  min_sources_per_script: 1
+
+assets:
+  wikimedia:
+    enabled: true
+    allowed_licenses: ["pd", "cc0", "cc-by", "cc-by-sa", "public domain"]
+    max_results: 6
+  owner_library_dir: ./assets/owner
+  cache_dir: ./data/assets
+
+dashboard:
+  title: AI Media Zero

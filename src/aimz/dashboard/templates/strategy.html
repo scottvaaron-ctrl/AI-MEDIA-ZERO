@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>Strategy memory (AI-editable within the constitution)</h3>
+    <div class="md">{{ md }}</div>
+    <h3 style="margin-top:14px">Version history</h3>
+    <table>{% for h in history %}<tr><td>v{{ h.version }}</td><td>{{ h.created_by }}</td><td class="muted">{{ h.created_at }}</td><td>{{ h.change_summary }}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Owner edit: strategy state (JSON, saved as a new version)</h3>
+    <form method="post" action="/controls/strategy">
+      <textarea name="state_json">{{ state|json }}</textarea>
+      <p><button>Save as owner version</button></p>
+    </form>
+    <h3>Constitution (owner-only, immutable to the AI)</h3>
+    <form method="post" action="/controls/constitution">
+      <textarea name="content" style="min-height:360px">{{ constitution }}</textarea>
+      <p><button class="danger">Save constitution</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

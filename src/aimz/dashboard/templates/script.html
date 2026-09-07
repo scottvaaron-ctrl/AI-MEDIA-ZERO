@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>Script <span class="status-{{ s.status }}">{{ s.status }}</span> · v{{ s.version }}</h3>
+    <h2 style="margin:4px 0">{{ s.title }}</h2>
+    <p class="muted">Idea: {{ idea.title }} · {{ idea.content_family }} · {{ idea.hook_type }} · {{ s.word_count }} words (~{{ s.estimated_runtime_s }}s)</p>
+    <p><b>Hook:</b> {{ s.hook_line }}</p>
+    <ol>{% for b in beats %}<li><b>[{{ b.visual_type }}{% if b.visual_query %}: {{ b.visual_query }}{% endif %}]</b> {{ b.narration }} <span class="muted">— caption: {{ b.caption }}</span></li>{% endfor %}</ol>
+    <p><b>Description:</b></p><div class="mono">{{ s.description }}</div>
+    <p><b>Thumbnail concept:</b> {{ s.thumbnail_concept }}</p>
+    {% if s.status in ['needs_owner_review', 'qa_failed', 'rejected', 'draft', 'factchecked'] %}
+    <form method="post" action="/scripts/{{ s.id }}/decide" class="row">
+      <button name="decision" value="approve">Approve for production</button>
+      <button class="ghost" name="decision" value="reject">Reject</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h3>Critic / QA</h3>
+    {% if qa %}
+    <p>Score <b>{{ qa.score }}</b> · {{ 'PASS' if qa['pass'] else 'FAIL' }} · hook {{ qa.hook_strength }} · originality {{ qa.originality }} · facts {{ qa.factual_support }} · pacing {{ qa.pacing }} · payoff {{ qa.payoff }} · clarity {{ qa.clarity }}</p>
+    <p>Risks: copyright {{ qa.copyright_risk }} · policy {{ qa.policy_risk }} · deceptive {{ qa.deceptive_media_risk }} · generic-AI {{ qa.feels_generic_ai }} · deserves video {{ qa.deserves_video }}</p>
+    {% if qa.elevated_review_required %}<p class="badge warn">Elevated review: {{ qa.elevated_review_reasons|join(', ') }}</p>{% endif %}
+    <p><b>Problems</b></p><ul>{% for p in qa.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    <p><b>Required revisions</b></p><ul>{% for p in qa.required_revisions %}<li>{{ p }}</li>{% endfor %}</ul>
+    <p><b>Optional improvements</b></p><ul>{% for p in qa.optional_improvements %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">not reviewed yet</p>{% endif %}
+    <h3>Fact-check</h3>
+    {% if fc %}<p>Overall: <b>{{ fc.overall }}</b> {{ fc.notes }}</p>{% if fc.flagged %}<p>Unsupported specifics: {{ fc.flagged|join(', ') }}</p>{% endif %}{% endif %}
+    <table><tr><th>claim</th><th>type</th><th>status</th><th>sources</th></tr>
+    {% for c in claims %}<tr><td>{{ c.text }}</td><td>{{ c.claim_type }}</td><td class="status-{{ 'approved' if c.verification_status == 'supported' else 'needs_owner_review' }}">{{ c.verification_status }}<br><span class="muted">{{ c.verification_notes or '' }}</span></td><td class="mono">{{ c.source_urls_json }}</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

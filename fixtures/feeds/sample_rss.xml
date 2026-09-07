@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Fixture history feed</title>
+<link>https://example.org/feed</link>
+<description>Offline fixture leads for tests and dry runs.</description>
+<item>
+  <title>The Great Molasses Flood of 1919</title>
+  <link>https://en.wikipedia.org/wiki/Great_Molasses_Flood</link>
+  <pubDate>Mon, 01 Sep 2026 10:00:00 GMT</pubDate>
+  <description>On January 15, 1919, a storage tank holding 2,300,000 gallons of molasses burst in Boston's North End. A wave of molasses moved through the streets, killing 21 people and injuring about 150. The company, United States Industrial Alcohol, was later found liable after a lengthy hearing.</description>
+</item>
+<item>
+  <title>When a typo in a 1962 rocket program destroyed Mariner 1</title>
+  <link>https://en.wikipedia.org/wiki/Mariner_1</link>
+  <pubDate>Mon, 01 Sep 2026 09:00:00 GMT</pubDate>
+  <description>Mariner 1, launched July 22, 1962, was destroyed 293 seconds after liftoff when it veered off course. The cause was traced to an error in guidance software, often described as a missing overbar or hyphen in a hand-transcribed equation.</description>
+</item>
+<item>
+  <title>The Dutch tulip boom of 1637 was smaller than the legend</title>
+  <link>https://en.wikipedia.org/wiki/Tulip_mania</link>
+  <pubDate>Sun, 31 Aug 2026 12:00:00 GMT</pubDate>
+  <description>Tulip mania in the Dutch Republic peaked in February 1637. Modern historians such as Anne Goldgar argue the economic fallout was limited and that many famous anecdotes were later moralizing inventions.</description>
+</item>
+<item>
+  <title>How the 1904 New York subway was built with cut-and-cover</title>
+  <link>https://en.wikipedia.org/wiki/Early_history_of_the_IRT_subway</link>
+  <pubDate>Sat, 30 Aug 2026 12:00:00 GMT</pubDate>
+  <description>The first line of the New York City Subway opened on October 27, 1904, running 9.1 miles from City Hall to 145th Street. Most of it was built by digging trenches in the street and roofing them over, a method called cut-and-cover.</description>
+</item>
+<item>
+  <title>Why Kodak invented the digital camera in 1975 and shelved it</title>
+  <link>https://en.wikipedia.org/wiki/Steven_Sasson</link>
+  <pubDate>Fri, 29 Aug 2026 12:00:00 GMT</pubDate>
+  <description>Kodak engineer Steven Sasson built the first self-contained digital camera in 1975. It weighed 3.6 kilograms and recorded a 0.01 megapixel image to cassette tape in 23 seconds. Kodak, which earned most of its profit from film, did not commercialize the idea.</description>
+</item>
+<item>
+  <title>The 1859 Carrington Event set telegraph paper on fire</title>
+  <link>https://en.wikipedia.org/wiki/Carrington_Event</link>
+  <pubDate>Thu, 28 Aug 2026 12:00:00 GMT</pubDate>
+  <description>On September 1-2, 1859, a geomagnetic storm caused by a solar coronal mass ejection disrupted telegraph systems across Europe and North America. Some operators reported sparks and could send messages with batteries disconnected.</description>
+</item>
+<item>
+  <title>The Great Molasses Flood of 1919 (duplicate)</title>
+  <link>https://en.wikipedia.org/wiki/Great_Molasses_Flood</link>
+  <pubDate>Mon, 01 Sep 2026 10:00:00 GMT</pubDate>
+  <description>Duplicate entry to test URL deduplication.</description>
+</item>
+</channel>
+</rss>

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Scripts &amp; QA</h3>
+  <table>
+    <tr><th>status</th><th>v</th><th>title</th><th>family / hook</th><th>words</th><th>QA score</th><th>fact-check</th><th>created</th></tr>
+    {% for s in scripts %}{% set qa = s.qa_json|loads %}{% set fc = s.factcheck_json|loads %}
+    <tr>
+      <td class="status-{{ s.status }}">{{ s.status }}</td><td>{{ s.version }}</td>
+      <td><a href="/scripts/{{ s.id }}">{{ s.title }}</a></td><td>{{ s.content_family }} / {{ s.hook_type }}</td>
+      <td>{{ s.word_count }} (~{{ s.estimated_runtime_s }}s)</td>
+      <td>{% if qa %}{{ qa.score }} {{ 'pass' if qa['pass'] else 'fail' }}{% if qa.elevated_review_required %} <span class="badge warn">elevated</span>{% endif %}{% endif %}</td>
+      <td>{{ fc.overall if fc else '' }}</td><td class="muted">{{ s.created_at }}</td>
+    </tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

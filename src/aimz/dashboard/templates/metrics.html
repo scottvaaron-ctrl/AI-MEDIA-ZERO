@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Performance (latest snapshot per publication)</h3>
+  <table>
+    <tr><th>video</th><th>platform</th><th>family</th><th>hook</th><th>mode</th><th>views</th><th>avg %</th><th>3s ret.</th><th>compl.</th><th>shares</th><th>subs/followers</th><th>score</th><th>captured</th></tr>
+    {% for r in perf %}
+    <tr><td>{{ r.title[:50] }}</td><td>{{ r.platform }}</td><td>{{ r.content_family }}</td><td>{{ r.hook_type }}</td><td>{{ r.allocation_mode }}</td>
+    <td>{{ r.views or '' }}</td><td>{{ r.avg_percent_viewed or '' }}</td><td>{{ r.retention_3s or '' }}</td><td>{{ r.completion_rate or '' }}</td><td>{{ r.shares or '' }}</td>
+    <td>{{ r.subscribers_gained or r.followers_gained or '' }}</td><td>{% if r.score is not none %}{{ '%.2f'|format(r.score) }}{% endif %}</td><td class="muted">{{ r.captured_at }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="card" style="margin-top:14px">
+  <h3>Manual metric entry (for numbers the platform APIs do not expose: impressions, CTR, 3-second retention, TikTok everything)</h3>
+  <form method="post" action="/metrics/add" class="row">
+    <select name="publication_id">{% for p in pubs %}<option value="{{ p.id }}">{{ p.platform }} · {{ p.title[:50] }}</option>{% endfor %}</select>
+    {% for f in ['views','impressions','ctr','retention_3s','avg_watch_time_s','avg_percent_viewed','completion_rate','likes','comments','shares','subscribers_gained','followers_gained','returning_viewers','revenue_usd'] %}
+    <input name="{{ f }}" placeholder="{{ f }}" size="10">
+    {% endfor %}
+    <button>Record</button>
+  </form>
+  <p class="help">Percentages as 0-100. Revenue is recorded to the ledger as revenue (never spent automatically).</p>
+</div>
+<div class="card" style="margin-top:14px">
+  <h3>Recent snapshots</h3>
+  <table><tr><th>captured</th><th>publication</th><th>source</th><th>views</th><th>avg %</th><th>shares</th><th>subs</th></tr>
+  {% for m in snapshots %}<tr><td class="muted">{{ m.captured_at }}</td><td class="mono">{{ m.publication_id[-12:] }}</td><td>{{ m.source }}</td><td>{{ m.views or '' }}</td><td>{{ m.avg_percent_viewed or '' }}</td><td>{{ m.shares or '' }}</td><td>{{ m.subscribers_gained or m.followers_gained or '' }}</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

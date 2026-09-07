@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Production queue &amp; produced videos</h3>
+  <table>
+    <tr><th>status</th><th>title</th><th>family / hook</th><th>duration</th><th>render time</th><th>cost</th><th>created</th></tr>
+    {% for v in videos %}
+    <tr><td class="status-{{ v.status }}">{{ v.status }}</td><td><a href="/videos/{{ v.id }}">{{ v.title }}</a>{% if v.error %}<br><span class="mono">{{ v.error[:200] }}</span>{% endif %}</td>
+    <td>{{ v.content_family }} / {{ v.hook_type }}</td><td>{{ v.duration_s or '' }}s</td><td>{{ v.production_seconds or '' }}s</td><td>${{ '%.2f'|format(v.production_cost_usd) }}</td><td class="muted">{{ v.created_at }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+{% if request.query_params.get('restart') %}<div class="card" style="border-color:var(--warn)"><b>Saved to .env.</b> Restart the dashboard / next CLI run picks up the change.</div>{% endif %}
+<div class="grid">
+  <div class="card">
+    <h3>Kill switch</h3>
+    <p>Status: <b class="{{ 'status-failed' if kill.engaged else 'status-ok' }}">{{ 'ENGAGED' if kill.engaged else 'off' }}</b> {% if kill.since %}<span class="muted">since {{ kill.since }}</span>{% endif %}</p>
+    <p class="help">Blocks publishing, platform API writes, scheduled writes, and paid providers. Also creatable by hand: <span class="mono">data\KILL</span>.</p>
+    {% if kill.engaged %}<form method="post" action="/controls/resume"><button>Resume</button></form>
+    {% else %}<form method="post" action="/controls/kill" class="row"><input name="reason" placeholder="reason"><button class="danger">Engage kill switch</button></form>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Budget (owner-only)</h3>
+    <form method="post" action="/controls/budget" class="row">
+      <label>Monthly budget USD <input name="monthly_budget_usd" value="{{ '%.2f'|format(budget.budget_usd) }}" size="8"></label>
+      <label>Allow paid providers <select name="allow_paid_providers"><option value="false" {{ 'selected' if not env.allow_paid_providers }}>false</option><option value="true" {{ 'selected' if env.allow_paid_providers }}>true</option></select></label>
+      <button class="danger">Save budget</button>
+    </form>
+    <p class="help">V0 runs at $0.00. Raising this does not enable any paid provider by itself; each must be wired in and still passes every call through BudgetManager.authorize().</p>
+  </div>
+  <div class="card">
+    <h3>Publishing mode</h3>
+    <form method="post" action="/controls/publishing" class="row">
+      <label>YouTube mode <select name="youtube_mode">{% for m in ['draft','private','scheduled','public'] %}<option {{ 'selected' if env.youtube_mode == m }}>{{ m }}</option>{% endfor %}</select></label>
+      <label>YouTube API enabled <select name="youtube_enabled"><option value="false" {{ 'selected' if not env.youtube_enabled }}>false</option><option value="true" {{ 'selected' if env.youtube_enabled }}>true</option></select></label>
+      <label>YouTube analytics <select name="youtube_analytics_enabled"><option value="false" {{ 'selected' if not env.youtube_analytics_enabled }}>false</option><option value="true" {{ 'selected' if env.youtube_analytics_enabled }}>true</option></select></label>
+      <button>Save</button>
+    </form>
+    <p class="help">TikTok stays in package mode in V0 (unaudited apps may only post private/SELF_ONLY). Owner approval is always required before any upload.</p>
+  </div>
+  <div class="card">
+    <h3>Credentials (paths only)</h3>
+    <form method="post" action="/controls/credentials" class="row">
+      <input name="client_secret_file" value="{{ env.youtube_client_secret_file }}" size="40"><input name="token_file" value="{{ env.youtube_token_file }}" size="40"><button>Save paths</button>
+    </form>
+    <p class="help">Download the OAuth client JSON from Google Cloud Console into <span class="mono">secrets/</span>, then run <span class="mono">aimz youtube auth</span> in a terminal. Secret contents never pass through this page.</p>
+    <h3>.env (masked)</h3>
+    <div class="mono">{{ env_text }}</div>
+  </div>
+</div>
+{% endblock %}

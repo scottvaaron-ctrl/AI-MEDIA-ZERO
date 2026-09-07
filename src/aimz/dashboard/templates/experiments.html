@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Experiments</h3>
+  <table>
+    <tr><th>status</th><th>name / hypothesis</th><th>variable</th><th>KPI</th><th>min n/arm</th><th>result</th><th>confidence</th><th>conclusion</th></tr>
+    {% for e in exps %}{% set r = e.result_json|loads %}
+    <tr><td class="status-{{ 'approved' if e.status == 'concluded' else e.status }}">{{ e.status }}</td>
+    <td><b>{{ e.name }}</b><br><span class="muted">{{ e.hypothesis }}</span><br><span class="muted">by {{ e.created_by }} · {{ e.started_at or e.created_at }}</span></td>
+    <td>{{ e.variable }}: <i>{{ e.control }}</i> vs <i>{{ e.treatment }}</i></td><td>{{ e.primary_kpi }}{% if e.secondary_kpi %} / {{ e.secondary_kpi }}{% endif %}</td><td>{{ e.min_sample }}</td>
+    <td class="mono">{% if r %}control n={{ r.control.n }} mean={{ r.control.mean }}
+treatment n={{ r.treatment.n }} mean={{ r.treatment.mean }}{% endif %}</td>
+    <td>{% if e.confidence is not none %}{{ '%.2f'|format(e.confidence) }}{% endif %}</td><td>{{ e.conclusion or '' }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Confidence is P(treatment better) from a Welch t approximation. Nothing concludes below the minimum sample per arm; results are correlational.</p>
+</div>
+{% endblock %}

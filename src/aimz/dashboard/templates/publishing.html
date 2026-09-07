@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Publishing state <span class="muted">(YouTube mode: {{ env.youtube_mode }}, TikTok: package)</span></h3>
+  <table>
+    <tr><th>video</th><th>platform</th><th>mode</th><th>status</th><th>privacy</th><th>posted</th><th>package / url</th><th>owner action</th></tr>
+    {% for p in pubs %}
+    <tr>
+      <td><a href="/videos/{{ p.video_id }}">{{ p.title }}</a></td><td>{{ p.platform }}</td><td>{{ p.mode }}</td>
+      <td class="status-{{ p.status }}">{{ p.status }}{% if p.last_error %}<br><span class="mono">{{ p.last_error[:160] }}</span>{% endif %}</td>
+      <td>{{ p.privacy or '' }}</td><td class="muted">{{ p.posted_at or '' }}</td>
+      <td class="mono">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url }}</a>{% else %}{{ p.package_dir }}{% endif %}</td>
+      <td>
+        {% if p.status == 'packaged' %}
+        <form method="post" action="/publications/{{ p.id }}/mark-posted" class="row">
+          <input name="url" placeholder="posted URL" size="26"><input name="platform_video_id" placeholder="platform id" size="12"><button>Mark posted</button>
+        </form>
+        {% elif p.status in ['failed', 'blocked'] %}
+        <form method="post" action="/publications/{{ p.id }}/retry"><button class="ghost">Retry (owner)</button></form>
+        {% endif %}
+      </td>
+    </tr>{% endfor %}
+  </table>
+  <p class="help">Packages contain video.mp4, caption/description, metadata.json, sources.json, thumbnail/cover, captions.srt, AI disclosure and posting notes. Mark a package as posted once you have published it so metrics can be attached.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+client_secret*.json
+token*.json
+youtube_token.json
+oauth_token*.json
+*cookies*
+*session*
+.credentials/
+
+# --- runtime data ---
+data/
+!data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+output/
+renders/
+assets_cache/
+voices/
+logs/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- os / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>Feeds (config/feeds.yaml)</h3>
+    <table><tr><th>name</th><th>kind</th><th>category</th><th>cred.</th><th>enabled</th><th></th></tr>
+    {% for f in feeds %}<tr><td>{{ f.name }}<br><span class="mono muted">{{ f.url }}</span></td><td>{{ f.kind }}</td><td>{{ f.category or '' }}</td><td>{{ f.credibility }}</td><td>{{ 'yes' if f.enabled else 'no' }}</td>
+    <td class="row"><form method="post" action="/feeds/toggle" class="inline"><input type="hidden" name="url" value="{{ f.url }}"><button class="ghost">toggle</button></form>
+    <form method="post" action="/feeds/remove" class="inline"><input type="hidden" name="url" value="{{ f.url }}"><button class="danger">remove</button></form></td></tr>{% endfor %}</table>
+    <h3 style="margin-top:14px">Add feed</h3>
+    <form method="post" action="/feeds/add" class="row">
+      <input name="name" placeholder="name" required><input name="url" placeholder="https://.../feed.xml" size="40" required>
+      <select name="kind"><option>rss</option><option>atom</option><option>reddit_rss</option><option>wikipedia_onthisday</option><option>wikipedia_featured</option></select>
+      <input name="category" placeholder="family key (optional)"><input name="credibility" value="0.6" size="4"><button>Add</button>
+    </form>
+    <p class="help">Free, official feeds only. The AI cannot add feeds; it can only propose them in strategy notes.</p>
+  </div>
+  <div class="card">
+    <h3>Source yield</h3>
+    <table><tr><th>source</th><th>status</th><th>last fetch</th><th>items</th><th>ideas</th><th>videos</th></tr>
+    {% for s in sources %}<tr><td>{{ s.name }}</td><td class="status-{{ s.last_status or 'pending' }}">{{ s.last_status or 'never' }}{% if s.last_error %}<br><span class="mono">{{ s.last_error[:120] }}</span>{% endif %}</td><td class="muted">{{ s.last_fetched_at or '' }}</td><td>{{ s.items_yielded }}</td><td>{{ s.ideas_yielded }}</td><td>{{ s.videos_yielded }}</td></tr>{% endfor %}</table>
+  </div>
+</div>
+{% endblock %}

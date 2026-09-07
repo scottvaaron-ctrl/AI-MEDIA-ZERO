@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">{{ title }}</span>
+  <nav>
+    <a href="/">Status</a><a href="/feeds">Feeds</a><a href="/ideas">Ideas</a><a href="/scripts">Scripts</a><a href="/videos">Videos</a>
+    <a href="/publishing">Publishing</a><a href="/metrics">Metrics</a><a href="/experiments">Experiments</a><a href="/strategy">Strategy</a><a href="/runs">Runs</a><a href="/controls">Controls</a>
+  </nav>
+  <span class="badge {{ 'bad' if kill.engaged else 'ok' }}">{{ 'KILL SWITCH ENGAGED' if kill.engaged else 'kill switch off' }}</span>
+  <span class="badge">budget ${{ '%.2f'|format(budget.budget_usd) }} · spent ${{ '%.4f'|format(budget.spent_usd) }} · denied {{ budget.denied_count }}</span>
+  <span class="badge">{{ env.llm_provider }} · {{ env.ollama_model if env.llm_provider == 'ollama' else 'fixture' }} · yt:{{ env.youtube_mode }}</span>
+  <form class="inline" method="post" action="{{ '/controls/resume' if kill.engaged else '/controls/kill' }}">
+    <button class="{{ 'ghost' if kill.engaged else 'danger' }}" type="submit">{{ 'Resume' if kill.engaged else 'KILL' }}</button>
+  </form>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,83 @@
+# Research feeds. Free, official/public sources only. The owner edits this file
+# (or uses the dashboard). The AI may propose feeds but cannot add them itself.
+#
+# kind: rss | atom | wikipedia_onthisday | wikipedia_featured | reddit_rss
+# credibility: 0.0 - 1.0 (owner prior; the system learns per-source yield over time)
+
+feeds:
+  - name: Wikipedia - On this day
+    kind: wikipedia_onthisday
+    url: https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom
+    category: forgotten_history
+    credibility: 0.85
+    enabled: true
+
+  - name: Wikipedia - Featured article
+    kind: wikipedia_featured
+    url: https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=featured&feedformat=atom
+    category: science_history_explainers
+    credibility: 0.9
+    enabled: true
+
+  - name: Smithsonian Magazine - History
+    kind: rss
+    url: https://www.smithsonianmag.com/rss/history/
+    category: forgotten_history
+    credibility: 0.85
+    enabled: true
+
+  - name: Ars Technica
+    kind: rss
+    url: https://feeds.arstechnica.com/arstechnica/index
+    category: technology_history
+    credibility: 0.8
+    enabled: true
+
+  - name: NASA News Releases
+    kind: rss
+    url: https://www.nasa.gov/news-release/feed/
+    category: science_history_explainers
+    credibility: 0.9
+    enabled: true
+
+  - name: US National Archives - Pieces of History
+    kind: rss
+    url: https://prologue.blogs.archives.gov/feed/
+    category: institutional_stories
+    credibility: 0.9
+    enabled: true
+
+  - name: Library of Congress Blogs
+    kind: rss
+    url: https://blogs.loc.gov/feed/
+    category: forgotten_history
+    credibility: 0.9
+    enabled: true
+
+  - name: Hacker News front page
+    kind: rss
+    url: https://hnrss.org/frontpage
+    category: internet_history
+    credibility: 0.55
+    enabled: true
+
+  - name: r/todayilearned (top, day)
+    kind: reddit_rss
+    url: https://www.reddit.com/r/todayilearned/top/.rss?t=day
+    category: unusual_historical_events
+    credibility: 0.4
+    enabled: true
+
+  - name: r/AskHistorians (top, week)
+    kind: reddit_rss
+    url: https://www.reddit.com/r/AskHistorians/top/.rss?t=week
+    category: forgotten_history
+    credibility: 0.6
+    enabled: false   # Reddit rate-limits back-to-back RSS fetches (429); enable one Reddit feed at a time
+
+  - name: Federal Reserve FEDS Notes
+    kind: rss
+    url: https://www.federalreserve.gov/feeds/feds_notes.xml
+    category: institutional_stories
+    credibility: 0.9
+    enabled: false

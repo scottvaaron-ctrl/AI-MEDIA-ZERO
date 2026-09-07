@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>System status</h3>
+    <div class="kpis">
+      <div class="kpi"><b>{{ 'ENGAGED' if kill.engaged else 'off' }}</b><span>kill switch{% if kill.reason %} · {{ kill.reason }}{% endif %}</span></div>
+      <div class="kpi"><b>${{ '%.2f'|format(budget.budget_usd) }}</b><span>monthly budget</span></div>
+      <div class="kpi"><b>${{ '%.4f'|format(budget.spent_usd) }}</b><span>spent {{ budget.month }}</span></div>
+      <div class="kpi"><b>{{ budget.denied_count }}</b><span>denied calls</span></div>
+      <div class="kpi"><b>{{ budget.authorized_count }}</b><span>authorized calls</span></div>
+      <div class="kpi"><b>{{ counts.errors_24h }}</b><span>errors 24h</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Money (ledger)</h3>
+    <div class="kpis">
+      <div class="kpi"><b>${{ '%.2f'|format(financials.revenue) }}</b><span>revenue</span></div>
+      <div class="kpi"><b>${{ '%.2f'|format(financials.owner_injections) }}</b><span>owner injections</span></div>
+      <div class="kpi"><b>${{ '%.4f'|format(financials.operating_spend) }}</b><span>operating spend</span></div>
+      <div class="kpi"><b>${{ '%.2f'|format(financials.reinvested_revenue) }}</b><span>reinvested</span></div>
+      <div class="kpi"><b>${{ '%.2f'|format(financials.profit) }}</b><span>profit</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Pipeline</h3>
+    <div class="kpis">
+      <div class="kpi"><b>{{ counts.leads_new }}</b><span>fresh leads</span></div>
+      <div class="kpi"><b>{{ counts.ideas_candidate }}</b><span>candidate ideas</span></div>
+      <div class="kpi"><b>{{ counts.ideas_selected }}</b><span>selected</span></div>
+      <div class="kpi"><b>{{ counts.scripts_approved }}</b><span>approved scripts</span></div>
+      <div class="kpi"><b>{{ counts.scripts_review }}</b><span>need owner review</span></div>
+      <div class="kpi"><b>{{ counts.videos_rendered }}</b><span>rendered</span></div>
+      <div class="kpi"><b>{{ counts.videos_published }}</b><span>published</span></div>
+      <div class="kpi"><b>{{ counts.metrics }}</b><span>metric snapshots</span></div>
+      <div class="kpi"><b>{{ counts.experiments_running }}</b><span>experiments running</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Milestone (30 videos / 3 families)</h3>
+    <div class="kpis">
+      <div class="kpi"><b>{{ milestone.published_videos }}/{{ milestone.target_published }}</b><span>published</span></div>
+      <div class="kpi"><b>{{ milestone.distinct_families_measured }}/{{ milestone.target_families }}</b><span>families measured</span></div>
+      <div class="kpi"><b>{{ milestone.measured_videos }}</b><span>measured videos</span></div>
+      <div class="kpi"><b>{{ milestone.strategy_versions }}</b><span>strategy versions</span></div>
+      <div class="kpi"><b>{{ 'yes' if milestone.validated else 'not yet' }}</b><span>validated</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:14px">
+  <div class="card">
+    <h3>Recent runs</h3>
+    <table><tr><th>run</th><th>kind</th><th>status</th><th>started</th><th>ms</th></tr>
+    {% for r in runs %}<tr><td class="mono">{{ r.id[-12:] }}</td><td>{{ r.kind }}</td><td class="status-{{ r.status }}">{{ r.status }}</td><td>{{ r.started_at }}</td><td>{{ r.duration_ms or '' }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Provider health</h3>
+    <table>{% for name, h in health %}<tr><td>{{ name }}</td><td><span class="badge {{ 'ok' if h.ok else 'warn' }}">{{ 'ok' if h.ok else 'issue' }}</span></td><td class="muted">{{ h.detail }}{% if not h.ok and h.fix %} — <i>{{ h.fix }}</i>{% endif %}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Provider usage (all time)</h3>
+    <table><tr><th>provider</th><th>calls</th><th>tokens</th><th>est $</th><th>actual $</th></tr>
+    {% for u in usage %}<tr><td>{{ u.provider }}</td><td>{{ u.n }}</td><td>{{ u.tokens or 0 }}</td><td>{{ '%.4f'|format(u.est or 0) }}</td><td>{{ '%.4f'|format(u.act or 0) }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Research feeds</h3>
+    <table><tr><th>feed</th><th>status</th><th>items</th><th>ideas</th><th>videos</th></tr>
+    {% for f in feeds %}<tr><td>{{ f.name }}{% if not f.enabled %} <span class="muted">(disabled)</span>{% endif %}</td><td class="status-{{ f.last_status or 'pending' }}">{{ f.last_status or 'never' }}</td><td>{{ f.items_yielded }}</td><td>{{ f.ideas_yielded }}</td><td>{{ f.videos_yielded }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Latest errors</h3>
+    {% if errors %}<table>{% for e in errors %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.agent }}.{{ e.operation }}</td><td class="mono">{{ e.error_type }}: {{ e.message[:160] }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">none</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

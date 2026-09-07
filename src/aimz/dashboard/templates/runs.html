@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h3>Runs</h3>
+    <table><tr><th>id</th><th>kind</th><th>status</th><th>started</th><th>ms</th><th>summary</th></tr>
+    {% for r in runs %}<tr><td class="mono">{{ r.id[-12:] }}</td><td>{{ r.kind }}</td><td class="status-{{ r.status }}">{{ r.status }}</td><td class="muted">{{ r.started_at }}</td><td>{{ r.duration_ms or '' }}</td><td class="mono">{{ (r.summary_json or '')[:300] }}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Agent runs</h3>
+    <table><tr><th>agent</th><th>operation</th><th>status</th><th>ms</th><th>est $</th><th>error</th></tr>
+    {% for a in agent_runs %}<tr><td>{{ a.agent }}</td><td>{{ a.operation }}</td><td class="status-{{ a.status }}">{{ a.status }}</td><td>{{ a.duration_ms or '' }}</td><td>{{ '%.4f'|format(a.estimated_cost_usd) }}</td><td class="mono">{{ (a.error or '')[:160] }}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Errors</h3>
+    <table>{% for e in errors %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.agent }}.{{ e.operation }}</td><td class="mono">{{ e.error_type }}: {{ e.message[:300] }}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Ledger (authorizations, denials, spend)</h3>
+    <table><tr><th>when</th><th>type</th><th>provider</th><th>action</th><th>est $</th><th>actual $</th><th>note</th></tr>
+    {% for l in ledger %}<tr><td class="muted">{{ l.created_at }}</td><td class="status-{{ 'failed' if l.entry_type == 'denial' else 'ok' }}">{{ l.entry_type }}</td><td>{{ l.provider or '' }}</td><td>{{ l.action or '' }}</td><td>{{ '%.4f'|format(l.estimated_cost_usd) }}</td><td>{{ '%.4f'|format(l.actual_cost_usd) }}</td><td class="muted">{{ l.note or '' }}</td></tr>{% endfor %}</table>
+  </div>
+</div>
+{% endblock %}
