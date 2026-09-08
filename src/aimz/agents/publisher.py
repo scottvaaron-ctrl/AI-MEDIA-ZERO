@@ -225,6 +225,31 @@ class PublishStage(Agent):
                 done += 1
         return done
 
+    def requeue(self, publication_id: str) -> dict[str, Any]:
+        """Owner-deliberate reset of a failed/blocked publication.
+
+        Failures are never retried automatically, so a row stays ``failed`` until the owner
+        clears it here; the next publish for that video then treats it as new work.
+        """
+        pub = self.svc.db.get("publications", publication_id)
+        if not pub:
+            raise ValueError(f"publication {publication_id} not found")
+        if pub["status"] not in {"failed", "blocked"}:
+            raise ValueError(
+                f"publication {publication_id} is '{pub['status']}'; only failed or blocked ones are re-queued"
+            )
+        self.svc.db.update(
+            "publications",
+            publication_id,
+            {"status": "pending", "last_error": None, "updated_at": now_iso()},
+        )
+        return {
+            "publication_id": publication_id,
+            "video_id": pub["video_id"],
+            "platform": pub["platform"],
+            "cleared_error": (pub["last_error"] or "")[:200],
+        }
+
     def mark_posted(
         self,
         publication_id: str,

@@ -44,6 +44,7 @@ class FakeBluesky:
         can_upload: bool = True,
         states: list[str] | None = None,
         create_record_error: str = "",
+        already_exists: bool = False,
     ):
         self.calls: list[tuple[str, str]] = []
         self.uploaded = b""
@@ -52,6 +53,7 @@ class FakeBluesky:
         self.can_upload = can_upload
         self.states = list(states or ["JOB_STATE_COMPLETED"])
         self.create_record_error = create_record_error
+        self.already_exists = already_exists
         self.service_auth_requests: list[dict[str, Any]] = []
 
     @property
@@ -112,16 +114,30 @@ class FakeBluesky:
             assert params["did"] == "did:plc:aimz" and params["name"].endswith(".mp4")
             assert request.headers["Authorization"] == "Bearer service-auth-token"
             self.uploaded += request.content
-            state = self._next_state()
-            job: dict[str, Any] = {"jobId": "job-1", "did": "did:plc:aimz", "state": state}
-            if state == "JOB_STATE_COMPLETED":
-                job["blob"] = self.blob
-            return httpx.Response(200, json={"jobStatus": job})
+            # The live service answers uploadVideo with the job's fields FLAT (not wrapped in
+            # "jobStatus" as the lexicon declares) and never includes the blob. Verified
+            # 2026-09-08; a mock that wrapped this is what let the shape bug ship.
+            if self.already_exists:
+                return httpx.Response(
+                    409,
+                    json={
+                        "did": "did:plc:aimz",
+                        "jobId": "job-1",
+                        "state": "JOB_STATE_COMPLETED",
+                        "error": "already_exists",
+                        "message": "Video already processed",
+                    },
+                )
+            return httpx.Response(
+                200, json={"did": "did:plc:aimz", "jobId": "job-1", "state": "JOB_STATE_CREATED"}
+            )
         if nsid == "app.bsky.video.getJobStatus":
+            # getJobStatus *is* wrapped, and is the only place the blob appears.
             state = self._next_state()
-            job = {"jobId": params["jobId"], "did": "did:plc:aimz", "state": state}
+            job: dict[str, Any] = {"jobId": params["jobId"], "did": "did:plc:aimz", "state": state}
             if state == "JOB_STATE_COMPLETED":
                 job["blob"] = self.blob
+                job["progress"] = 100
             if state == "JOB_STATE_FAILED":
                 job["failureCode"] = "validation_failure"
                 job["error"] = "unsupported codec"
@@ -303,6 +319,41 @@ def test_publish_happy_path(svc, tmp_path: Path) -> None:  # noqa: ANN001
     assert upload_auth["aud"] == "did:web:pds.example"
 
 
+def test_upload_video_returns_the_job_flat_and_the_blob_comes_from_get_job_status(
+    svc,  # noqa: ANN001
+    tmp_path: Path,
+) -> None:
+    """Regression: uploadVideo is NOT wrapped in `jobStatus` and never carries the blob.
+
+    The first live post failed with "returned no jobId" because the code trusted the lexicon's
+    declared shape for both endpoints. Only getJobStatus matches it.
+    """
+    fake = FakeBluesky()
+    client = _client(tmp_path, fake)
+    mp4 = svc.env.data_dir / "x.mp4"
+    mp4.write_bytes(b"\x03" * 32)
+
+    job = client.upload_video(mp4, "x.mp4")
+    assert job["jobId"] == "job-1"
+    assert job["state"] == "JOB_STATE_CREATED"
+    assert "blob" not in job
+
+    resolved = client.job_status("job-1")
+    assert resolved["state"] == "JOB_STATE_COMPLETED" and resolved["blob"] == fake.blob
+
+
+def test_already_exists_409_is_reused_rather_than_failing(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    """A file uploaded on an earlier attempt answers 409 with the job; reuse it, do not fail."""
+    fake = FakeBluesky(already_exists=True)
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    res = pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    assert res.status == "published" and res.platform_video_id == POST_URI
+    # completed-without-blob still has to resolve the blob through getJobStatus
+    assert ("GET", "app.bsky.video.getJobStatus") in fake.calls
+    assert fake.records[0]["embed"]["video"] == fake.blob
+
+
 def test_captions_are_attached_when_present(svc, tmp_path: Path) -> None:  # noqa: ANN001
     fake = FakeBluesky()
     pub = BlueskyPublisher(_client(tmp_path, fake))
@@ -345,11 +396,12 @@ def test_daily_quota_block_costs_no_upload(svc, tmp_path: Path) -> None:  # noqa
 
 
 def test_still_encoding_then_poll_completes(svc, tmp_path: Path) -> None:  # noqa: ANN001
-    fake = FakeBluesky(states=["JOB_STATE_ENCODING", "JOB_STATE_COMPLETED"])
+    fake = FakeBluesky(states=["JOB_STATE_COMPLETED"])
     pub = BlueskyPublisher(_client(tmp_path, fake), poll_seconds=0)
     video, script, meta = _video(svc)
     package = svc.env.data_dir / "pkg"
     res = pub.publish(svc.ctx(), video, script, meta, package)
+    # poll_seconds=0 means the cycle does not wait for encoding at all
     assert res.status == "uploading" and res.publish_id == "job-1" and fake.records == []
 
     done = pub.poll(svc.ctx(), {"package_dir": str(package), "metadata_json": "{}"})
@@ -358,7 +410,7 @@ def test_still_encoding_then_poll_completes(svc, tmp_path: Path) -> None:  # noq
 
 
 def test_processing_failure_is_reported_not_retried(svc, tmp_path: Path) -> None:  # noqa: ANN001
-    fake = FakeBluesky(states=["JOB_STATE_ENCODING", "JOB_STATE_FAILED"])
+    fake = FakeBluesky(states=["JOB_STATE_FAILED"])
     pub = BlueskyPublisher(_client(tmp_path, fake), poll_seconds=0)
     video, script, meta = _video(svc)
     package = svc.env.data_dir / "pkg"

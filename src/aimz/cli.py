@@ -217,6 +217,29 @@ def publish_run(
     _print_json(res)
 
 
+@publish_app.command("retry")
+def publish_retry(
+    publication_id: str,
+    approved: Annotated[bool, typer.Option("--approved", help="Owner approval for API uploads")] = False,
+) -> None:
+    """Re-queue a failed publication and publish it again (failures are never retried on their own)."""
+    svc = _svc()
+    try:
+        orch = _orch(svc)
+        info = orch.publisher.requeue(publication_id)
+        console.print(
+            f"re-queued {info['platform']} publication {publication_id} "
+            f"(was: {info['cleared_error'] or 'no error recorded'})"
+        )
+        with svc.tracker.run("publish") as ctx:
+            res = orch.publisher.publish(ctx, info["video_id"], owner_approved=approved)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        svc.close()
+    _print_json(res)
+
+
 @publish_app.command("mark-posted")
 def publish_mark_posted(
     publication_id: str, url: str | None = None, platform_video_id: str | None = None

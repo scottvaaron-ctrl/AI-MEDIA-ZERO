@@ -9,10 +9,17 @@ Verified against the atproto lexicons and the Bluesky client source (2026-09-08)
 * Video: the bytes do not go to the PDS directly. The account asks its PDS for a service-auth
   token (``com.atproto.server.getServiceAuth`` with ``aud=did:web:<pds host>`` and
   ``lxm=com.atproto.repo.uploadBlob``) and hands it to the video service:
-  ``POST https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did=..&name=..`` returns a
-  ``jobStatus``; ``app.bsky.video.getJobStatus`` is polled until ``JOB_STATE_COMPLETED``, which
-  carries the finished ``blob``. ``app.bsky.video.getUploadLimits`` (service auth with
+  ``POST https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did=..&name=..`` starts a job;
+  ``app.bsky.video.getJobStatus`` is polled until ``JOB_STATE_COMPLETED``, which carries the
+  finished ``blob``. ``app.bsky.video.getUploadLimits`` (service auth with
   ``aud=did:web:video.bsky.app``) reports the account's remaining daily video allowance.
+
+  **The two job endpoints do not share a response shape, whatever the lexicon says.** Verified
+  against the live service 2026-09-08: ``getJobStatus`` wraps the job in ``jobStatus`` and is the
+  only place the ``blob`` ever appears, while ``uploadVideo`` returns the job's fields flat at
+  the top level with no blob -- including on the ``409 already_exists`` reply for a file that a
+  previous attempt already uploaded, which is a reusable result and not an error.
+  ``_job_from_body`` accepts both shapes; do not "simplify" it back to the declared one.
 * Post: ``com.atproto.repo.createRecord`` for ``app.bsky.feed.post`` with an
   ``app.bsky.embed.video`` embed (video blob, ``alt``, ``aspectRatio``, optional WebVTT
   ``captions``). Text is capped at 300 graphemes / 3000 bytes, and hashtags and links only
@@ -312,6 +319,22 @@ class BlueskyClient:
         token = self.service_auth(VIDEO_SERVICE_DID, "app.bsky.video.getUploadLimits")
         return self._get(VIDEO_SERVICE, "app.bsky.video.getUploadLimits", token=token)
 
+    @staticmethod
+    def _job_from_body(body: Any) -> dict[str, Any]:
+        """Pull a jobStatus out of either shape the video service actually uses.
+
+        The lexicon declares both endpoints as ``{"jobStatus": {...}}``, and ``getJobStatus``
+        does that. ``uploadVideo`` does not: it returns the job's fields flat at the top level
+        (verified against the live service 2026-09-08), including on the ``409 already_exists``
+        answer you get for a file that was uploaded on an earlier attempt.
+        """
+        if not isinstance(body, dict):
+            return {}
+        inner = body.get("jobStatus")
+        if isinstance(inner, dict) and inner:
+            return dict(inner)
+        return dict(body) if body.get("jobId") else {}
+
     def upload_video(self, path: Path, name: str) -> dict[str, Any]:
         session = self.session()
         size = path.stat().st_size
@@ -332,16 +355,16 @@ class BlueskyClient:
             body = r.json()
         except ValueError:
             body = {}
-        # Re-sending an identical file answers 409 already_exists but still carries the job.
-        if isinstance(body, dict) and body.get("jobStatus"):
-            return dict(body["jobStatus"])
-        return dict(self._check(r, "uploadVideo").get("jobStatus", {}))
+        # Re-sending an identical file answers 409 already_exists but still carries the job, so a
+        # body with a jobId is a usable result whatever the status code says.
+        job = self._job_from_body(body)
+        if job.get("jobId"):
+            return job
+        return self._job_from_body(self._check(r, "uploadVideo"))
 
     def job_status(self, job_id: str) -> dict[str, Any]:
         # Public on the video service: reading a job's progress needs no service-auth token.
-        return dict(
-            self._get(VIDEO_SERVICE, "app.bsky.video.getJobStatus", {"jobId": job_id}).get("jobStatus", {})
-        )
+        return self._job_from_body(self._get(VIDEO_SERVICE, "app.bsky.video.getJobStatus", {"jobId": job_id}))
 
     # -- repo --------------------------------------------------------------------------
     def upload_blob(self, data: bytes, mime: str) -> dict[str, Any]:
@@ -562,16 +585,19 @@ class BlueskyPublisher(Publisher):
                 ),
                 encoding="utf-8",
             )
+            # `uploadVideo` never carries the blob, not even when it reports the job already
+            # complete, so the blob is always resolved through `getJobStatus`.
             deadline = time.time() + self.poll_seconds
+            polled = False
             while True:
                 state = str(job.get("state") or "")
-                if state == "JOB_STATE_COMPLETED":
-                    break
                 if state == "JOB_STATE_FAILED":
                     raise PublishError(
                         f"Bluesky video processing failed ({job.get('failureCode')}): "
                         f"{job.get('error') or job.get('message')}"
                     )
+                if state == "JOB_STATE_COMPLETED" and job.get("blob"):
+                    break
                 if time.time() > deadline:
                     return PublishResult(
                         status="uploading",
@@ -580,12 +606,11 @@ class BlueskyPublisher(Publisher):
                         message=f"Bluesky is still encoding ({state}); will be polled next cycle",
                         publish_id=job_id,
                     )
-                time.sleep(5)
+                if polled:  # the first re-read is immediate; a short file is often already done
+                    time.sleep(5)
+                polled = True
                 job = self.client.job_status(job_id)
-            blob = job.get("blob")
-            if not blob:
-                raise PublishError(f"Bluesky job {job_id} completed without a blob")
-            created, note = self._finish(record, dict(blob), reply_text)
+            created, note = self._finish(record, dict(job["blob"]), reply_text)
             handle = self.client.session().handle
         uri = str(created.get("uri") or "")
         return PublishResult(

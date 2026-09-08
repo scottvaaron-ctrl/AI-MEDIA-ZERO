@@ -6,6 +6,8 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 
@@ -124,6 +126,55 @@ def test_with_consent_api_upload_runs_and_marks_published(svc) -> None:  # noqa:
     with svc.tracker.run("publish") as run:
         res2 = stage.publish(run, vid)
     assert res2[0].get("skipped") and len(rec.calls) == 1
+
+
+class FailingPublisher(RecordingPublisher):
+    name = "FailingPublisher"
+
+    def publish(
+        self, ctx: ProviderContext, video: dict, script: dict, metadata: dict, package_dir: Path
+    ) -> PublishResult:
+        from aimz.core.errors import PublishError
+
+        self.calls.append(metadata)
+        raise PublishError("platform said no")
+
+
+def test_failed_publication_is_skipped_until_the_owner_requeues_it(svc) -> None:  # noqa: ANN001
+    """A failure is never retried on its own; `requeue` is the deliberate owner action."""
+    rec = FailingPublisher()
+    svc.publishers = {"youtube": rec}
+    stage = _stage(svc, consent=True)
+    vid = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        assert stage.publish(run, vid)[0]["status"] == "failed"
+    pub_id = svc.db.one("SELECT * FROM publications")["id"]
+
+    # a second cycle must not touch the platform again
+    with svc.tracker.run("publish") as run:
+        assert stage.publish(run, vid)[0]["skipped"]
+    assert len(rec.calls) == 1
+
+    info = stage.requeue(pub_id)
+    assert info["platform"] == "youtube" and "platform said no" in info["cleared_error"]
+    assert svc.db.get("publications", pub_id)["status"] == "pending"
+
+    svc.publishers = {"youtube": RecordingPublisher()}
+    with svc.tracker.run("publish") as run:
+        assert stage.publish(run, vid)[0]["status"] == "uploaded"
+
+
+def test_requeue_refuses_publications_that_did_not_fail(svc) -> None:  # noqa: ANN001
+    svc.publishers = {"youtube": RecordingPublisher()}
+    stage = _stage(svc, consent=True)
+    vid = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        stage.publish(run, vid)
+    pub_id = svc.db.one("SELECT * FROM publications")["id"]
+    with pytest.raises(ValueError, match="only failed or blocked"):
+        stage.requeue(pub_id)
+    with pytest.raises(ValueError, match="not found"):
+        stage.requeue("pub_does_not_exist")
 
 
 def test_consent_never_overrides_kill_switch(svc) -> None:  # noqa: ANN001
