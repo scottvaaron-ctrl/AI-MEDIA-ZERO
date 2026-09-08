@@ -240,6 +240,46 @@ def test_token_refresh_when_expired(tmp_path: Path) -> None:
     assert TikTokToken.load(client.token_file).access_token == "at2"
 
 
+def test_requested_fields_stay_within_the_requested_scopes(tmp_path: Path) -> None:
+    """Every field we ask for must be covered by SCOPES, or the live call fails at runtime.
+
+    `username` needs `user.info.profile`, which we deliberately do not request: the post URL is
+    built from creator_info's `creator_username` instead, which posting already pays for.
+    """
+    from aimz.providers.publishers.tiktok_direct import SCOPES
+
+    assert "user.info.profile" not in SCOPES
+
+    captured: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(str(request.url))
+        return FakeTikTok().handler(request)
+
+    client = TikTokClient(
+        "key",
+        "secret",
+        "https://example.com/cb",
+        tmp_path / "tok.json",
+        http=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    TikTokToken("at", "rt", time.time() + 3600, time.time() + 1e6).save(client.token_file)
+    client.user_info()
+    user_info_url = next(u for u in captured if "/user/info/" in u)
+    assert "username" not in user_info_url, f"asks for a user.info.profile field: {user_info_url}"
+
+
+def test_poll_builds_the_url_without_the_profile_scope(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    fake = FakeTikTok(complete_after=2)
+    pub = TikTokDirectPostPublisher(_client(tmp_path, fake), privacy_level="SELF_ONLY", poll_seconds=0)
+    video, script, meta = _video(svc)
+    pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    done = pub.poll(svc.ctx(), {"metadata_json": json.dumps({"publish_id": "v_pub_file~1"})})
+    assert done is not None and done.url == "https://www.tiktok.com/@aimz/video/7351234567890123456"
+    # the username came from creator_info, not from the profile-scoped user_info endpoint
+    assert any(p.endswith("/creator_info/query/") for _m, p in fake.calls)
+
+
 def test_display_api_metrics_and_follower_delta(svc, tmp_path: Path) -> None:  # noqa: ANN001
     from aimz.util import new_id, now_iso
 

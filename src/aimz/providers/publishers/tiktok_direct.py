@@ -265,7 +265,10 @@ class TikTokClient:
 
     def user_info(self) -> dict[str, Any]:
         r = self.http.get(
-            f"{API}/user/info/?fields=open_id,display_name,username,follower_count,likes_count,video_count",
+            # `username` deliberately not requested: it needs the extra `user.info.profile` scope,
+            # and the only thing we wanted it for (the post URL) is already in creator_info's
+            # `creator_username`, which costs no scope beyond the ones posting already requires.
+            f"{API}/user/info/?fields=open_id,display_name,follower_count,likes_count,video_count",
             headers=self._headers(),
         )
         return dict(self._check(r, "user info").get("user", {}))
@@ -418,7 +421,7 @@ class TikTokDirectPostPublisher(Publisher):
                 vid = str(ids[0]) if ids else None
                 username = ""
                 with contextlib.suppress(ProviderError):
-                    username = self.client.user_info().get("username", "")
+                    username = self.client.creator_info().get("creator_username", "")
                 url = f"https://www.tiktok.com/@{username}/video/{vid}" if (vid and username) else None
                 return PublishResult(
                     status="published",
