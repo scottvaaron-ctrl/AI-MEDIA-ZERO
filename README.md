@@ -208,7 +208,7 @@ FFmpeg rendering via the bundled `imageio-ffmpeg` binary) runs in CI with no mod
 - [Architecture](docs/ARCHITECTURE.md) · [Database schema](docs/DATABASE.md)
 - [Platform compliance](docs/COMPLIANCE.md) · [Owner controls](docs/OWNER_CONTROLS.md)
 - [What is autonomous vs human-controlled](docs/AUTONOMY.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](docs/ROADMAP.md) · [Funded V1 path](docs/FUNDED_V1.md)
+- [Handoff for adding platforms](docs/HANDOFF.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](docs/ROADMAP.md) · [Funded V1 path](docs/FUNDED_V1.md)
 - [Dry-run report](docs/DRY_RUN.md) · [Example generated package](examples/huhu_beetle_package/)
 
 ## Privacy and terms
