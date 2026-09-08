@@ -99,6 +99,24 @@ def create_app(svc: Services | None = None) -> FastAPI:
             ),
         )
 
+    @app.get("/privacy", response_class=HTMLResponse)
+    def privacy(request: Request) -> HTMLResponse:
+        return render(
+            request,
+            "document.html",
+            heading="Privacy Policy",
+            body=read_text(svc.env.project_root / "PRIVACY.md"),
+        )
+
+    @app.get("/terms", response_class=HTMLResponse)
+    def terms(request: Request) -> HTMLResponse:
+        return render(
+            request,
+            "document.html",
+            heading="Terms of Service",
+            body=read_text(svc.env.project_root / "TERMS.md"),
+        )
+
     @app.get("/ideas", response_class=HTMLResponse)
     def ideas(request: Request) -> HTMLResponse:
         rows = q(

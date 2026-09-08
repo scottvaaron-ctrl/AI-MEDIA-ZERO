@@ -211,6 +211,11 @@ FFmpeg rendering via the bundled `imageio-ffmpeg` binary) runs in CI with no mod
 - [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](docs/ROADMAP.md) · [Funded V1 path](docs/FUNDED_V1.md)
 - [Dry-run report](docs/DRY_RUN.md) · [Example generated package](examples/huhu_beetle_package/)
 
+## Privacy and terms
+
+The software uses YouTube API Services. See [PRIVACY.md](PRIVACY.md) and [TERMS.md](TERMS.md).
+By using it you agree to the [YouTube Terms of Service](https://www.youtube.com/t/terms); Google's data handling is described in the [Google Privacy Policy](https://policies.google.com/privacy).
+
 ## License
 
 MIT for this repository. Piper's engine is GPL-3 (used as a separate installed package);
