@@ -1,17 +1,18 @@
 # Handoff: adding more platforms to AI Media Zero
 
-_Written 2026-09-08 for the next agent; updated 2026-09-08 after Bluesky shipped. Read this,
+_Written 2026-09-08 for the next agent; updated the same day once Bluesky and TikTok were both
+live. Read this,
 `docs/ARCHITECTURE.md`, `docs/COMPLIANCE.md` and `docs/AUTONOMOUS_SETUP.md` before touching code._
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done, 5 real cycles run, 75 tests green, ruff + mypy clean |
+| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done, 5 real cycles run, 81 tests green, ruff + mypy clean |
 | YouTube upload + analytics + comments | **Done and live** on the owner's machine: OAuth token stored, `YOUTUBE_ENABLED=true`, `YOUTUBE_MODE=public`, `YOUTUBE_ANALYTICS_ENABLED=true`, `AUTOPUBLISH_CONSENT=true` |
 | YouTube API compliance audit | **Submitted by the owner (or in progress)**. Until Google approves, uploads land as private. Evidence files are in `data/audit/` (not in git). Nothing in code changes when it's approved |
-| TikTok Direct Post + Display API analytics | **Implemented and unit-tested against a mock transport** (`providers/publishers/tiktok_direct.py`, `providers/analytics/tiktok.py`). **Not live**: the owner has not registered a TikTok developer app. `TIKTOK_MODE=package` still |
-| Bluesky (AT Protocol) post + analytics | **Implemented and unit-tested against a mock transport** (`providers/publishers/bluesky.py`, `providers/analytics/bluesky.py`). Not yet run against the live API: needs `BLUESKY_ENABLED=true` plus a handle and app password in `.env`, then `aimz bluesky auth`. No developer app and no audit are involved, so this is a five-minute owner step with nothing to wait for |
+| TikTok Direct Post + Display API analytics | **Live in sandbox** as of 2026-09-08: app registered, `TIKTOK_MODE=direct`, connected as `backhouse67`, one video posted `SELF_ONLY`. Posts are invisible to everyone but the owner and expose no metrics until TikTok audits the app, so TikTok adds no learning signal yet. The demo video for that audit still has to be filmed |
+| Bluesky (AT Protocol) post + analytics | **Done and live** as `@backhouse06.bsky.social`: video, alt text, WebVTT captions, hashtag facets and a threaded sources reply, all read back through the API. No audit exists on this platform, so it is public from the first post and is the only one currently producing usable engagement data alongside YouTube |
 | Scheduler | `aimz schedule install` works (tested install/status/remove). **Not installed** yet; the owner should run it once they are happy with the first uploads |
 | Repo | Public at https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO (main). Work on this machine at `C:\Users\scott\Documents\Agentic_Youtube`, venv `.venv`, Python 3.14 |
 | Local models | Ollama with `qwen3:8b` (default) and `qwen3:4b`; Piper voice downloaded; FFmpeg via winget and bundled imageio-ffmpeg |
@@ -26,25 +27,27 @@ Non-negotiables inherited from the owner (see `config/constitution.md`):
 - API writes require owner consent: per-video approval or `AUTOPUBLISH_CONSENT=true`.
 - Failed uploads are never retried automatically.
 
-## 2. First task: switch Bluesky on (owner-dependent, five minutes)
+## 2. First task: fix the sources link (real, and it affects every platform)
 
-The code is done and tested; the blocker is one credential. Walk the owner through
-`docs/AUTONOMOUS_SETUP.md` Part C: create an app password in Bluesky settings, put
-`BLUESKY_ENABLED=true`, `BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD` and
-`BLUESKY_ANALYTICS_ENABLED=true` in `.env`, run `aimz bluesky auth`, then `aimz run`.
+The self-reply under the first Bluesky post reads:
 
-Things to confirm against the live API on the first real post (mock-tested only):
+```
+Sources:
+https://en.wikipedia.org/wiki/Special:FeedItem/featured/20260903000000/en
+```
 
-- whether `app.bsky.video.uploadVideo` answers immediately with `JOB_STATE_COMPLETED` for a 2-6 MB
-  file or hands back an encoding job (both paths are implemented; the second finishes in
-  `aimz publish poll`);
-- the exact wording `getUploadLimits` returns when the daily allowance is used up;
-- that the WebVTT caption blob is accepted (if Bluesky rejects it, the post still goes out and a
-  warning is logged, so this shows up in `data/logs/aimz.jsonl` rather than as a failure).
+That is the RSS **feed item** URL, not the article. A reader clicking it to check a claim gets
+nothing useful, which defeats the point of publishing sources at all. The same URL goes into
+`sources.json`, the YouTube description and the TikTok package, so this is not a Bluesky bug --
+it is wherever `RSSResearchProvider` stores the item link for Wikipedia-style feeds. Resolve the
+feed item to its real article URL there, and every platform's citations improve at once.
 
-Fix anything that differs in `bluesky.py` and keep `tests/test_bluesky.py` passing.
+While in that area: `critic.py` checks `safety.banned_patterns` against `narration.lower()` only,
+so a banned phrase in a *title* passes. That is how
+"The AI Sandbox Escape Plan That Broke the Internet" got rendered with `broke the internet` on the
+channel's own ban list. Extend the check to the title and hook.
 
-## 3. Second task: finish TikTok (owner-dependent)
+## 3. TikTok: what is left (owner-dependent)
 
 Code is done; the blocker is account setup. Walk the owner through
 `docs/AUTONOMOUS_SETUP.md` Part B:
@@ -59,10 +62,25 @@ Code is done; the blocker is account setup. Walk the owner through
 4. Run a cycle; expect a SELF_ONLY post on a private account. Then submit TikTok's app audit.
    After approval set `TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE`.
 
-Things to verify against the live API on first use (mock-tested only): the exact `upload_url`
-PUT response codes (we accept 200/201/206), whether `publicaly_available_post_id` is returned
-immediately or only after `PUBLISH_COMPLETE`, and the Display API field list. Fix in
-`tiktok_direct.py`; keep the tests in `tests/test_tiktok_direct.py` passing.
+**Verified live 2026-09-08** (sandbox app, account `backhouse67`), answering the questions this
+section used to leave open:
+
+- An unaudited client needs **both** `SELF_ONLY` on the post **and** the TikTok account itself set
+  to private. Posting to a public account fails with HTTP 403
+  `unaudited_client_can_only_post_to_private_accounts`, however correct the request is.
+- `publicaly_available_post_id` is **never** returned for a `SELF_ONLY` post; the field means what
+  it says. So `platform_video_id` and `url` stay empty, and `TikTokAnalyticsProvider` returns
+  `None` for those publications. The Display API only covers public videos, so there is nothing to
+  fetch anyway. TikTok contributes no signal to the learning loop until the app is audited.
+- `username` needs the `user.info.profile` scope, which we do not request; the post URL is built
+  from `creator_info`'s `creator_username` instead. A test pins the requested fields to `SCOPES`.
+- The sandbox client key (`sbaw...`) is separate from the production one, and only accounts added
+  under **Sandbox settings -> Target users** can authorize an unapproved app. Any other account
+  gets a login error that blames `client_key`, which is misleading.
+
+Still unverified: the chunked `upload_url` PUT response codes (we accept 200/201/206) for files
+over 64 MB, and the Display API field list, which needs a public post. Fix in `tiktok_direct.py`;
+keep the tests in `tests/test_tiktok_direct.py` passing.
 
 ## 4. How to add a platform (the pattern)
 
@@ -169,7 +187,7 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
 ```powershell
 cd $HOME\Documents\Agentic_Youtube; .\.venv\Scripts\Activate.ps1
 aimz doctor                      # everything should be OK
-pytest -q                        # 75 tests, offline
+pytest -q                        # 81 tests, offline
 ruff check src tests; ruff format src tests; mypy
 aimz run --stages publish        # re-run only publishing for rendered videos
 aimz publish list; aimz publish poll
