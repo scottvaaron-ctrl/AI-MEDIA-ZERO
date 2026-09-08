@@ -19,10 +19,14 @@ app = typer.Typer(
 metric_app = typer.Typer(help="Record or view performance metrics.", no_args_is_help=True)
 publish_app = typer.Typer(help="Package / upload videos and confirm manual posts.", no_args_is_help=True)
 youtube_app = typer.Typer(help="Owner-only YouTube OAuth helpers.", no_args_is_help=True)
+tiktok_app = typer.Typer(help="Owner-only TikTok OAuth helpers.", no_args_is_help=True)
+schedule_app = typer.Typer(help="Run the cycle automatically (Windows Task Scheduler).", no_args_is_help=True)
 strategy_app = typer.Typer(help="Inspect or edit strategy memory.", no_args_is_help=True)
 app.add_typer(metric_app, name="metric")
 app.add_typer(publish_app, name="publish")
 app.add_typer(youtube_app, name="youtube")
+app.add_typer(tiktok_app, name="tiktok")
+app.add_typer(schedule_app, name="schedule")
 app.add_typer(strategy_app, name="strategy")
 console = Console()
 
@@ -519,6 +523,105 @@ def budget(show: bool = True) -> None:
         console.print(t)
     finally:
         svc.close()
+
+
+@tiktok_app.command("auth")
+def tiktok_auth() -> None:
+    """Owner-only: connect your TikTok account (paste the redirected URL back here)."""
+    from aimz.providers.publishers.tiktok_direct import TikTokClient
+
+    svc = _svc(quiet=True)
+    try:
+        env = svc.env
+        if not env.tiktok_client_key or not env.tiktok_client_secret or not env.tiktok_redirect_uri:
+            raise typer.BadParameter(
+                "set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET and TIKTOK_REDIRECT_URI in .env first"
+            )
+        client = TikTokClient(
+            env.tiktok_client_key, env.tiktok_client_secret, env.tiktok_redirect_uri, env.tiktok_token_file
+        )
+        url, _state = client.authorize_url()
+        console.print("1. Open this link, log in to TikTok and allow access:\n")
+        console.print(url)
+        console.print(
+            "\n2. Your browser will land on your redirect page. Copy the FULL address bar URL and paste it here."
+        )
+        pasted = typer.prompt("Redirected URL")
+        tok = client.exchange_code(TikTokClient.code_from_redirect(pasted))
+        console.print(
+            f"[green]TikTok connected[/] (open_id {tok.open_id}); token stored at {env.tiktok_token_file}"
+        )
+        info = client.creator_info()
+        console.print(
+            f"Creator: {info.get('creator_nickname')} · allowed privacy levels: {info.get('privacy_level_options')}"
+        )
+    finally:
+        svc.close()
+
+
+@tiktok_app.command("creator-info")
+def tiktok_creator_info() -> None:
+    """Show what TikTok allows for the connected creator (privacy options, max duration)."""
+    from aimz.providers.publishers.tiktok_direct import TikTokClient
+
+    svc = _svc(quiet=True)
+    try:
+        env = svc.env
+        client = TikTokClient(
+            env.tiktok_client_key, env.tiktok_client_secret, env.tiktok_redirect_uri, env.tiktok_token_file
+        )
+        _print_json(client.creator_info())
+    finally:
+        svc.close()
+
+
+@publish_app.command("poll")
+def publish_poll() -> None:
+    """Advance uploads the platform was still processing."""
+    svc = _svc()
+    try:
+        with svc.tracker.run("publish") as ctx:
+            n = _orch(svc).publisher.poll_pending(ctx)
+        console.print(f"advanced {n} publication(s)")
+    finally:
+        svc.close()
+
+
+@schedule_app.command("install")
+def schedule_install(
+    times: Annotated[str, typer.Option(help="Comma-separated HH:MM local times")] = "09:00,18:00",
+) -> None:
+    """Register daily Task Scheduler jobs that run `aimz run`."""
+    from aimz import scheduler
+    from aimz.settings import load_env_settings
+
+    root = load_env_settings().project_root
+    try:
+        names = scheduler.install(root, [t.strip() for t in times.split(",") if t.strip()])
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    console.print("[green]scheduled:[/] " + ", ".join(names))
+    console.print(f"Runner: {root / 'scripts' / 'run-cycle.ps1'} · log: data/logs/scheduled.log")
+
+
+@schedule_app.command("remove")
+def schedule_remove() -> None:
+    """Delete the scheduled jobs."""
+    from aimz import scheduler
+
+    console.print("removed: " + (", ".join(scheduler.remove()) or "none"))
+
+
+@schedule_app.command("status")
+def schedule_status() -> None:
+    """List the scheduled jobs."""
+    from aimz import scheduler
+
+    tasks = scheduler.list_tasks()
+    console.print(
+        "\n".join(tasks) if tasks else "no AI Media Zero tasks scheduled (run `aimz schedule install`)"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

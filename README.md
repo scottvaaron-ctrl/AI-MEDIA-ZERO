@@ -24,8 +24,8 @@ authority, publishing permissions, and the kill switch.
 | Visuals | `PillowCardProvider` + `WikimediaAssetProvider` (PD / CC0 / CC BY / CC BY-SA only) | $0 |
 | Render | `FFmpegRenderer` (1080x1920 H.264, burned captions) | $0 |
 | Research | `RSSResearchProvider` (Wikipedia feeds, Reddit RSS, news, archives) | $0 |
-| Publish | `YouTubePublisher` (official Data API, `draft` by default), `TikTokPackagePublisher` | $0 (quota only) |
-| Analytics | `SQLiteAnalyticsProvider` (+ manual entry), `YouTubeAnalyticsProvider` (read-only) | $0 |
+| Publish | `YouTubePublisher` (official Data API, `draft` by default), `TikTokPackagePublisher` / `TikTokDirectPostPublisher` (official Content Posting API) | $0 (quota only) |
+| Analytics | `SQLiteAnalyticsProvider` (+ manual entry), `YouTubeAnalyticsProvider`, `TikTokAnalyticsProvider` (read-only) | $0 |
 | Storage | SQLite with file migrations | $0 |
 | Dashboard | FastAPI + Jinja2 on `127.0.0.1` | $0 |
 
@@ -176,7 +176,9 @@ Set `FONT_FILE` in `.env` to a bold TTF (e.g. `/usr/share/fonts/truetype/dejavu/
 | `aimz kill [--reason ..]` / `aimz resume` | hard kill switch |
 | `aimz budget` | ledger view |
 | `aimz dashboard` | local owner console |
-| `aimz youtube auth` | owner-only OAuth consent flow |
+| `aimz youtube auth` / `aimz tiktok auth` | owner-only OAuth consent flows |
+| `aimz schedule install\|status\|remove` | Task Scheduler jobs for hands-off operation |
+| `aimz publish poll` | advance uploads still processing on the platform |
 
 ## Configuration
 
@@ -202,7 +204,7 @@ FFmpeg rendering via the bundled `imageio-ffmpeg` binary) runs in CI with no mod
 
 ## Documentation
 
-- **[Beginner guide](docs/GETTING_STARTED.md)** (start here)
+- **[Beginner guide](docs/GETTING_STARTED.md)** (start here) · **[Fully autonomous setup](docs/AUTONOMOUS_SETUP.md)**
 - [Architecture](docs/ARCHITECTURE.md) · [Database schema](docs/DATABASE.md)
 - [Platform compliance](docs/COMPLIANCE.md) · [Owner controls](docs/OWNER_CONTROLS.md)
 - [What is autonomous vs human-controlled](docs/AUTONOMY.md)

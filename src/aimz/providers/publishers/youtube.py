@@ -138,7 +138,7 @@ class YouTubePublisher(Publisher):
             "snippet": {
                 "title": metadata.get("title", "")[:100],
                 "description": metadata.get("description", "")[:5000],
-                "tags": [t[:30] for t in metadata.get("tags", [])][:20],
+                "tags": list(dict.fromkeys([*[t[:30] for t in metadata.get("tags", [])], "Shorts"]))[:20],
                 "categoryId": self.category_id,
                 "defaultLanguage": "en",
             },

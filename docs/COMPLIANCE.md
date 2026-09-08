@@ -20,12 +20,12 @@ Verified against official documentation on 2026-09-07. Re-verify before changing
 
 | Requirement | Source | How AI Media Zero complies |
 |---|---|---|
-| Unaudited API clients "can only post contents in SELF_ONLY viewership" and the account must be private; public posting requires an app audit | developers.tiktok.com/doc/content-sharing-guidelines, content-posting-api-get-started | V0 does not call the API at all: `TikTokPackagePublisher` writes an owner-completed package |
-| Creator must preview the content, be able to edit the caption, and manually select privacy from `creator_info` options with **no default**; consent before bytes are sent; "Music Usage Confirmation" declaration | content-sharing-guidelines | `posting_notes.md` walks the owner through these steps; `tiktok_metadata.json` marks privacy as `CHOOSE_IN_APP` |
+| Unaudited API clients "can only post contents in SELF_ONLY viewership" and the account must be private; public posting requires an app audit | developers.tiktok.com/doc/content-sharing-guidelines, content-posting-api-get-started | Default `TIKTOK_MODE=package` never calls the API. `TIKTOK_MODE=direct` uses `TikTokDirectPostPublisher`, which validates the chosen privacy level against `creator_info.privacy_level_options` (so an unaudited app can only post SELF_ONLY) and checks `max_video_post_duration_sec` |
+| Creator must preview the content, be able to edit the caption, and manually select privacy from `creator_info` options with **no default**; consent before bytes are sent; "Music Usage Confirmation" declaration | content-sharing-guidelines | Package mode: `posting_notes.md` walks the owner through these steps. Direct mode: the dashboard one-tap page shows the creator name, a privacy dropdown with no default, and an explicit consent checkbox; the hands-off path requires the owner to set `TIKTOK_PRIVACY_LEVEL` and `AUTOPUBLISH_CONSENT=true` in `.env` for their own account |
 | `post_info.is_aigc` labels AI-generated content | direct-post reference | Package recommends `is_aigc: true`; posting notes tell the owner to enable the AI label |
-| Rate limits: 6 `init` calls/min per token; chunk 5–64 MB; MP4/H.264 recommended; 23–60 fps; ≤ 4 GB | media-transfer guide | Renderer outputs 1080x1920 H.264 MP4 at 30 fps, well inside limits, ready for a future `TikTokDirectPostPublisher` |
-| Automation of tiktok.com with bots violates the Terms of Service | tiktok.com/legal | No browser automation anywhere in the codebase; the interface is API-shaped so Direct Post can be added once the owner's app is audited |
-| Display API `video.list` / `video.query` expose like/comment/share/view counts for **public** videos only | developers.tiktok.com/doc/tiktok-api-v2-video-list | Not integrated in V0 (SELF_ONLY posts would be invisible anyway); metrics are entered manually |
+| Rate limits: 6 `init` calls/min per token; chunk 5–64 MB; MP4/H.264 recommended; 23–60 fps; ≤ 4 GB | media-transfer guide | Renderer outputs 1080x1920 H.264 MP4 at 30 fps, well inside limits; `TikTokDirectPostPublisher` uploads in 5-64 MB chunks (single chunk under 64 MB) and never retries a failed post |
+| Automation of tiktok.com with bots violates the Terms of Service | tiktok.com/legal | No browser automation anywhere in the codebase; posting goes through the official API only |
+| Display API `video.list` / `video.query` expose like/comment/share/view counts for **public** videos only | developers.tiktok.com/doc/tiktok-api-v2-video-list | `TikTokAnalyticsProvider` (`TIKTOK_ANALYTICS_ENABLED=true`) reads them for public posts; SELF_ONLY posts return nothing, so metrics stay manual until the app is audited |
 
 ## Media licensing
 
@@ -52,10 +52,8 @@ Verified against official documentation on 2026-09-07. Re-verify before changing
 
 ## Human-required actions (V0)
 
-1. Create the Google Cloud project, enable YouTube Data + Analytics APIs, download the OAuth
-   client JSON, run `aimz youtube auth`. (Only if you want API uploads; draft mode needs nothing.)
-2. Approve each video before any API upload.
-3. Post TikTok packages in the app; select privacy and the AI label yourself.
-4. Enter metrics the APIs do not expose.
-5. Apply for the YouTube compliance audit and the TikTok app audit if you ever want public,
-   automated posting.
+See docs/AUTONOMOUS_SETUP.md for the one-time checklist. In short: create the Google Cloud OAuth
+client and run `aimz youtube auth`; register a TikTok app and run `aimz tiktok auth`; submit both
+platform audits (uploads stay private/SELF_ONLY until approved); set `AUTOPUBLISH_CONSENT=true` for
+your own accounts; schedule `aimz run`. Impressions/CTR (YouTube) and watch time (TikTok) are not
+exposed by any API and remain optional manual entries.

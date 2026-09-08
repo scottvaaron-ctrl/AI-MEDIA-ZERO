@@ -11,6 +11,10 @@
       <td>{{ p.privacy or '' }}</td><td class="muted">{{ p.posted_at or '' }}</td>
       <td class="mono">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url }}</a>{% else %}{{ p.package_dir }}{% endif %}</td>
       <td>
+        {% if p.platform == 'tiktok' and env.tiktok_mode == 'direct' and p.status in ['packaged', 'blocked', 'failed', 'pending'] %}
+        <a href="/publications/{{ p.id }}/tiktok"><button>Post to TikTok…</button></a>
+        {% endif %}
+        {% if p.status == 'uploading' %}<span class="muted">processing on platform; polled next cycle</span>{% endif %}
         {% if p.status == 'packaged' %}
         <form method="post" action="/publications/{{ p.id }}/mark-posted" class="row">
           <input name="url" placeholder="posted URL" size="26"><input name="platform_video_id" placeholder="platform id" size="12"><button>Mark posted</button>

@@ -16,6 +16,7 @@ from aimz.core.runs import AgentSpan, RunTracker
 from aimz.db import Database, connect
 from aimz.logging_setup import setup_logging
 from aimz.providers.analytics.store import SQLiteAnalyticsProvider
+from aimz.providers.analytics.tiktok import TikTokAnalyticsProvider
 from aimz.providers.analytics.youtube import YouTubeAnalyticsProvider
 from aimz.providers.assets.owner_library import OwnerLibraryAssetProvider
 from aimz.providers.assets.wikimedia import WikimediaAssetProvider
@@ -33,6 +34,7 @@ from aimz.providers.image.cards import PillowCardProvider
 from aimz.providers.llm.fixture import FixtureLLMProvider
 from aimz.providers.llm.ollama import OllamaProvider
 from aimz.providers.publishers.tiktok import TikTokPackagePublisher
+from aimz.providers.publishers.tiktok_direct import TikTokClient, TikTokDirectPostPublisher
 from aimz.providers.publishers.youtube import YouTubePublisher
 from aimz.providers.research.rss import RSSResearchProvider
 from aimz.providers.tts.piper import PiperTTSProvider
@@ -158,12 +160,25 @@ def build_services(
         ),
         "tiktok": TikTokPackagePublisher(bool(config.get("publishing.tiktok.recommend_ai_label", True))),
     }
+    tiktok_client: TikTokClient | None = None
+    if env.tiktok_mode == "direct" or env.tiktok_analytics_enabled:
+        tiktok_client = TikTokClient(
+            env.tiktok_client_key, env.tiktok_client_secret, env.tiktok_redirect_uri, env.tiktok_token_file
+        )
+    if env.tiktok_mode == "direct" and tiktok_client is not None:
+        publishers["tiktok"] = TikTokDirectPostPublisher(
+            tiktok_client,
+            env.tiktok_privacy_level,
+            bool(config.get("publishing.tiktok.recommend_ai_label", True)),
+        )
 
     # ---- analytics -------------------------------------------------------------------
     store = SQLiteAnalyticsProvider(db)
     remote: dict[str, AnalyticsProvider] = {}
     if env.youtube_analytics_enabled:
         remote["youtube"] = YouTubeAnalyticsProvider(True, env.youtube_token_file)
+    if env.tiktok_analytics_enabled and tiktok_client is not None:
+        remote["tiktok"] = TikTokAnalyticsProvider(tiktok_client, db)
 
     disabled_paid = ["PaidTTSProviderExample", "PaidLLMProviderExample"]
     if env.allow_paid_providers and env.monthly_budget_usd > 0:

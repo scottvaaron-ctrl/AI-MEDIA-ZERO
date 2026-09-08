@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>Post to TikTok (official Content Posting API)</h3>
+  {% if error %}<p class="status-failed">{{ error }}</p>{% endif %}
+  {% if info %}
+  <p>Creator: <b>{{ info.creator_nickname }}</b> (@{{ info.creator_username }}) · max duration {{ info.max_video_post_duration_sec }}s</p>
+  <form method="post" action="/publications/{{ pub.id }}/tiktok" class="row">
+    <label>Privacy level (TikTok requires you to choose; no default)
+      <select name="privacy_level" required>
+        <option value="" disabled selected>choose…</option>
+        {% for opt in info.privacy_level_options %}<option value="{{ opt }}">{{ opt }}</option>{% endfor %}
+      </select>
+    </label>
+    <label><input type="checkbox" name="consent" value="yes" required> I have previewed the video and consent to uploading it to my TikTok account. By posting, I agree to TikTok's Music Usage Confirmation.</label>
+    <button>Post now</button>
+  </form>
+  <p class="help">Caption and AI-generated label come from the package (editable in the package folder before posting). Unaudited apps can only post SELF_ONLY.</p>
+  {% endif %}
+  <p><a href="/publishing">← back</a></p>
+</div>
+{% endblock %}

@@ -404,6 +404,39 @@ def create_app(svc: Services | None = None) -> FastAPI:
             svc.analytics_store.record(dict(pub), snap, source="manual")
         return RedirectResponse("/metrics", status_code=303)
 
+    @app.get("/publications/{pub_id}/tiktok", response_class=HTMLResponse)
+    def tiktok_post_form(request: Request, pub_id: str) -> HTMLResponse:
+        pub = dict(svc.db.get("publications", pub_id) or {})
+        info: dict[str, Any] = {}
+        error = ""
+        publisher = svc.publishers.get("tiktok")
+        client = getattr(publisher, "client", None)
+        if client is not None:
+            try:
+                info = client.creator_info()
+            except Exception as exc:
+                error = str(exc)
+        else:
+            error = "TIKTOK_MODE is not 'direct' (set it in .env and run `aimz tiktok auth`)"
+        return render(request, "tiktok_post.html", pub=pub, info=info, error=error)
+
+    @app.post("/publications/{pub_id}/tiktok")
+    def tiktok_post(pub_id: str, privacy_level: str = Form(...), consent: str = Form("")) -> RedirectResponse:
+        """One-tap TikTok post: the owner picks privacy from creator_info options and consents explicitly."""
+        pub = svc.db.get("publications", pub_id)
+        if pub and consent == "yes":
+            if pub["status"] in {"packaged", "blocked", "failed"}:
+                svc.db.update("publications", pub_id, {"status": "pending", "updated_at": now_iso()})
+            with svc.tracker.run("publish") as ctx:
+                orch.publisher.publish(
+                    ctx,
+                    pub["video_id"],
+                    platforms=["tiktok"],
+                    owner_approved=True,
+                    extra_metadata={"tiktok_privacy_level": privacy_level},
+                )
+        return RedirectResponse("/publishing", status_code=303)
+
     @app.post("/publications/{pub_id}/retry")
     def retry_publish(pub_id: str) -> RedirectResponse:
         """Owner explicitly re-queues a failed publication (the system never does this on its own)."""

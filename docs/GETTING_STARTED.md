@@ -134,6 +134,15 @@ shares, new followers. Click **Record**. The next `aimz run` uses those numbers.
 
 ## Part 4 — Let it run on its own
 
+For a **fully hands-off** setup (automatic uploads and automatic metrics on both platforms), follow
+[AUTONOMOUS_SETUP.md](AUTONOMOUS_SETUP.md) instead of Parts 3.3–3.4; then schedule with one command:
+
+```powershell
+aimz schedule install --times 09:00,18:00
+```
+
+Manual alternative:
+
 Make it run twice a day automatically:
 
 1. Create a file `C:\Users\<you>\run-cycle.ps1` containing:

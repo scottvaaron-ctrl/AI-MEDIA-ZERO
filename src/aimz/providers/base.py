@@ -283,6 +283,10 @@ class Publisher(Provider):
         package_dir: Path,
     ) -> PublishResult: ...
 
+    def poll(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
+        """For publications left in 'uploading': return the terminal result once the platform finishes."""
+        return None
+
 
 # --------------------------------------------------------------------------------------
 # Analytics

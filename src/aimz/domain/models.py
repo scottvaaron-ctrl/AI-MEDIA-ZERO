@@ -312,8 +312,9 @@ class RenderResult(BaseModel):
 
 
 class PublishResult(BaseModel):
-    status: Literal["packaged", "uploaded", "published", "blocked", "failed"]
+    status: Literal["packaged", "uploading", "uploaded", "published", "blocked", "failed"]
     platform_video_id: str | None = None
+    publish_id: str | None = None
     url: str | None = None
     package_dir: str | None = None
     privacy: str | None = None

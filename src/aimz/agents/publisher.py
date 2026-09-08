@@ -58,7 +58,12 @@ class PublishStage(Agent):
         }
 
     def publish(
-        self, run: RunContext, video_id: str, platforms: list[str] | None = None, owner_approved: bool = False
+        self,
+        run: RunContext,
+        video_id: str,
+        platforms: list[str] | None = None,
+        owner_approved: bool = False,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         db = self.svc.db
         video = dict(db.get("videos", video_id) or {})
@@ -66,8 +71,14 @@ class PublishStage(Agent):
             raise ValueError(f"video {video_id} not publishable (status={video.get('status')})")
         script = dict(db.get("scripts", video["script_id"]) or {})
         idea = dict(db.get("ideas", video["idea_id"]) or {})
-        approved = owner_approved or video["status"] in {"approved", "published"}
+        # Owner consent: per-video approval, or the standing AUTOPUBLISH_CONSENT the owner set in .env.
+        approved = (
+            owner_approved
+            or video["status"] in {"approved", "published"}
+            or bool(self.svc.env.autopublish_consent)
+        )
         metadata = self.build_metadata(video, script, idea, approved)
+        metadata.update(extra_metadata or {})
         results: list[dict[str, Any]] = []
         for platform, pub in self.svc.publishers.items():
             if platforms and platform not in platforms:
@@ -155,6 +166,10 @@ class PublishStage(Agent):
                 }
                 if res.status in {"uploaded", "published"}:
                     update["posted_at"] = now_iso()
+                if res.publish_id:
+                    update["metadata_json"] = dumps(
+                        {**loads(str(row.get("metadata_json") or ""), {}), "publish_id": res.publish_id}
+                    )
                 db.update("publications", pub_id, update)
                 span.output_refs["status"] = res.status
                 results.append(
@@ -171,6 +186,44 @@ class PublishStage(Agent):
             db.update("ideas", video["idea_id"], {"status": "published", "updated_at": now_iso()})
         run.note(f"publish:{video_id}", results)
         return results
+
+    def poll_pending(self, run: RunContext) -> int:
+        """Advance publications the platform was still processing (e.g. TikTok PROCESSING_UPLOAD)."""
+        db = self.svc.db
+        done = 0
+        for pub in [dict(r) for r in db.query("SELECT * FROM publications WHERE status='uploading'")]:
+            publisher = self.svc.publishers.get(pub["platform"])
+            if publisher is None:
+                continue
+            with self.svc.tracker.agent(
+                run, self.name, f"poll:{pub['platform']}", {"publication_id": pub["id"]}
+            ) as span:
+                try:
+                    res = publisher.poll(self.pctx(run, pub["video_id"], span), pub)
+                except Exception as exc:
+                    self.log.warning("poll failed for %s: %s", pub["id"], exc)
+                    continue
+                if res is None:
+                    continue
+                update = {
+                    "status": res.status,
+                    "updated_at": now_iso(),
+                    "last_error": None if res.status != "failed" else res.message[:800],
+                }
+                if res.platform_video_id:
+                    update["platform_video_id"] = res.platform_video_id
+                if res.url:
+                    update["url"] = res.url
+                if res.status in {"uploaded", "published"}:
+                    update["posted_at"] = now_iso()
+                    db.update("videos", pub["video_id"], {"status": "published", "updated_at": now_iso()})
+                    video = db.get("videos", pub["video_id"])
+                    if video:
+                        db.update("ideas", video["idea_id"], {"status": "published", "updated_at": now_iso()})
+                db.update("publications", pub["id"], update)
+                span.output_refs["status"] = res.status
+                done += 1
+        return done
 
     def mark_posted(
         self,

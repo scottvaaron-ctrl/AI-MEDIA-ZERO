@@ -25,9 +25,9 @@
 | Kill switch | `aimz kill/resume`, dashboard, `data/KILL` |
 | Credentials, OAuth consent | `secrets/`, `aimz youtube auth` |
 | Publishing mode | `.env` (`YOUTUBE_MODE`, `YOUTUBE_ENABLED`) |
-| Approval of each upload | dashboard / `aimz approve` |
+| Approval of each upload | dashboard / `aimz approve`, or standing consent `AUTOPUBLISH_CONSENT=true` in `.env` |
 | Approval of elevated-review scripts | dashboard / `aimz approve script` |
-| TikTok posting (preview, caption, privacy, AI label, consent) | TikTok app |
+| TikTok posting | TikTok app (package mode), one-tap dashboard flow, or Direct Post with `TIKTOK_PRIVACY_LEVEL` + consent (direct mode) |
 | Feeds list | `config/feeds.yaml` / dashboard |
 | Constitution | `config/constitution.md` |
 | Overriding strategy | dashboard / `aimz strategy edit` |

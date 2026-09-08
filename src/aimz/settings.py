@@ -83,7 +83,14 @@ class EnvSettings:
     youtube_client_secret_file: Path
     youtube_token_file: Path
     youtube_analytics_enabled: bool
+    autopublish_consent: bool
     tiktok_mode: str
+    tiktok_client_key: str
+    tiktok_client_secret: str
+    tiktok_redirect_uri: str
+    tiktok_token_file: Path
+    tiktok_privacy_level: str
+    tiktok_analytics_enabled: bool
 
     dashboard_host: str
     dashboard_port: int
@@ -134,7 +141,14 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         ),
         youtube_token_file=_resolve(root, _env("YOUTUBE_TOKEN_FILE"), "secrets/youtube_token.json"),
         youtube_analytics_enabled=_env_bool("YOUTUBE_ANALYTICS_ENABLED", False),
+        autopublish_consent=_env_bool("AUTOPUBLISH_CONSENT", False),
         tiktok_mode=_env("TIKTOK_MODE", "package").lower(),
+        tiktok_client_key=_env("TIKTOK_CLIENT_KEY", ""),
+        tiktok_client_secret=_env("TIKTOK_CLIENT_SECRET", ""),
+        tiktok_redirect_uri=_env("TIKTOK_REDIRECT_URI", ""),
+        tiktok_token_file=_resolve(root, _env("TIKTOK_TOKEN_FILE"), "secrets/tiktok_token.json"),
+        tiktok_privacy_level=_env("TIKTOK_PRIVACY_LEVEL", "").upper(),
+        tiktok_analytics_enabled=_env_bool("TIKTOK_ANALYTICS_ENABLED", False),
         dashboard_host=_env("DASHBOARD_HOST", "127.0.0.1"),
         dashboard_port=_env_int("DASHBOARD_PORT", 8420),
         user_agent=_env("AIMZ_USER_AGENT", "AIMediaZero/0.1 (local research bot; contact owner)"),

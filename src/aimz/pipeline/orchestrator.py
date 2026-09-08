@@ -212,6 +212,7 @@ class Orchestrator:
         return out
 
     def publish_rendered(self, run: RunContext) -> list[dict[str, Any]]:
+        self.publisher.poll_pending(run)
         videos = [
             dict(r)
             for r in self.svc.db.query(
