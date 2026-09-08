@@ -210,6 +210,7 @@ FFmpeg rendering via the bundled `imageio-ffmpeg` binary) runs in CI with no mod
 ## Documentation
 
 - **[Beginner guide](docs/GETTING_STARTED.md)** (start here) · **[Fully autonomous setup](docs/AUTONOMOUS_SETUP.md)**
+- **[Check-in guide](docs/CHECK_IN.md)** — what to run and what to look at when coming back to the data
 - [Architecture](docs/ARCHITECTURE.md) · [Database schema](docs/DATABASE.md)
 - [Platform compliance](docs/COMPLIANCE.md) · [Owner controls](docs/OWNER_CONTROLS.md)
 - [What is autonomous vs human-controlled](docs/AUTONOMY.md)
