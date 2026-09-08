@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Media Zero - TikTok callback</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem;
+  }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1.75rem; opacity: .7; }
+  code, #url {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .85rem;
+  }
+  #url {
+    display: block; width: 100%; box-sizing: border-box; padding: .7rem .8rem;
+    border: 1px solid rgba(128,128,128,.45); border-radius: 6px;
+    background: rgba(128,128,128,.08); word-break: break-all; min-height: 3.2rem;
+  }
+  button {
+    margin-top: .75rem; padding: .55rem 1rem; font: inherit; font-size: .9rem;
+    border: 1px solid rgba(128,128,128,.45); border-radius: 6px;
+    background: rgba(128,128,128,.1); cursor: pointer;
+  }
+  .state { margin-top: 1.5rem; padding: .8rem 1rem; border-radius: 6px; }
+  .ok   { background: rgba(46,160,67,.12);  border: 1px solid rgba(46,160,67,.4); }
+  .warn { background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4); }
+  footer { margin-top: 2.5rem; font-size: .8rem; opacity: .6; }
+</style>
+</head>
+<body>
+<h1>TikTok authorization callback</h1>
+<p class="sub">This page belongs to a personal, single-user project. It stores nothing and sends nothing anywhere.</p>
+
+<div id="state" class="state warn">Checking the address&hellip;</div>
+
+<p style="margin-bottom:.4rem"><strong>Copy this whole URL and paste it into the <code>aimz tiktok auth</code> prompt:</strong></p>
+<div id="url"></div>
+<button id="copy" type="button">Copy URL</button>
+
+<footer>
+  AI Media Zero &middot; an autonomous, zero-budget media experiment.
+  Everything happens locally in your browser on this page.
+</footer>
+
+<script>
+  var full = window.location.href;
+  var params = new URLSearchParams(window.location.search);
+  var box = document.getElementById('url');
+  var state = document.getElementById('state');
+  box.textContent = full;
+
+  if (params.get('code')) {
+    state.className = 'state ok';
+    state.textContent = 'Authorization code received. Copy the URL below and paste it back into the terminal. It expires within minutes, so do it now.';
+  } else if (params.get('error')) {
+    state.className = 'state warn';
+    state.textContent = 'TikTok returned an error: ' + params.get('error') +
+      (params.get('error_description') ? ' - ' + params.get('error_description') : '');
+  } else {
+    state.className = 'state warn';
+    state.textContent = 'No authorization code in this address. If you are verifying this URL for a TikTok app, you are in the right place and nothing more is needed here.';
+  }
+
+  document.getElementById('copy').addEventListener('click', function () {
+    navigator.clipboard.writeText(full).then(function () {
+      var b = document.getElementById('copy');
+      b.textContent = 'Copied';
+      setTimeout(function () { b.textContent = 'Copy URL'; }, 1800);
+    });
+  });
+</script>
+</body>
+</html>
