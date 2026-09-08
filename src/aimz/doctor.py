@@ -165,6 +165,20 @@ def run_checks(svc: Services, fix: bool = False) -> list[Check]:
                 Check("google-api-python-client", False, "missing", "pip install ai-media-zero[youtube]")
             )
     checks.append(Check("TikTok", True, svc.publishers["tiktok"].health().detail, required=False))
+    bluesky = svc.publishers.get("bluesky") or svc.remote_analytics.get("bluesky")
+    if bluesky is not None:
+        h = bluesky.health()
+        checks.append(Check("Bluesky", h.ok, h.detail, h.fix, required=env.bluesky_enabled))
+    else:
+        checks.append(
+            Check(
+                "Bluesky",
+                True,
+                "disabled (BLUESKY_ENABLED=false)",
+                "free and needs no platform audit; see docs/AUTONOMOUS_SETUP.md",
+                required=False,
+            )
+        )
 
     # Assets network (optional)
     for ap in svc.assets:

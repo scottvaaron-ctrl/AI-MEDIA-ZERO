@@ -1,7 +1,7 @@
 # AI Media Zero
 
-An autonomous, AI-operated short-form media channel (TikTok + YouTube Shorts) that runs on
-**$0.00/month** of usage-based software and learns from its own performance data.
+An autonomous, AI-operated short-form media channel (YouTube Shorts, TikTok and Bluesky) that runs
+on **$0.00/month** of usage-based software and learns from its own performance data.
 
 The experiment: *can an AI starting with $0 discover what people want to watch, build an
 audience, learn from performance data, and evolve its own media strategy?*
@@ -122,7 +122,11 @@ V0 never posts publicly by itself. For each package:
    `YOUTUBE_ENABLED=true`, `YOUTUBE_MODE=private`, put your OAuth client JSON at
    `secrets/client_secret.json`, run `aimz youtube auth` once, approve the video in the
    dashboard, and `aimz publish run --approved`.
-3. Enter metrics the APIs cannot provide (impressions, CTR, 3-second retention, all TikTok
+3. **Bluesky**: the one platform with no gatekeeper. Create an app password in Bluesky settings,
+   set `BLUESKY_ENABLED=true`, `BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD` in `.env`, run
+   `aimz bluesky auth` once, and posting and metrics are automatic from then on. No developer
+   account and no platform audit. See [docs/AUTONOMOUS_SETUP.md](docs/AUTONOMOUS_SETUP.md) Part C.
+4. Enter metrics the APIs cannot provide (impressions, CTR, 3-second retention, all TikTok
    numbers) with `aimz metric add <publication_id> --views ... --avg-percent-viewed ...` or the
    dashboard Metrics page. The learning loop treats manual and API metrics identically.
 
@@ -177,6 +181,7 @@ Set `FONT_FILE` in `.env` to a bold TTF (e.g. `/usr/share/fonts/truetype/dejavu/
 | `aimz budget` | ledger view |
 | `aimz dashboard` | local owner console |
 | `aimz youtube auth` / `aimz tiktok auth` | owner-only OAuth consent flows |
+| `aimz bluesky auth` / `aimz bluesky limits` | sign in with a Bluesky app password; show the daily video allowance |
 | `aimz schedule install\|status\|remove` | Task Scheduler jobs for hands-off operation |
 | `aimz publish poll` | advance uploads still processing on the platform |
 

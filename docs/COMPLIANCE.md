@@ -1,6 +1,7 @@
 # Platform compliance notes
 
-Verified against official documentation on 2026-09-07. Re-verify before changing publishing modes.
+Verified against official documentation on 2026-09-07; the Bluesky section on 2026-09-08.
+Re-verify before changing publishing modes.
 
 ## YouTube Data API v3
 
@@ -26,6 +27,27 @@ Verified against official documentation on 2026-09-07. Re-verify before changing
 | Rate limits: 6 `init` calls/min per token; chunk 5–64 MB; MP4/H.264 recommended; 23–60 fps; ≤ 4 GB | media-transfer guide | Renderer outputs 1080x1920 H.264 MP4 at 30 fps, well inside limits; `TikTokDirectPostPublisher` uploads in 5-64 MB chunks (single chunk under 64 MB) and never retries a failed post |
 | Automation of tiktok.com with bots violates the Terms of Service | tiktok.com/legal | No browser automation anywhere in the codebase; posting goes through the official API only |
 | Display API `video.list` / `video.query` expose like/comment/share/view counts for **public** videos only | developers.tiktok.com/doc/tiktok-api-v2-video-list | `TikTokAnalyticsProvider` (`TIKTOK_ANALYTICS_ENABLED=true`) reads them for public posts; SELF_ONLY posts return nothing, so metrics stay manual until the app is audited |
+
+## Bluesky / AT Protocol
+
+Verified 2026-09-08 against the `bluesky-social/atproto` lexicons and the official client source.
+
+| Requirement | Source | How AI Media Zero complies |
+|---|---|---|
+| A program acting for an account should use an **app password**, not the account password | bsky.app settings -> Privacy and Security -> App Passwords | `BLUESKY_APP_PASSWORD` holds a revocable app password; `.env.example` says in as many words never to put the account password there. `aimz bluesky auth` runs `com.atproto.server.createSession` once and stores only the returned JWTs |
+| Video bytes go to the video service, not the PDS: `app.bsky.video.uploadVideo` authorized by a `com.atproto.server.getServiceAuth` token with `aud=did:web:<pds host>`, `lxm=com.atproto.repo.uploadBlob` | lexicons `app/bsky/video/*`, `social-app/src/lib/media/video/upload.shared.ts` | `BlueskyClient.upload_video` derives the audience from the PDS in the account's DID document and requests a token bound to that one method, valid 30 minutes |
+| Processing is asynchronous: poll `app.bsky.video.getJobStatus` until `JOB_STATE_COMPLETED`, which carries the blob | `app.bsky.video.defs#jobStatus` | Polled inside the cycle for up to `poll_seconds`; if it is still encoding the publication stays `uploading` and `aimz publish poll` finishes it next cycle. `JOB_STATE_FAILED` is reported and **never** retried |
+| Per-account daily video allowance; Bluesky-hosted accounts must have a confirmed email before uploading video | `app.bsky.video.getUploadLimits` | Checked before a single byte is sent, so hitting the limit costs nothing and surfaces the platform's own message |
+| Video embed limits: MP4, up to 300 MB and 10 minutes; captions are WebVTT blobs up to 20 kB, max 20 | lexicon `app.bsky.embed.video` | Enforced in `bluesky.py` (`MAX_VIDEO_BYTES`, `MAX_VIDEO_SECONDS`, `MAX_CAPTION_BYTES`). Our renderer emits 1080x1920 H.264 MP4, 20-90 s, 2-6 MB, far inside them |
+| Post text: 300 graphemes / 3000 bytes; hashtags and links are inert unless the record carries matching `app.bsky.richtext.facet` byte ranges | lexicons `app/bsky/feed/post`, `app/bsky/richtext/facet` | `build_post_text` trims on grapheme clusters and then on bytes; `facets_for` emits UTF-8 byte offsets for tags and URLs |
+| Accessibility: `alt` on the video embed | lexicon `app.bsky.embed.video` | Always set from the title; the SRT track is converted to WebVTT and attached when it fits |
+| No official API exposes view, impression or watch-time counts to anyone, including the author | `app.bsky.feed.defs#postView` | `BlueskyAnalyticsProvider` records likes, replies, reposts + quotes, bookmarks and the follower delta, and leaves `views` empty rather than inventing a proxy |
+| Automating the bsky.app web client with a browser would be a workaround, not an API | project constitution | No browser automation anywhere; every call is an XRPC method against the owner's PDS or the video service |
+
+Bluesky requires **no developer app and no platform audit**, so unlike YouTube and TikTok there is
+no restricted first phase: posts are public from the first upload. That makes owner consent the
+only gate, and it is the same one as everywhere else (`AUTOPUBLISH_CONSENT=true` or per-video
+approval, plus the kill switch).
 
 ## Media licensing
 
@@ -54,6 +76,7 @@ Verified against official documentation on 2026-09-07. Re-verify before changing
 
 See docs/AUTONOMOUS_SETUP.md for the one-time checklist. In short: create the Google Cloud OAuth
 client and run `aimz youtube auth`; register a TikTok app and run `aimz tiktok auth`; submit both
-platform audits (uploads stay private/SELF_ONLY until approved); set `AUTOPUBLISH_CONSENT=true` for
-your own accounts; schedule `aimz run`. Impressions/CTR (YouTube) and watch time (TikTok) are not
-exposed by any API and remain optional manual entries.
+platform audits (uploads stay private/SELF_ONLY until approved); create a Bluesky app password and
+run `aimz bluesky auth` (no audit, no waiting); set `AUTOPUBLISH_CONSENT=true` for your own
+accounts; schedule `aimz run`. Impressions/CTR (YouTube), watch time (TikTok) and views of any
+kind (Bluesky) are not exposed by any API and remain optional manual entries.

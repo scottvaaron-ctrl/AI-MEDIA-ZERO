@@ -12,9 +12,13 @@ The AI cannot do any of these for you, by design.
 |---|---|---|---|
 | YouTube Shorts | Automatic via the official Data API | Automatic via Analytics API (views, avg % viewed, shares, subscribers gained, comments) | Google Cloud OAuth setup; YouTube API compliance audit (otherwise uploads stay private) |
 | TikTok | Automatic via the Content Posting API (Direct Post) | Automatic via Display API (views, likes, comments, shares, follower delta) | TikTok developer app; app audit (otherwise posts are SELF_ONLY / private) |
+| Bluesky | Automatic via the AT Protocol video API | Automatic (likes, replies, reposts + quotes, bookmarks, follower delta) | Create one app password. **No developer app, no audit, no waiting** |
 
-Not available from any API, ever: YouTube impressions/CTR, TikTok watch time. The learning loop
-does not need them.
+Not available from any API, ever: YouTube impressions/CTR, TikTok watch time, and any Bluesky
+view count. The learning loop does not need them.
+
+Bluesky is the cheapest platform to switch on and the only one with no gatekeeper, so if you
+want the shortest path to a fully hands-off channel, do Part C first.
 
 ---
 
@@ -112,7 +116,54 @@ post.
 
 ---
 
-## Part C — Schedule (2 minutes)
+## Part C — Bluesky (about 5 minutes, no audit)
+
+Bluesky needs no developer account and no app review. An app password is a revocable credential
+that is not your account password, and it is the officially supported way to let a program post.
+
+### C1. Create the app password
+
+1. Open Bluesky -> **Settings** -> **Privacy and Security** -> **App Passwords** -> *Add App Password*.
+2. Name it `ai-media-zero` and copy the `xxxx-xxxx-xxxx-xxxx` value. It is shown once.
+3. If your account is hosted by Bluesky, confirm your email first; video upload is blocked until you do.
+
+### C2. Fill in `.env`
+
+```
+BLUESKY_ENABLED=true
+BLUESKY_HANDLE=yourname.bsky.social
+BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+BLUESKY_ANALYTICS_ENABLED=true
+```
+
+Leave `BLUESKY_PDS_URL=https://bsky.social` unless you self-host your PDS. Never put your account
+password here; if the app password leaks, revoke it in the same settings page and nothing else is
+exposed.
+
+### C3. Connect and check the quota
+
+```powershell
+aimz bluesky auth
+aimz bluesky limits
+```
+
+`auth` signs in once and stores the session in `secretsluesky_session.json`; after that the
+system keeps itself signed in. `limits` prints `canUpload` and how many videos the account may
+still post today.
+
+### C4. What gets posted
+
+Title, a one-line AI disclosure and up to three hashtags (Bluesky allows only 300 characters),
+the vertical video with alt text and a WebVTT caption track, then a self-reply carrying the source
+links. Set `BLUESKY_SOURCES_REPLY=false` if you would rather not have the reply.
+
+Posts are public immediately: there is no restricted phase to wait out. The owner consent gate is
+the only thing standing in front of them, so nothing is posted until `AUTOPUBLISH_CONSENT=true`
+or you approve the video.
+
+---
+
+## Part D — Schedule (2 minutes)
 
 ```powershell
 aimz schedule install --times 09:00,18:00
@@ -124,7 +175,7 @@ The laptop must be on (not asleep) at those times; set Power options to "never s
 
 ---
 
-## Part D — Verify
+## Part E — Verify
 
 ```powershell
 aimz doctor
@@ -132,7 +183,8 @@ aimz run
 aimz publish list
 ```
 
-`doctor` should show `YouTube OAuth token valid` and (if enabled) `TikTok direct post ready`.
+`doctor` should show `YouTube OAuth token valid`, `Bluesky connected as <handle>` and (if
+enabled) `TikTok direct post ready`.
 After the first upload, `aimz publish list` shows `uploaded`/`published` with a URL. The next
 cycles pull metrics automatically (YouTube analytics lag by 1–2 days) and the strategy starts
 moving families out of `hypothesis`.
@@ -140,6 +192,8 @@ moving families out of `hypothesis`.
 ## What still needs you (rarely)
 
 - Re-running `aimz youtube auth` / `aimz tiktok auth` if a token is revoked (about yearly).
+  Bluesky is the exception: it signs itself back in from the app password, so it only needs you
+  if you revoke that password.
 - Responding to a platform audit question.
 - Reading the weekly review in `data\reports\` if you are curious. Optional.
 - Anything involving money, contracts, sponsorships, or ads (never automated).

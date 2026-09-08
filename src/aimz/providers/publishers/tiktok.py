@@ -26,12 +26,13 @@ from typing import Any
 
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
+from aimz.providers.publishers.captions import hashtags
 from aimz.providers.publishers.packages import write_common_package
 
 
 def build_caption(title: str, tags: list[str], max_len: int = 2200) -> str:
-    hashtags = " ".join("#" + "".join(p.capitalize() for p in t.replace("_", " ").split()) for t in tags[:5])
-    cap = f"{title}\n\nAI-narrated, sourced explainer. Sources in comments/bio.\n{hashtags}".strip()
+    tag_line = " ".join(hashtags(tags, 5))
+    cap = f"{title}\n\nAI-narrated, sourced explainer. Sources in comments/bio.\n{tag_line}".strip()
     return cap[:max_len]
 
 

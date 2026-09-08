@@ -102,6 +102,10 @@ publishing:
   tiktok:
     package_dir: ./data/packages/tiktok
     recommend_ai_label: true
+  bluesky:
+    # Bluesky posts are capped at 300 graphemes, so the caption is title + disclosure + a few tags.
+    max_hashtags: 3
+    upload_captions: true   # attach the WebVTT track for accessibility
 
 safety:
   elevated_review_topics:

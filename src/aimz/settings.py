@@ -91,6 +91,14 @@ class EnvSettings:
     tiktok_token_file: Path
     tiktok_privacy_level: str
     tiktok_analytics_enabled: bool
+    bluesky_enabled: bool
+    bluesky_handle: str
+    bluesky_app_password: str
+    bluesky_pds_url: str
+    bluesky_session_file: Path
+    bluesky_lang: str
+    bluesky_sources_reply: bool
+    bluesky_analytics_enabled: bool
 
     dashboard_host: str
     dashboard_port: int
@@ -149,6 +157,14 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         tiktok_token_file=_resolve(root, _env("TIKTOK_TOKEN_FILE"), "secrets/tiktok_token.json"),
         tiktok_privacy_level=_env("TIKTOK_PRIVACY_LEVEL", "").upper(),
         tiktok_analytics_enabled=_env_bool("TIKTOK_ANALYTICS_ENABLED", False),
+        bluesky_enabled=_env_bool("BLUESKY_ENABLED", False),
+        bluesky_handle=_env("BLUESKY_HANDLE", ""),
+        bluesky_app_password=_env("BLUESKY_APP_PASSWORD", ""),
+        bluesky_pds_url=_env("BLUESKY_PDS_URL", "https://bsky.social").rstrip("/"),
+        bluesky_session_file=_resolve(root, _env("BLUESKY_SESSION_FILE"), "secrets/bluesky_session.json"),
+        bluesky_lang=_env("BLUESKY_LANG", "en"),
+        bluesky_sources_reply=_env_bool("BLUESKY_SOURCES_REPLY", True),
+        bluesky_analytics_enabled=_env_bool("BLUESKY_ANALYTICS_ENABLED", False),
         dashboard_host=_env("DASHBOARD_HOST", "127.0.0.1"),
         dashboard_port=_env_int("DASHBOARD_PORT", 8420),
         user_agent=_env("AIMZ_USER_AGENT", "AIMediaZero/0.1 (local research bot; contact owner)"),

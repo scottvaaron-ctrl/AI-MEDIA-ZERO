@@ -20,12 +20,14 @@ metric_app = typer.Typer(help="Record or view performance metrics.", no_args_is_
 publish_app = typer.Typer(help="Package / upload videos and confirm manual posts.", no_args_is_help=True)
 youtube_app = typer.Typer(help="Owner-only YouTube OAuth helpers.", no_args_is_help=True)
 tiktok_app = typer.Typer(help="Owner-only TikTok OAuth helpers.", no_args_is_help=True)
+bluesky_app = typer.Typer(help="Owner-only Bluesky account helpers.", no_args_is_help=True)
 schedule_app = typer.Typer(help="Run the cycle automatically (Windows Task Scheduler).", no_args_is_help=True)
 strategy_app = typer.Typer(help="Inspect or edit strategy memory.", no_args_is_help=True)
 app.add_typer(metric_app, name="metric")
 app.add_typer(publish_app, name="publish")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(tiktok_app, name="tiktok")
+app.add_typer(bluesky_app, name="bluesky")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(strategy_app, name="strategy")
 console = Console()
@@ -571,6 +573,48 @@ def tiktok_creator_info() -> None:
             env.tiktok_client_key, env.tiktok_client_secret, env.tiktok_redirect_uri, env.tiktok_token_file
         )
         _print_json(client.creator_info())
+    finally:
+        svc.close()
+
+
+@bluesky_app.command("auth")
+def bluesky_auth() -> None:
+    """Owner-only: sign in to Bluesky with the app password from .env and store the session."""
+    from aimz.providers.publishers.bluesky import BlueskyClient
+
+    svc = _svc(quiet=True)
+    try:
+        env = svc.env
+        if not env.bluesky_handle or not env.bluesky_app_password:
+            raise typer.BadParameter(
+                "set BLUESKY_HANDLE and BLUESKY_APP_PASSWORD in .env first. Create the app password at "
+                "Bluesky -> Settings -> Privacy and Security -> App Passwords (never your account password)."
+            )
+        client = BlueskyClient(
+            env.bluesky_handle, env.bluesky_app_password, env.bluesky_pds_url, env.bluesky_session_file
+        )
+        session = client.login()
+        console.print(
+            f"[green]Bluesky connected[/] as {session.handle} ({session.did}); "
+            f"session stored at {env.bluesky_session_file}"
+        )
+        _print_json(client.upload_limits())
+    finally:
+        svc.close()
+
+
+@bluesky_app.command("limits")
+def bluesky_limits() -> None:
+    """Show the account's remaining daily video allowance."""
+    from aimz.providers.publishers.bluesky import BlueskyClient
+
+    svc = _svc(quiet=True)
+    try:
+        env = svc.env
+        client = BlueskyClient(
+            env.bluesky_handle, env.bluesky_app_password, env.bluesky_pds_url, env.bluesky_session_file
+        )
+        _print_json(client.upload_limits())
     finally:
         svc.close()
 

@@ -15,6 +15,7 @@ from aimz.core.killswitch import KillSwitch
 from aimz.core.runs import AgentSpan, RunTracker
 from aimz.db import Database, connect
 from aimz.logging_setup import setup_logging
+from aimz.providers.analytics.bluesky import BlueskyAnalyticsProvider
 from aimz.providers.analytics.store import SQLiteAnalyticsProvider
 from aimz.providers.analytics.tiktok import TikTokAnalyticsProvider
 from aimz.providers.analytics.youtube import YouTubeAnalyticsProvider
@@ -33,6 +34,7 @@ from aimz.providers.base import (
 from aimz.providers.image.cards import PillowCardProvider
 from aimz.providers.llm.fixture import FixtureLLMProvider
 from aimz.providers.llm.ollama import OllamaProvider
+from aimz.providers.publishers.bluesky import BlueskyClient, BlueskyPublisher
 from aimz.providers.publishers.tiktok import TikTokPackagePublisher
 from aimz.providers.publishers.tiktok_direct import TikTokClient, TikTokDirectPostPublisher
 from aimz.providers.publishers.youtube import YouTubePublisher
@@ -172,6 +174,22 @@ def build_services(
             bool(config.get("publishing.tiktok.recommend_ai_label", True)),
         )
 
+    # Bluesky needs no app review and no owner-completed package: either it is switched on
+    # in .env with an app password, or the platform is simply absent from the publisher set.
+    bluesky_client: BlueskyClient | None = None
+    if env.bluesky_enabled or env.bluesky_analytics_enabled:
+        bluesky_client = BlueskyClient(
+            env.bluesky_handle, env.bluesky_app_password, env.bluesky_pds_url, env.bluesky_session_file
+        )
+    if env.bluesky_enabled and bluesky_client is not None:
+        publishers["bluesky"] = BlueskyPublisher(
+            bluesky_client,
+            lang=env.bluesky_lang,
+            max_hashtags=int(config.get("publishing.bluesky.max_hashtags", 3)),
+            upload_captions=bool(config.get("publishing.bluesky.upload_captions", True)),
+            sources_reply=env.bluesky_sources_reply,
+        )
+
     # ---- analytics -------------------------------------------------------------------
     store = SQLiteAnalyticsProvider(db)
     remote: dict[str, AnalyticsProvider] = {}
@@ -179,6 +197,8 @@ def build_services(
         remote["youtube"] = YouTubeAnalyticsProvider(True, env.youtube_token_file)
     if env.tiktok_analytics_enabled and tiktok_client is not None:
         remote["tiktok"] = TikTokAnalyticsProvider(tiktok_client, db)
+    if env.bluesky_analytics_enabled and bluesky_client is not None:
+        remote["bluesky"] = BlueskyAnalyticsProvider(bluesky_client, db)
 
     disabled_paid = ["PaidTTSProviderExample", "PaidLLMProviderExample"]
     if env.allow_paid_providers and env.monthly_budget_usd > 0:
