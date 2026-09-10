@@ -1,6 +1,6 @@
 # Strategy Memory (AI-editable within the constitution)
 
-_Version 5 — updated 2026-09-07T21:22:11+00:00 — confidence 0.10_
+_Version 6 — updated 2026-09-10T13:35:56+00:00 — confidence 0.10_
 
 ## Current audience model
 Cold start: curious, general-interest short-form viewers with no prior engagement data. Assume minimal historical knowledge and interest in niche topics until verified.
@@ -15,7 +15,7 @@ _None_
 _None_
 
 ## Families under test
-_None_
+- unusual_historical_events (n=1, score=0.051)
 
 ## Untested hypotheses
 - strange_business_history
@@ -27,7 +27,6 @@ _None_
 - institutional_stories
 - internet_history
 - local_history
-- unusual_historical_events
 - technology_history
 
 ## Strong hooks
