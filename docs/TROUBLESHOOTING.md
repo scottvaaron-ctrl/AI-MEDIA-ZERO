@@ -33,6 +33,12 @@ Run `aimz doctor` first; it names the missing piece and the fix. Logs: `data/log
 | YouTube upload `403 / quotaExceeded` | Default is 100 uploads/day; more requires an audit. Wait or reduce cadence |
 | YouTube upload `forbidden` / video private | Unverified API projects are locked to private until audited (see COMPLIANCE.md) |
 | Dashboard shows stale `.env` values | Restart `aimz dashboard` after editing `.env` (settings are read at startup) |
+| Scheduled task reports success but nothing ran | Windows Smart App Control blocks the unsigned `aimz.exe` shim in `.venv\Scripts`, and PowerShell does not fold a native launch failure into its own exit code. The task launches `python -m aimz` instead; `aimz schedule install` regenerates the runner. Check `data\logs\scheduled.log` for a `FATAL:` line |
+| Scheduled cycle never fires overnight | The task must allow battery, wake, and catch-up. `aimz schedule install` sets all three. It still cannot run while no one is signed in; it catches up at the next logon |
+
+Every scheduled run appends to `data\logs\scheduled.log`, bracketed by `=== cycle start ===`
+and `=== cycle end ... exit=N ===`. A missing end marker means the run was cut short; a non-zero
+`exit` is the cycle's own exit code.
 
 ## Resetting
 
