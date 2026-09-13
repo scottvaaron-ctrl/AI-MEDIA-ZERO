@@ -65,3 +65,14 @@ def test_cron_line_also_uses_the_interpreter(project: Path) -> None:
     line = scheduler.cron_line(project, ["09:00"])
     assert "-m aimz run" in line
     assert line.startswith("0 9 * * *")
+
+
+def test_runner_starts_ollama_before_the_cycle(project: Path) -> None:
+    body = scheduler.runner_script(project).read_text(encoding="utf-8")
+    # Scheduled runs failed with "model unreachable" when Ollama was not open.
+    assert "function Test-Ollama" in body
+    assert "127.0.0.1:11434/api/tags" in body
+    assert "Start-Process -FilePath $ollama.Source -ArgumentList 'serve'" in body
+    # The guard must run before the cycle, and give up loudly rather than run without a model.
+    assert body.index("Test-Ollama") < body.index("-m aimz run")
+    assert "FATAL: ollama did not answer" in body

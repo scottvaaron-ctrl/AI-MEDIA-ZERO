@@ -17,6 +17,34 @@ if (-not (Test-Path -LiteralPath $py)) {
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 
+# Ollama has to be serving before the cycle starts. Scheduled runs failed with
+# "model unreachable" whenever the Ollama app was not open, so start it here
+# and wait until its HTTP API answers. (Owner decision D-012/D-015, 2026-09-13.)
+$ollamaUrl = 'http://127.0.0.1:11434/api/tags'
+function Test-Ollama {
+    try { Invoke-WebRequest -UseBasicParsing -Uri $ollamaUrl -TimeoutSec 3 | Out-Null; return $true }
+    catch { return $false }
+}
+if (-not (Test-Ollama)) {
+    "ollama not serving; starting it $(Get-Date -Format o)" | Out-File -FilePath $log -Append -Encoding utf8
+    $ollama = Get-Command ollama -ErrorAction SilentlyContinue
+    if ($null -eq $ollama) {
+        "FATAL: ollama is not on PATH; install Ollama or add it to PATH" | Out-File -FilePath $log -Append -Encoding utf8
+        exit 1
+    }
+    Start-Process -FilePath $ollama.Source -ArgumentList 'serve' -WindowStyle Hidden
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 2
+        if (Test-Ollama) { $ready = $true; break }
+    }
+    if (-not $ready) {
+        "FATAL: ollama did not answer at $ollamaUrl within 60 s" | Out-File -FilePath $log -Append -Encoding utf8
+        exit 1
+    }
+    "ollama serving $(Get-Date -Format o)" | Out-File -FilePath $log -Append -Encoding utf8
+}
+
 # cmd.exe performs the redirect at the OS level. PowerShell 5.1's own `*>>`
 # wraps every stderr line in a NativeCommandError record and writes the file as
 # UTF-16, which leaves the log unreadable next to the UTF-8 markers above.
