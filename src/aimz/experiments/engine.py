@@ -81,7 +81,7 @@ def welch_confidence(a: ArmSummary, b: ArmSummary) -> float:
 
 
 ASSIGNABLE_VARIABLES: dict[str, set[str] | None] = {
-    "hook_type": None,  # validated against config hook_types
+    "hook_type": None,  # any label the channel uses (validated against config hook_types only if set)
     "runtime": None,  # integer seconds
     "target_platform": {"tiktok", "youtube_shorts", "both"},
 }

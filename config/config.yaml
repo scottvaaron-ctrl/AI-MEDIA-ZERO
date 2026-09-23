@@ -37,9 +37,10 @@ experiments:
 
 content:
   short_form:
-    min_seconds: 20
-    max_seconds: 90
-    target_seconds: 45
+    # Platform limits, not a style choice: YouTube Shorts are at most 180 s. The AI picks the runtime.
+    min_seconds: 10
+    max_seconds: 180
+    target_seconds: 45   # fallback only, for an idea saved without a runtime
     resolution: [1080, 1920]
     fps: 30
   long_form:
@@ -47,48 +48,11 @@ content:
     min_seconds: 240
     max_seconds: 900
     resolution: [1920, 1080]
-  # Starting hypotheses only. The AI may retire all of these and add new ones.
-  starting_families:
-    - key: strange_business_history
-      label: Strange business history
-      description: Odd, surprising, or absurd episodes from the history of companies and commerce.
-    - key: corporate_failures
-      label: Corporate failures
-      description: How and why notable companies, products, or projects collapsed.
-    - key: forgotten_history
-      label: Forgotten history
-      description: Historically significant events and people that most viewers have never heard of.
-    - key: infrastructure_systems
-      label: Infrastructure and systems
-      description: How large systems (grids, ports, networks, supply chains) actually work and fail.
-    - key: science_history_explainers
-      label: Science and history explainers
-      description: Clear explanations of a scientific or historical mechanism with a concrete payoff.
-    - key: maps_data_stories
-      label: Maps and data stories
-      description: Stories told primarily through a map, chart, or dataset.
-    - key: institutional_stories
-      label: Institutional stories
-      description: The strange inner workings of governments, agencies, courts, and bureaucracies.
-    - key: internet_history
-      label: Internet history
-      description: Origins and turning points of websites, protocols, and online cultures.
-    - key: local_history
-      label: Local history
-      description: Hyper-specific place-based stories with a universal angle.
-    - key: unusual_historical_events
-      label: Unusual historical events
-      description: Bizarre, little-known, well-documented events.
-    - key: technology_history
-      label: Technology history
-      description: Where everyday technologies actually came from and why they won.
-  hook_types:
-    - numeric_hook
-    - question_hook
-    - contrarian_hook
-    - narrative_hook
-    - stakes_hook
-    - visual_hook
+  # No starting content families or hook types: the AI names its own (constitution section 8).
+  # Removed by the owner on 2026-09-23; the eleven human-written starting families and six hook
+  # types are in git history.
+  starting_families: []
+  hook_types: []
 
 publishing:
   # Owner approval is required before anything leaves the machine.

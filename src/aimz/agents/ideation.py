@@ -9,19 +9,24 @@ from aimz.core.runs import RunContext
 from aimz.domain.models import IdeaBatch, IdeaDraft, SourceItemView
 from aimz.util import clamp, dumps, new_id, now_iso
 
+# Equal weights: the model rates each criterion; no human view of which matters most is layered on top.
+# What actually matters is learned from performance through family status (below) and the editor.
 SCORE_WEIGHTS = {
-    "hook_strength": 1.5,
-    "curiosity": 1.2,
-    "audience_relevance": 1.0,
-    "trend_velocity": 0.6,
-    "competition_gap": 0.8,
-    "source_quality": 1.0,
-    "originality": 1.0,
-    "evergreen_potential": 0.8,
-    "repeatability": 0.5,
-    "monetization_potential": 0.4,
-    "production_feasibility": 0.8,
-    "zero_budget_feasibility": 0.8,
+    k: 1.0
+    for k in (
+        "hook_strength",
+        "curiosity",
+        "audience_relevance",
+        "trend_velocity",
+        "competition_gap",
+        "source_quality",
+        "originality",
+        "evergreen_potential",
+        "repeatability",
+        "monetization_potential",
+        "production_feasibility",
+        "zero_budget_feasibility",
+    )
 }
 
 
@@ -93,19 +98,24 @@ class IdeationAgent(Agent):
         families = strategy_state["families"]
         active = {k: v for k, v in families.items() if v.get("status") != "retired"}
         fam_lines = "\n".join(
-            f"- {k}: {v.get('description') or v.get('label')} [status={v.get('status')}]"
+            f"- {k} [status={v.get('status')}, measured={v.get('n', 0)}, mean_score={v.get('mean_score')}]"
             for k, v in active.items()
         )
-        hooks = ", ".join(cfg.hook_types)
+        used_hooks = sorted(
+            {
+                r["hook_type"]
+                for r in self.svc.db.query("SELECT DISTINCT hook_type FROM ideas WHERE hook_type IS NOT NULL")
+            }
+        )
         sf = cfg.short_form
         user = (
             f"{self.strategy.prompt_summary(strategy_state)}\n\n"
-            f"Generate {n_ideas} candidate short-form video ideas ({sf.get('min_seconds', 20)}-{sf.get('max_seconds', 90)} seconds, vertical) from the leads below. "
+            f"Generate {n_ideas} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
             "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
-            "Prefer ideas with a concrete mechanism, a surprising but well-documented fact, and a clear payoff. "
-            "Spread ideas across different content families; you may propose a new family key (snake_case) if a lead clearly deserves one. "
+            "content_family and hook_type are your own labels (snake_case) for grouping ideas so results can be compared; reuse a label when an idea belongs to it, or create a new one. "
             "Score each criterion 0-10 honestly; do not inflate. zero_budget_feasibility must consider that visuals are limited to licensed archival photos, generated cards, charts and maps.\n\n"
-            f"Content families:\n{fam_lines}\n\nHook types: {hooks}\n\nLeads:\n{self.sources_block(leads, 500)}\n"
+            f"Content families so far:\n{fam_lines or '- none yet'}\n\n"
+            f"Hook types used so far: {', '.join(used_hooks) or 'none yet'}\n\nLeads:\n{self.sources_block(leads, 500)}\n"
         )
         with self.svc.tracker.agent(run, self.name, "generate", {"leads": [s.id for s in leads]}) as span:
             batch = self.ask(
@@ -144,7 +154,7 @@ class IdeationAgent(Agent):
                         "title": d.title.strip()[:120],
                         "premise": d.premise.strip(),
                         "hook": d.hook.strip(),
-                        "hook_type": d.hook_type.strip().lower(),
+                        "hook_type": d.hook_type.strip().lower().replace(" ", "_").replace("-", "_"),
                         "content_family": fam_key,
                         "target_platform": d.target_platform,
                         "format": "short",

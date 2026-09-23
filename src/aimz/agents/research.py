@@ -59,6 +59,36 @@ class ResearchAgent(Agent):
                 self.svc.db.update("sources", r["id"], {"enabled": 0, "updated_at": now_iso()})
         return len(feeds)
 
+    def enrich(self, run: RunContext, item_ids: list[str]) -> int:
+        """Fetch the full article behind each lead once, just before a script is written from it.
+
+        Only leads that reach the writer are fetched, so this costs a handful of page loads per cycle.
+        A page that cannot be read is recorded and the writer falls back to the feed summary.
+        """
+        fetched = 0
+        for item_id in item_ids:
+            row = self.svc.db.get("source_items", item_id)
+            if row is None or row["full_text_status"]:
+                continue
+            src = self.svc.db.get("sources", row["source_id"])
+            provider = self.svc.research.get(src["kind"] if src else "rss") or self.svc.research.get("rss")
+            if provider is None or not hasattr(provider, "fetch_article"):
+                continue
+            status, text = "skipped", None
+            with self.svc.tracker.agent(run, self.name, "article_fetch", {"source_item_id": item_id}) as span:
+                try:
+                    text = provider.fetch_article(self.pctx(run, item_id, span), row["url"])
+                    status = "skipped" if text is None else ("ok" if text else "empty")
+                except Exception as exc:  # a paywall or 403 is a data gap, not a run failure
+                    self.log.warning("article fetch failed for %s: %s", row["url"], exc)
+                    status = f"failed: {type(exc).__name__}: {str(exc)[:150]}"
+                span.output_refs["status"] = status
+            self.svc.db.update(
+                "source_items", item_id, {"full_text": text or None, "full_text_status": status}
+            )
+            fetched += status == "ok"
+        return fetched
+
     def run(self, run: RunContext, max_per_source: int | None = None) -> dict[str, Any]:
         self.sync_sources()
         window = int(self.svc.config.get("pipeline.freshness_window_days", 14))

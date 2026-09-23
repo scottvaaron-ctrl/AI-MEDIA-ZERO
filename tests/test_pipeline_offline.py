@@ -65,8 +65,8 @@ def test_full_cycle_offline(svc, orch, ffmpeg_available: bool) -> None:  # noqa:
     versions = orch.strategy.history()
     assert len(versions) >= 2 and versions[0]["created_by"] == "ai"
     assert (svc.env.config_dir / "strategy.md").read_text(encoding="utf-8").startswith("# Strategy Memory")
-    # experiment seeded at cold start
-    assert svc.db.count("experiments", "status='running'") == 1
+    # no experiment is seeded by code: experiments are the strategist's own (owner decision 2026-09-23)
+    assert svc.db.count("experiments", "created_by='ai' AND name LIKE 'Numeric vs narrative%'") == 0
     # learning summary written
     assert list((svc.env.data_dir / "reports").glob("daily_*.md"))
     if ffmpeg_available:

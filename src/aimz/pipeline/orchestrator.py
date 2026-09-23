@@ -126,6 +126,7 @@ class Orchestrator:
 
     def write_one(self, run: RunContext, idea: dict[str, Any], state: dict[str, Any]) -> str | None:
         max_rounds = int(self.svc.config.get("pipeline.max_revision_rounds", 2))
+        self.research.enrich(run, self.script.idea_source_ids(idea))
         sources = self.script.load_sources(self.script.idea_source_ids(idea))
         if not sources:
             self.svc.db.update(
@@ -154,7 +155,11 @@ class Orchestrator:
             fc_result, revisions = self.factcheck.check(run, script_id, draft, sources)
             sf = self.svc.config.short_form
             ok_len, len_msg = self.script.word_budget_ok(
-                draft, target_s, int(sf.get("min_seconds", 20)), int(sf.get("max_seconds", 90))
+                draft,
+                target_s,
+                int(sf.get("min_seconds", 10)),
+                int(sf.get("max_seconds", 180)),
+                enforce_target=self.script.runtime_under_test(idea),
             )
             if not ok_len:
                 revisions.append(len_msg)

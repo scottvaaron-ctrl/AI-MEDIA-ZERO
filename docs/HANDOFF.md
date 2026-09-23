@@ -113,7 +113,7 @@ tests/test_<platform>.py             httpx.MockTransport tests: happy path, cons
 payload in `snap.raw`). `AnalystAgent.collect_metrics()` stores it; the learning loop needs
 nothing else. Optional `fetch_comments()` feeds the comment agent.
 
-Video spec the renderer already produces: 1080x1920 H.264/AAC MP4, 30 fps, 20–90 s, 2–6 MB.
+Video spec the renderer already produces: 1080x1920 H.264/AAC MP4, 30 fps, 10–180 s (the AI picks the runtime; 180 s is the Shorts limit).
 Most platforms accept it unchanged. If a platform needs a different aspect ratio, add a profile
 in `config.yaml` `content.*` and let `ProducerAgent` render a second file; do not re-encode
 inside a publisher.

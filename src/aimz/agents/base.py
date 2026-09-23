@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -18,11 +19,40 @@ from aimz.util import loads
 
 T = TypeVar("T", bound=BaseModel)
 
+_WORD_RE = re.compile(r"[a-z0-9]{4,}")
+
+
+def relevant_excerpt(text: str, query: str, budget: int) -> str:
+    """Up to ``budget`` characters of ``text``: the lede plus the paragraphs sharing most words with
+    ``query`` (the lead's title and summary), kept in their original order.
+
+    A lead can link to a long page that is mostly about other things (Wikipedia year pages list a
+    hundred events), so truncating from the top would often cut the part the lead is about.
+    """
+    if len(text) <= budget:
+        return text
+    paras = [p for p in text.split("\n") if p.strip()]
+    terms = set(_WORD_RE.findall(query.lower()))
+    ranked = sorted(
+        range(len(paras)),
+        key=lambda i: (i != 0, -len(terms & set(_WORD_RE.findall(paras[i].lower()))), i),
+    )
+    keep: set[int] = set()
+    used = 0
+    for i in ranked:
+        if used + len(paras[i]) + 1 > budget:
+            continue
+        keep.add(i)
+        used += len(paras[i]) + 1
+    return "\n".join(paras[i] for i in sorted(keep)) or text[:budget]
+
+
+# Constitution section 5 (honesty, no engagement bait or fake urgency, no mass-produced AI slop), restated.
+# Style, tone and structure are left to the channel's own judgement (section 8).
 STYLE_RULES = (
-    "Writing rules: plain, concrete, specific. No engagement bait, no fake urgency, no 'you won't believe', "
-    "no 'like and subscribe', no rhetorical filler, no repetitive AI phrasing ('delve', 'in the realm of', "
-    "'it's important to note'). Never invent facts, quotes, numbers, names, or dates that are not in the sources. "
-    "If a detail is not in the sources, leave it out or say it is uncertain."
+    "Rules: no engagement bait and no fake urgency (e.g. 'you won't believe', 'like and subscribe'); "
+    "avoid stock AI phrasing ('delve', 'in the realm of', 'it's important to note'). Never invent facts, quotes, "
+    "numbers, names, or dates that are not in the sources. If a detail is not in the sources, leave it out or say it is uncertain."
 )
 
 
@@ -96,17 +126,23 @@ class Agent:
                     published_at=row["published_at"],
                     credibility=float(row["credibility"] or 0.5),
                     freshness_score=float(row["freshness_score"] or 0.5),
+                    full_text=row["full_text"] or "",
                 )
             )
         return out
 
     @staticmethod
-    def sources_block(sources: list[SourceItemView], max_summary: int = 700) -> str:
+    def sources_block(sources: list[SourceItemView], max_summary: int = 700, text_budget: int = 0) -> str:
+        """Sources for a prompt. ``text_budget`` > 0 adds fetched article text, shared across sources
+        (in characters, sized to fit the local model's 8k-token context alongside the rest of the prompt)."""
+        with_text = [s for s in sources if s.full_text]
+        share = text_budget // len(with_text) if text_budget and with_text else 0
         lines = []
         for s in sources:
-            lines.append(
-                f"- [{s.id}] ({s.source_name}, {s.published_at or 'undated'}, credibility {s.credibility:.2f}) {s.title}\n  URL: {s.url}\n  Summary: {s.summary[:max_summary]}"
-            )
+            line = f"- [{s.id}] ({s.source_name}, {s.published_at or 'undated'}, credibility {s.credibility:.2f}) {s.title}\n  URL: {s.url}\n  Summary: {s.summary[:max_summary]}"
+            if share and s.full_text:
+                line += f"\n  Article text: {relevant_excerpt(s.full_text, s.title + ' ' + s.summary, share)}"
+            lines.append(line)
         return "\n".join(lines) if lines else "(no sources)"
 
     @staticmethod

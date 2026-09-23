@@ -8,6 +8,7 @@ allocation and experiment engines compare across videos.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from aimz.db import Database
@@ -15,34 +16,54 @@ from aimz.domain.models import MetricsSnapshot
 from aimz.providers.base import AnalyticsProvider, HealthStatus, ProviderContext
 from aimz.util import clamp, dumps, new_id, now_iso
 
-# Weights follow the Editor-in-Chief's optimization goals: retention > shares > subs > completion.
-WEIGHTS = {"retention": 0.35, "shares": 0.25, "subs": 0.20, "completion": 0.20}
+# Weights follow the Editor-in-Chief's optimization goals: retention > shares > subs > completion,
+# plus reach: how many people the platform chose to show the video to is the audience's first verdict.
+WEIGHTS = {"retention": 0.35, "shares": 0.25, "subs": 0.20, "completion": 0.20, "reach": 0.20}
+
+# Percentages from a handful of viewers are noise: 19 views at 85% watched is not better evidence than
+# 250 views at 24%. Percent metrics are shrunk toward a neutral prior, worth this many views of evidence.
+PRIOR_VIEWS = 50
+PRIOR_PERCENT = 0.35
+# Shares and subscribers are rare events, so their per-1,000 rates need more views before they mean much.
+RATE_PRIOR_VIEWS = 200
+
+# Videos are compared at the same age: the first snapshot at least this old. Views level off within
+# about two days, and YouTube Analytics (retention, shares, subscribers) lags one to two days.
+SCORE_AT_HOURS = 72.0
+
+
+def _shrunk(pct: float, views: int) -> float:
+    return (clamp(pct / 100.0, 0, 1) * views + PRIOR_PERCENT * PRIOR_VIEWS) / (views + PRIOR_VIEWS)
 
 
 def performance_score(m: dict[str, Any]) -> float | None:
-    """0..1 composite from a metrics row. Returns None when nothing usable is present."""
-    views = m.get("views") or 0
+    """0..1 composite from a metrics row. Returns None when nothing usable is present.
+
+    Every component is computed the same way at every view count, so a video that reached few
+    people cannot outscore one that reached many just because some metrics were skipped for it.
+    """
+    if m.get("views") is None:
+        return None  # no denominator (Bluesky reports none): rates and reach cannot be compared
+    views = int(m["views"])
     parts: list[tuple[float, float]] = []
-    if m.get("avg_percent_viewed") is not None:
-        parts.append((WEIGHTS["retention"], clamp(float(m["avg_percent_viewed"]) / 100.0, 0, 1)))
-    elif m.get("retention_3s") is not None:
-        parts.append((WEIGHTS["retention"], clamp(float(m["retention_3s"]) / 100.0, 0, 1)))
-    if views >= 50:
-        if m.get("shares") is not None:
-            parts.append(
-                (WEIGHTS["shares"], clamp((m["shares"] / views * 1000) / 15.0, 0, 1))
-            )  # 15 shares/1k = max
-        gained = m.get("subscribers_gained")
-        if gained is None:
-            gained = m.get("followers_gained")
-        if gained is not None:
-            parts.append((WEIGHTS["subs"], clamp((gained / views * 1000) / 10.0, 0, 1)))  # 10 subs/1k = max
+    pct = m.get("avg_percent_viewed")
+    if pct is None:
+        pct = m.get("retention_3s")
+    if pct is not None:
+        parts.append((WEIGHTS["retention"], _shrunk(float(pct), views)))
+    if m.get("shares") is not None:
+        # per 1,000 views, with RATE_PRIOR_VIEWS added to the denominator so 1 share on 5 views is not 200/1k
+        rate = m["shares"] * 1000 / (views + RATE_PRIOR_VIEWS)
+        parts.append((WEIGHTS["shares"], clamp(rate / 15.0, 0, 1)))  # 15 shares/1k = max
+    gained = m.get("subscribers_gained")
+    if gained is None:
+        gained = m.get("followers_gained")
+    if gained is not None:
+        rate = gained * 1000 / (views + RATE_PRIOR_VIEWS)
+        parts.append((WEIGHTS["subs"], clamp(rate / 10.0, 0, 1)))  # 10 subs/1k = max
     if m.get("completion_rate") is not None:
-        parts.append((WEIGHTS["completion"], clamp(float(m["completion_rate"]) / 100.0, 0, 1)))
-    if not parts:
-        if views:
-            return clamp(views / 5000.0, 0, 0.3)  # views alone are a weak signal; cap it
-        return None
+        parts.append((WEIGHTS["completion"], _shrunk(float(m["completion_rate"]), views)))
+    parts.append((WEIGHTS["reach"], clamp(math.log10(1 + views) / 4.0, 0, 1)))  # 10,000 views = max
     wsum = sum(w for w, _ in parts)
     return sum(w * v for w, v in parts) / wsum
 
@@ -118,8 +139,27 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
         )
         return [dict(r) for r in rows]
 
+    def scoring_snapshot(self, latest: dict[str, Any]) -> dict[str, Any] | None:
+        """The snapshot a publication is scored on, or None while it is too young to compare.
+
+        The first API snapshot at least SCORE_AT_HOURS old, so every video is judged at the same age.
+        Owner-entered (manual) numbers and snapshots with no known age are used as they are.
+        """
+        if latest.get("source") == "manual" or latest.get("hours_since_post") is None:
+            return latest
+        row = self.db.one(
+            "SELECT * FROM metrics WHERE publication_id=? AND hours_since_post >= ? "
+            "ORDER BY hours_since_post LIMIT 1",
+            [latest["publication_id"], SCORE_AT_HOURS],
+        )
+        return dict(row) if row else None
+
     def video_performance(self) -> list[dict[str, Any]]:
-        """One row per published video with its latest metrics, idea attributes, and composite score."""
+        """One row per published video with its latest metrics, idea attributes, and composite score.
+
+        The metric columns are the latest snapshot; ``score`` comes from :meth:`scoring_snapshot` and is
+        None until the video is old enough to compare fairly.
+        """
         out: list[dict[str, Any]] = []
         for m in self.latest_per_publication():
             v = self.db.get("videos", m["video_id"])
@@ -127,7 +167,8 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
                 continue
             idea = self.db.get("ideas", v["idea_id"])
             pub = self.db.get("publications", m["publication_id"])
-            score = performance_score(m)
+            snap = self.scoring_snapshot(m)
+            score = performance_score(snap) if snap else None
             out.append(
                 {
                     **m,

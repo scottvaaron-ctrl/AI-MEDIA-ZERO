@@ -6,7 +6,7 @@ This is the feedback loop. Every cycle:
 2. compute per-family / per-hook / per-runtime / per-source statistics from *measured* videos;
 3. evaluate running experiments (no conclusions below the minimum sample);
 4. ask the model for a StrategyUpdate given those numbers, then merge it with guard-rails;
-5. seed a first experiment at cold start if none is running;
+5. start the strategist's own experiment proposal, or report why it cannot run;
 6. save a new strategy version and a daily learning summary.
 
 The next cycle's Editor-in-Chief and Ideation agents consume the saved strategy.
@@ -21,20 +21,10 @@ from typing import Any
 
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
-from aimz.domain.models import ExperimentProposal, StrategyUpdate
+from aimz.domain.models import StrategyUpdate
 from aimz.experiments.allocation import family_stats
 from aimz.experiments.engine import ExperimentEngine
 from aimz.util import now_iso
-
-COLD_START_EXPERIMENT = ExperimentProposal(
-    name="Numeric vs narrative hook on retention",
-    hypothesis="Opening with a specific number improves early retention compared with a narrative opening.",
-    variable="hook_type",
-    control="narrative_hook",
-    treatment="numeric_hook",
-    primary_kpi="avg_percent_viewed",
-    secondary_kpi="shares_per_1000",
-)
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -187,11 +177,14 @@ class AnalystAgent(Agent):
         user = (
             "Update the strategy memory using ONLY the evidence below. Be conservative: with fewer than ~5 measured videos per family, keep statuses at 'testing' or 'hypothesis'. "
             "Do not declare winners from tiny samples; do not let one video lock the strategy. Propose at most one new experiment, only if none is running on that variable. "
+            "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels), "
+            "runtime (two integer runtimes in seconds), or target_platform (tiktok, youtube_shorts, both). "
             "Suggest an explore ratio between 0.25 and 0.8 that fits the evidence (more evidence -> less exploration). Write a one-paragraph audience model and a concise change_summary.\n\n"
             f"Measured videos: {ev['measured_videos']} (published {ev['published_videos']}, rendered {ev['rendered_videos']})\n"
             f"Families:\n{fam_lines}\nHooks:\n{hook_lines}\nRuntime buckets:\n{rt_lines}\nSources:\n{src_lines}\nExperiments:\n{exp_lines}\n"
             f"Top videos:\n{top_lines}\nProduction bottlenecks: {ev['bottlenecks']}\n"
-            f"Audience requests so far: {'; '.join(strategy_state.get('audience_requests', [])) or 'none'}\n\n"
+            f"Audience requests so far: {'; '.join(strategy_state.get('audience_requests', [])) or 'none'}\n"
+            f"Your last experiment proposal that could not run: {self.svc.db.get_state('last_rejected_experiment') or 'none'}\n\n"
             f"Current strategy:\n{self.strategy.prompt_summary(strategy_state)}"
         )
         with self.svc.tracker.agent(
@@ -217,20 +210,22 @@ class AnalystAgent(Agent):
                 )
             # experiments: retire on request, propose new (engine enforces concurrency / duplicates)
             for eid in upd.retire_experiment_ids:
-                if self.svc.db.get("experiments", eid):
+                exp = self.svc.db.get("experiments", eid)
+                if exp and exp["status"] == "running":  # the model re-lists retired ids every cycle
                     self.experiments.retire(eid)
+            # Experiments are the strategist's own; none is seeded by code. A proposal the engine cannot run
+            # is reported back in the next prompt instead of being dropped silently.
             for prop in upd.new_experiments[:1]:
-                self.experiments.propose(
+                started = self.experiments.propose(
                     prop,
                     created_by="ai",
                     min_sample=int(self.svc.config.get("experiments.default_min_sample_per_arm", 8)),
                 )
-            if not self.experiments.running():
-                self.experiments.propose(
-                    COLD_START_EXPERIMENT,
-                    created_by="ai",
-                    min_sample=int(self.svc.config.get("experiments.default_min_sample_per_arm", 8)),
-                )
+                if started is None:
+                    why = self.experiments.validate(prop) or (
+                        "an experiment on that variable is already running, or the concurrent limit is reached"
+                    )
+                    self.svc.db.set_state("last_rejected_experiment", f"{prop.name}: {why}")
             exps = {
                 "active": [f"{e['id']}: {e['name']}" for e in self.experiments.running()],
                 "retired": [

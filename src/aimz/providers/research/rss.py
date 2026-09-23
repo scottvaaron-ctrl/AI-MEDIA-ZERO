@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import time
 from datetime import UTC, datetime
 from time import mktime
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlencode
 
 import feedparser
 import httpx
@@ -21,6 +22,7 @@ from aimz.providers.base import HealthStatus, ProviderContext, ResearchProvider
 log = logging.getLogger("aimz.research.rss")
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_WS_LINES_RE = re.compile(r"\n\s*\n+")
 
 
 def strip_html(s: str) -> str:
@@ -110,6 +112,26 @@ def _split_wikipedia_onthisday(entry: Any) -> list[tuple[str, str]]:
     return out
 
 
+_PARA_RE = re.compile(r"<p\b[^>]*>(.*?)</p>", re.DOTALL | re.IGNORECASE)
+_DROP_BLOCKS_RE = re.compile(
+    r"<(script|style|nav|header|footer|aside|form|noscript)\b.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+# Links that are not articles: the lead text is the whole content.
+_NO_ARTICLE_HOSTS = ("reddit.com", "bsky.app", "news.ycombinator.com")
+
+
+def article_text_from_html(raw: str, max_chars: int) -> str:
+    """Readable body text from an article page: its <p> paragraphs, minus page chrome."""
+    raw = _DROP_BLOCKS_RE.sub(" ", raw)
+    paras = [strip_html(p) for p in _PARA_RE.findall(raw)]
+    return "\n".join(p for p in paras if len(p) >= 60)[:max_chars]
+
+
+def wikipedia_title(url: str) -> str | None:
+    m = re.match(r"https?://en\.(?:m\.)?wikipedia\.org/wiki/([^?#]+)", url)
+    return unquote(m.group(1)).replace("_", " ") if m else None
+
+
 class RSSResearchProvider(ResearchProvider):
     name = "RSSResearchProvider"
     kinds = ("rss", "atom", "wikipedia_onthisday", "wikipedia_featured", "reddit_rss")
@@ -146,6 +168,35 @@ class RSSResearchProvider(ResearchProvider):
                 return r.content
 
         return retry(_get, attempts=2, base_delay=1.5, label=f"fetch {url}")
+
+    def fetch_article(self, ctx: ProviderContext, url: str, max_chars: int = 12000) -> str | None:
+        """Full text behind a lead's link, or None when the link is not an article.
+
+        Wikipedia goes through its API (plain-text extract); other hosts are public pages read
+        once, like a person following the link. Nothing behind a login is fetched.
+        """
+        host = url.split("/")[2].lower() if "://" in url else ""
+        if not host or any(host == h or host.endswith("." + h) for h in _NO_ARTICLE_HOSTS):
+            return None
+        title = wikipedia_title(url)
+        with self.authorized(ctx, "article_fetch"):
+            if title:
+                api = "https://en.wikipedia.org/w/api.php?" + urlencode(
+                    {
+                        "action": "query",
+                        "prop": "extracts",
+                        "explaintext": 1,
+                        "redirects": 1,
+                        "format": "json",
+                        "titles": title,
+                    }
+                )
+                data = json.loads(self._download(api))
+                pages = (data.get("query") or {}).get("pages") or {}
+                text = "\n".join(str(p.get("extract") or "") for p in pages.values())
+                return _WS_LINES_RE.sub("\n", text).strip()[:max_chars]
+            raw = self._download(url).decode("utf-8", errors="replace")
+        return article_text_from_html(raw, max_chars)
 
     def fetch(self, ctx: ProviderContext, source: dict[str, Any]) -> list[FetchedItem]:
         url = source["url"]

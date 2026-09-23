@@ -12,15 +12,6 @@ from aimz.util import dumps, estimate_speech_seconds, new_id, now_iso, words
 
 WORDS_PER_SECOND = 2.6
 
-HOOK_GUIDE = {
-    "numeric_hook": "open with a specific, sourced number or date in the first sentence",
-    "question_hook": "open with a sharp, concrete question the video will answer",
-    "contrarian_hook": "open by contradicting a common belief, then prove it",
-    "narrative_hook": "open in the middle of a specific scene or moment",
-    "stakes_hook": "open with what was at stake or what went wrong",
-    "visual_hook": "open by describing something the viewer is looking at on screen",
-}
-
 
 class ScriptAgent(Agent):
     name = "script"
@@ -37,26 +28,37 @@ class ScriptAgent(Agent):
     ) -> tuple[str, ScriptDraft]:
         cfg = self.svc.config
         sf = cfg.short_form
+        min_s, max_s = int(sf.get("min_seconds", 10)), int(sf.get("max_seconds", 180))
         target_s = int(idea.get("suggested_runtime_s") or sf.get("target_seconds", 45))
-        target_s = max(int(sf.get("min_seconds", 20)), min(int(sf.get("max_seconds", 90)), target_s))
-        min_words = int(target_s * WORDS_PER_SECOND * 0.75)
-        max_words = int(target_s * WORDS_PER_SECOND * 1.15)
-        hook_type = (idea.get("hook_type") or "narrative_hook").lower()
+        target_s = max(min_s, min(max_s, target_s))
+        if self.runtime_under_test(idea):
+            runtime_line = (
+                f"Runtime: {target_s}s (this idea is in a runtime experiment) -> "
+                f"{int(target_s * WORDS_PER_SECOND * 0.6)}-{int(target_s * WORDS_PER_SECOND * 1.4)} spoken words; outside this range is rejected."
+            )
+        else:
+            runtime_line = (
+                f"Runtime: your ideation estimate was {target_s}s. The script may be any length from {min_s}s to {max_s}s "
+                f"({int(min_s * WORDS_PER_SECOND)}-{int(max_s * WORDS_PER_SECOND)} spoken words); let the facts in the sources decide."
+            )
+        hook_type = (idea.get("hook_type") or "").lower()
         banned = ", ".join(f"'{b}'" for b in cfg.banned_patterns)
+        # Only the channel's own choices (from ideation, the editor and its experiments), the constitution,
+        # and what the renderer can physically do go in here. Structure, pacing and style are the AI's call.
         user = (
-            f"Write a short-form vertical video script.\n\n"
+            f"Write a vertical short-form video script.\n\n"
             f"Title: {idea['title']}\nPremise: {idea['premise']}\nHook: {idea['hook']}\n"
-            f"Required hook type: {hook_type} ({HOOK_GUIDE.get(hook_type, 'strong, specific opening')}).\n"
-            f"Content family: {idea['content_family']}\nTarget runtime: {target_s}s -> {min_words}-{max_words} spoken words total.\n\n"
-            "Structure: immediate hook (beat 1, one sentence, no preamble), clear tension/mechanism, a payoff the viewer can repeat to a friend, "
-            f"and a final beat that points to sources in the description. Minimal filler. 6-8 beats of 18-30 spoken words each (about {min_words}-{max_words} words in total; scripts under {min_words} words are rejected). "
-            "Each beat needs a short caption (max 8 words) and a visual: 'image' with a visual_query (a concrete search phrase for a licensed archival photo, e.g. a place, object, or person), "
-            "or 'text_card' / 'stat_card' / 'quote_card' with the card text in visual_query. At least two beats must be 'image' beats with a concrete, photographable visual_query (a named place, object, machine, document, or landscape).\n"
-            f"Banned phrases: {banned}. Do not address the viewer with generic engagement bait.\n"
+            + (f"Hook type chosen for this idea: {hook_type}.\n" if hook_type else "")
+            + f"Content family: {idea['content_family']}\n{runtime_line} Narration is read at about {WORDS_PER_SECOND} words per second.\n\n"
+            f"How the video is built: the script is a sequence of {ScriptDraft.MIN_BEATS}-{ScriptDraft.MAX_BEATS} beats; the renderer shows one visual per beat while its narration plays. "
+            "Each beat has a caption (on-screen text; more than about 8 words will not fit) and a visual: 'image' with a visual_query "
+            "(a search phrase for a licensed archival photo, so it must name something photographable), or 'text_card' / 'stat_card' / 'quote_card' "
+            "with the card text in visual_query.\n"
+            f"Banned phrases: {banned}. Do not address the viewer with engagement bait.\n"
             "List every factual claim (dates, numbers, names, events) in `claims` with the beat index and the source ids that support it. "
             "Only use facts present in the sources below; if the sources do not say it, do not say it.\n\n"
-            f"Sources:\n{self.sources_block(sources)}\n\n"
-            f"Strategy context (for tone and format decisions only):\n{self.strategy.prompt_summary(strategy_state, 1500)}\n"
+            f"Sources:\n{self.sources_block(sources, text_budget=5000)}\n\n"
+            f"Channel strategy memory (your own notes on what has worked):\n{self.strategy.prompt_summary(strategy_state, 1500)}\n"
         )
         if feedback:
             user += "\n\nREVISION REQUIRED. Fix all of the following before returning:\n" + "\n".join(
@@ -136,22 +138,31 @@ class ScriptAgent(Agent):
         self.svc.db.update("ideas", idea["id"], {"status": "scripted", "updated_at": now_iso()})
         return script_id
 
+    def runtime_under_test(self, idea: dict[str, Any]) -> bool:
+        """True when the idea is an arm of a running experiment on runtime, so its runtime is binding."""
+        if not idea.get("experiment_id"):
+            return False
+        exp = self.svc.db.get("experiments", idea["experiment_id"])
+        return bool(exp and exp["variable"] == "runtime")
+
     @staticmethod
     def word_budget_ok(
-        draft: ScriptDraft, target_s: int, min_s: int = 20, max_s: int = 90
+        draft: ScriptDraft, target_s: int, min_s: int = 10, max_s: int = 180, enforce_target: bool = False
     ) -> tuple[bool, str]:
-        """Hard bounds come from the platform (20-90s); the suggested runtime is only guidance."""
+        """Hard bounds come from the platform. The idea's runtime is the AI's own estimate and binds only when
+        runtime is the variable under test: forcing a script up to an estimate the sources cannot fill is
+        what pushed the writer to pad with invented detail."""
         n = sum(words(b.narration) for b in draft.beats)
-        lo = int(max(min_s, target_s * 0.6) * WORDS_PER_SECOND)
-        hi = int(max_s * WORDS_PER_SECOND)
+        lo = int((max(min_s, target_s * 0.6) if enforce_target else min_s) * WORDS_PER_SECOND)
+        hi = int((min(max_s, target_s * 1.4) if enforce_target else max_s) * WORDS_PER_SECOND)
         if n < lo:
             return (
                 False,
-                f"Script is too short: {n} spoken words. Add at least {lo - n} more words of sourced detail (target about {int(target_s * WORDS_PER_SECOND)} words for ~{target_s}s).",
+                f"Script is too short: {n} spoken words; the minimum is {lo}. Add {lo - n} or more words using only facts in the sources.",
             )
         if n > hi:
             return (
                 False,
-                f"Script is too long: {n} spoken words. Cut at least {n - hi} words (target about {int(target_s * WORDS_PER_SECOND)} words).",
+                f"Script is too long: {n} spoken words; the maximum is {hi}. Cut at least {n - hi} words.",
             )
         return True, ""

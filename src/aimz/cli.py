@@ -119,9 +119,16 @@ def run(
         summary = _orch(svc).cycle(
             [s.strip() for s in stages.split(",")] if stages else None, produce_limit=limit
         )
+        last = svc.db.query(
+            "SELECT status, error FROM runs WHERE kind='cycle' ORDER BY started_at DESC LIMIT 1"
+        )
     finally:
         svc.close()
     _print_json(summary)
+    if last and last[0]["status"] == "degraded":
+        console.print(f"[yellow]run degraded[/]: {last[0]['error']}")
+        # Exit 2 so the scheduler log and Task Scheduler's "last run result" show it.
+        raise typer.Exit(2)
 
 
 @app.command()

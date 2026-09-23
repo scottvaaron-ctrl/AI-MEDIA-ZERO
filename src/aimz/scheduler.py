@@ -79,6 +79,23 @@ if ($null -eq $code) {{
 }}
 
 "=== cycle end $(Get-Date -Format o) exit=$code ===" | Out-File -FilePath $log -Append -Encoding utf8
+
+# A cycle that fails, or finishes degraded (exit 2: e.g. an expired platform token),
+# raises a Windows notification. Unattended failures otherwise go unseen for days.
+if ($code -ne 0) {{
+    try {{
+        $msg = if ($code -eq 2) {{ 'Cycle finished with errors. Run: python -m aimz status' }} else {{ "Cycle failed (exit $code). See data\\logs\\scheduled.log" }}
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+        $text = $xml.GetElementsByTagName('text')
+        $text.Item(0).AppendChild($xml.CreateTextNode('AI Media Zero')) | Out-Null
+        $text.Item(1).AppendChild($xml.CreateTextNode($msg)) | Out-Null
+        $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe'
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+    }} catch {{
+        "notification failed: $_" | Out-File -FilePath $log -Append -Encoding utf8
+    }}
+}}
 exit $code
 """
 

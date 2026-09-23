@@ -43,6 +43,7 @@ class SourceItemView(BaseModel):
     published_at: str | None = None
     credibility: float = 0.5
     freshness_score: float = 0.5
+    full_text: str = ""  # the article behind the link, fetched before writing (empty if unavailable)
 
 
 # --------------------------------------------------------------------------------------
@@ -117,22 +118,24 @@ class ClaimDraft(BaseModel):
 class ScriptDraft(BaseModel):
     title: str = Field(min_length=4, max_length=100)
     hook_line: str = Field(min_length=5)
-    beats: list[Beat] = Field(min_length=5, max_length=14)
+    beats: list[Beat] = Field(min_length=3, max_length=14)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     thumbnail_concept: str = ""
     claims: list[ClaimDraft] = Field(default_factory=list)
 
-    MIN_WORDS: ClassVar[int] = 60
+    # Renderer limits, not style: fewer than 3 beats is a single still; 14 bounds asset searches per video.
+    MIN_BEATS: ClassVar[int] = 3
+    MAX_BEATS: ClassVar[int] = 14
+    # About the shortest runtime the channel publishes (10 s at 2.6 words/s), so an empty draft fails fast.
+    MIN_WORDS: ClassVar[int] = 25
 
     @model_validator(mode="after")
     def _enough_words(self) -> ScriptDraft:
         # Enforced in the schema so a thin draft fails validation and the error is fed back to the model.
         n = sum(len(b.narration.split()) for b in self.beats)
         if n < self.MIN_WORDS:
-            raise ValueError(
-                f"beats contain only {n} spoken words; write at least {self.MIN_WORDS} words across 5-8 beats of 18-30 words each"
-            )
+            raise ValueError(f"beats contain only {n} spoken words; write at least {self.MIN_WORDS}")
         return self
 
 
@@ -176,6 +179,8 @@ class CriticResult(BaseModel):
     deserves_video: bool = True
     elevated_review_required: bool = False
     elevated_review_reasons: list[str] = Field(default_factory=list)
+    # Exact words from the script behind each elevated reason; reasons without a verifiable quote are dropped.
+    elevated_review_evidence: list[str] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 

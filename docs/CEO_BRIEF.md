@@ -1,7 +1,7 @@
 # AI Media Zero: Brief for the CEO and the CEO's AI Agent
 
-_Snapshot as of 2026-09-13. Numbers come from `aimz status`, `aimz analytics` and
-`data/reports/daily_2026-09-12.md`._
+_Snapshot as of 2026-09-23 (evening). Numbers come from `aimz status`, `aimz analytics`, the `metrics` and
+`errors` tables and `data/reports/daily_2026-09-23.md`._
 
 ---
 
@@ -36,27 +36,47 @@ Any call that would cost money is refused before it runs.
 ### Where it is today
 | Platform | Status | Gives learning data? |
 |---|---|---|
-| YouTube Shorts ("Backhouse Explainers") | Live, public, posting automatically | Yes, 1-2 days late |
+| YouTube Shorts ("Backhouse Explainers") | Reconnected 23 Sep after its login expired 19 Sep | Yes, 1-2 days late |
 | Bluesky (@backhouse06.bsky.social) | Live, public, posting automatically | Yes, within hours |
 | TikTok (backhouse67) | Working, but private until TikTok approves the app | No |
 
-**Early results:** 13 publications. The first three measured YouTube videos drew **257, 199 and 119
-views**, with viewers watching 24% to 48% of each video on average. Spend so far is **$0.00**.
-The AI rates its own confidence at **0.10 out of 1**. That is correct: three data points tell it
-almost nothing yet. It is testing three topic families and running one A/B test (number-led vs.
-story-led openings). An early hint is that 35-60 second videos do better than shorter ones.
+**Results so far:** 5 videos on YouTube (last one 14 Sep), **650 views** in total as of 23 Sep:
+252, 197, 123, 59 and 19. Viewers watched 24% to 85% of each video. No likes, comments or
+subscribers yet. Views stop growing about 2 days after posting. Spend so far is **$0.00**.
+
+**What the AI has learned: almost nothing new since 13 Sep.** Its strategy notes went from version 12
+to 22, but every update re-read the same 5 measurements, because YouTube data stopped arriving on
+14 Sep. Confidence is still **0.10 out of 1**. Its only two leads are still hints from one or two
+videos each: 35-60 second videos beat shorter ones, and a number-led opening (1 video) beat
+story-led ones (4 videos). The A/B test has no videos in the number-led arm yet.
+
+**Why it stalled:**
+1. **YouTube login expired on 19 Sep.** The 19 Sep video ("The 1945 Borneo POW Camp Rescue") failed
+   to upload, and every metrics read since has failed. Runs still report "ok", so nothing raised an
+   alarm. Google expires these logins after 7 days while the Google Cloud app is in "Testing" mode.
+2. **Almost no new videos.** Only one video was made after 14 Sep. Scripts keep failing the quality
+   checks (41 failed QA, 21 rejected in total), and today's run approved 0 scripts.
+3. **Skipped days.** No runs on 15-17 or 20-21 Sep, most likely because the laptop was off or asleep.
+
+**Fixed on 23 Sep:** YouTube is reconnected. Failed runs now pop up a Windows alert. The writer now
+gets the full article instead of a one-line summary, which should cut the invented-fact rejections.
+The scoring no longer rates a video 19 people saw above one 250 people saw. None of these
+changes tell the AI what content to make.
 
 ### What is honest to say
 - **It works end to end.** Real videos go out on real platforms with no human in the loop and no cost.
 - **It is too early to judge the learning.** Meaningful signals need dozens of videos, which means
   weeks of running.
 - **Quality is limited by free tools.** A small local model writes thinner scripts than paid models.
-  Of the ideas it attempted, 18 scripts failed quality checks and 10 were rejected. The filters are
-  doing their job.
-- **Reliability depends on the laptop.** If it is asleep or the local AI isn't running, the cycle
-  fails quietly. The last run (12 Sep) reported the AI model as unreachable, with 9 errors in 24 hours.
+  So far 41 scripts failed quality checks and 21 were rejected, mostly for stating facts their
+  sources did not contain. The filters are doing their job.
+- **Reliability depends on the laptop.** If it is asleep, the cycle is skipped. A lost login also
+  fails quietly: runs report "ok" while YouTube errors pile up (15 in the last 24 hours).
 
 ### Decisions for the CEO
+0. **Now:** YouTube was reconnected on 23 Sep. To stop the login expiring again every 7 days, set
+   the Google Cloud OAuth app's publishing status to **In production**. The owner approved the 9
+   scripts that were waiting in `needs_owner_review` on 23 Sep.
 1. **Keep running at $0** to finish the experiment as designed, or **fund a V1**. Adding money is a
    settings change plus new plug-ins, not a rewrite. Best return per dollar, in order: a better
    script-writing model, a better voice, stock footage. See `docs/FUNDED_V1.md`.
@@ -120,7 +140,10 @@ which logs to `data\logs\scheduled.log`.
 - **TikTok (unaudited):** needs `SELF_ONLY` **and** a private account, otherwise you get HTTP 403.
   `publicaly_available_post_id` is never returned, so TikTok yields no metrics until the audit passes.
 - **Bluesky:** no audit. Read the AT Protocol lexicon JSON on GitHub; the docs site returns empty.
-- **YouTube:** the API audit has cleared and uploads land public. Analytics lag 1-2 days.
+- **YouTube:** the API audit has cleared and uploads land public. Analytics lag 1-2 days. The OAuth
+  refresh token died with `invalid_grant` on 2026-09-19 (the last good call was 2026-09-14). This
+  matches the 7-day limit for Google OAuth apps in "Testing" status. Fix: `aimz youtube auth`, and
+  publish the OAuth consent screen to Production.
 - In general, mocks built from docs have passed while real calls failed. Verify against the live API
   before trusting a test.
 
@@ -132,11 +155,44 @@ switch, validation and the no-retry rule. Use `bluesky.py` as the template. Full
 `docs/HANDOFF.md` section 4.
 
 ### Known open issues
-- Scheduled runs fail when Ollama isn't running or the laptop sleeps (last run: model unreachable,
-  9 errors in 24h). Consider starting Ollama inside `run-cycle.ps1` and adding a wake timer.
+- **Fixed 2026-09-23 (owner-approved; engineering only, no creative direction added):**
+  - Runs that record errors now finish `degraded` instead of `ok`, `aimz run` exits 2, and
+    `run-cycle.ps1` raises a Windows notification. The YouTube outage went 4 days unseen.
+  - Elevated-review flags from the critic count only if it quotes the script. The small model was
+    echoing the whole topic list, which sent 6 of 9 queued scripts to the owner (one was about a moon of Jupiter).
+    The keyword backstop still applies and now matches at word starts.
+  - The writer, fact-checker and critic now get the full article behind each lead
+    (`ResearchAgent.enrich`, migration 0002). QA failures were mostly the writer padding thin feed
+    summaries with invented facts.
+  - The score treats every view count the same way: percentages are shrunk toward a prior, share and
+    subscriber rates are smoothed, a reach term (log views) is added, and each video is scored at its
+    first snapshot at least 72 hours after posting. The old formula scored 19 views at 85% watched as
+    0.85 and 252 views at 24% as 0.11. The new one gives 0.24 and 0.21.
+- **The 19 Sep Borneo video failed to upload** and is not retried automatically. The owner re-uploads it or lets it go.
+- **The analyst repeats itself.** Every version retires an experiment that is already retired and
+  proposes experiments that `ExperimentEngine.validate` silently drops. Its explore-ratio cuts are held
+  at 0.7 by design until 12 videos are measured, but the change_summary still reports them as applied.
+- **Human creative direction removed (owner decision, 2026-09-23).** Constitution section 8 gives the AI
+  control of topics, formats, hooks and length, and the owner confirmed it. Removed:
+  - the eleven starting content families and six hook types in `config.yaml` (the 8 never tried were
+    also dropped from strategy memory, v23)
+  - the hook-type style guide and the fixed script structure (6-8 beats, hook/tension/payoff, at least 2 image beats)
+  - the "prefer a mechanism, surprising fact, payoff" and "spread across families" ideation nudges
+  - the uneven idea-scoring weights (now equal)
+  - the auto-seeded "numeric vs narrative hook" experiment (retired)
+  - the critic's pass/fail gate on hook, pacing, payoff and clarity; it now gates only on factual
+    support and originality, which the constitution requires
+  - the human 20-90 s length range; the range is now 10-180 s, the platform limits
+  - the rule that padded scripts up to the ideation runtime estimate, which forced the writer to invent detail
+  Kept: constitution rules (honesty, no engagement bait, no AI-slop phrasing, safety review), the
+  owner's goal ranking for the editor, renderer limits, and the owner-controlled feed list. The
+  renderer's visual design (card layouts, fonts) is still human-made; the AI has no control over it yet.
+- **Bluesky reports no view counts**, so its posts get no score and do not feed learning.
+- Scheduled runs are skipped when the laptop is off. The owner confirmed it was off on 15-17 and
+  20-21 Sep. Wake-to-run covers sleep, not shutdown, and an always-on machine is still decision 2.
 - The TikTok chunked-upload response codes for files over 64 MB and the Display API field list are
   still unverified.
-- Sample size is tiny (3 measured videos). Do not draw strategy conclusions yet.
+- Sample size is tiny (5 measured videos, 4 families). Do not draw strategy conclusions yet.
 
 ### How to report to the CEO
 Lead with: publications this week, views and average % viewed by platform, dollars spent (should be

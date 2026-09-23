@@ -24,7 +24,9 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _source_text(sources: list[SourceItemView]) -> str:
-    return " ".join(f"{s.title} {s.summary} {s.published_at or ''} {s.url}" for s in sources).lower()
+    return " ".join(
+        f"{s.title} {s.summary} {s.full_text} {s.published_at or ''} {s.url}" for s in sources
+    ).lower()
 
 
 def unsupported_specifics(draft: ScriptDraft, sources: list[SourceItemView]) -> list[str]:
@@ -69,7 +71,7 @@ class FactCheckAgent(Agent):
             "Never add new facts. Overall: 'pass' if all supported/weak-with-rewrite, 'revise' if some need fixing, 'reject' if the core premise is contradicted or unverifiable.\n\n"
             f"Claims:\n{claims_block}\n\nScript narration:\n"
             + " ".join(b.narration for b in draft.beats)
-            + f"\n\nSources:\n{self.sources_block(sources, 900)}\n"
+            + f"\n\nSources:\n{self.sources_block(sources, 900, text_budget=5000)}\n"
         )
         with self.svc.tracker.agent(run, self.name, "verify", {"script_id": script_id}) as span:
             try:

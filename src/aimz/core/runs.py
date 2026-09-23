@@ -80,7 +80,24 @@ class RunTracker:
             self.finish(ctx, "failed", f"{type(exc).__name__}: {exc}")
             raise
         else:
-            self.finish(ctx, "ok")
+            degraded = self.error_summary(ctx.id)
+            self.finish(ctx, "degraded" if degraded else "ok", degraded)
+
+    def error_summary(self, run_id: str) -> str | None:
+        """One line describing the errors recorded under a run, or None if there were none.
+
+        A cycle survives stage failures by design, so a run that recorded errors still completes;
+        it finishes as ``degraded`` rather than ``ok`` so an expired token or a dead feed is visible.
+        """
+        rows = self._db.query(
+            "SELECT agent, operation, error_type, COUNT(*) AS n FROM errors WHERE run_id=? "
+            "GROUP BY agent, operation, error_type ORDER BY n DESC",
+            [run_id],
+        )
+        if not rows:
+            return None
+        parts = [f"{r['error_type']} x{r['n']} ({r['agent']}.{r['operation']})" for r in rows]
+        return f"{sum(r['n'] for r in rows)} errors: " + "; ".join(parts)
 
     # -- agent-level spans --------------------------------------------------------------
     @contextmanager

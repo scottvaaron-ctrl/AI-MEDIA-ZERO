@@ -68,8 +68,14 @@ class EditorInChief(Agent):
             run.note("selection", {"selected": 0, "reason": "no candidates"})
             return []
         alloc_cfg = dict(cfg.get("allocation", {}) or {})
+        # Families the AI named during ideation enter strategy memory only once a video is measured, so
+        # the candidates' families are added here as new and unmeasured. Otherwise a family can never be tried.
+        families = dict(strategy_state["families"])
+        for c in cands:
+            if c.get("content_family"):
+                families.setdefault(c["content_family"], {"status": "new", "n": 0})
         slots = plan_allocation(
-            perf_rows, strategy_state["families"], k, alloc_cfg, self.rng, strategy_state.get("explore_ratio")
+            perf_rows, families, k, alloc_cfg, self.rng, strategy_state.get("explore_ratio")
         )
         running = self.experiments.running()
 

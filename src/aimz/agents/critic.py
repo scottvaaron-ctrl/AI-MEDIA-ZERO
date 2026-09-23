@@ -53,6 +53,10 @@ AI_SLOP_PATTERNS = [
 ]
 
 
+def _norm(s: str) -> str:
+    return " ".join(re.sub(r"[^\w\s$%.]", " ", s.lower()).split())
+
+
 class CriticAgent(Agent):
     name = "critic"
 
@@ -70,12 +74,17 @@ class CriticAgent(Agent):
         elevated = "\n".join(f"- {t}" for t in cfg.elevated_review_topics)
         narration = " ".join(b.narration for b in draft.beats)
         user = (
-            "You are adversarial. Assume the script is mediocre until proven otherwise. Evaluate: hook strength, originality, factual support, source quality, "
-            "pacing, payoff, clarity, duplication of common content, copyright risk, policy risk, deceptive-media risk, whether it feels like generic mass-produced AI content, "
-            "and whether the topic actually deserves a video. Required revisions must be fixable using ONLY the listed sources (never demand facts the sources do not contain; if a fact is missing, the fix is to cut or soften, not to add). "
+            "You are adversarial. Assume the script is mediocre until proven otherwise. The constitution requires you to check: factual support against the sources, "
+            "originality (not generic mass-produced AI content, not a duplicate of common content), copyright risk, policy risk, deceptive-media risk, "
+            "and whether the topic deserves a video at all. Judge craft (opening, structure, pacing, ending) by the channel's own evidence in the strategy memory below, "
+            "not by a fixed formula; while that evidence is thin, do not fail a script for a creative choice. "
+            "Required revisions must be fixable using ONLY the listed sources (never demand facts the sources do not contain; if a fact is missing, the fix is to cut or soften, not to add). "
             "'Realistic depictions of real people' means synthetic or altered imagery/voice of a real person, not merely naming a historical figure. Score 0-100; below "
             f"{threshold} fails. Every point below 80 must be explained by an entry in problems. List concrete required revisions (things that MUST change) separately from optional improvements.\n"
-            f"Flag elevated_review_required if the script touches any of:\n{elevated}\n\n"
+            f"Flag elevated_review_required if the script touches any of:\n{elevated}\n"
+            "Only list a topic in elevated_review_reasons if the script actually touches it, and put the exact words from the script "
+            "that touch it in elevated_review_evidence. If you cannot quote the script, do not list the topic.\n\n"
+            f"Channel strategy memory:\n{self.strategy.prompt_summary(self.strategy.current(), 1200)}\n\n"
             f"Idea: {idea['title']} | family {idea['content_family']} | hook_type {idea.get('hook_type')}\n"
             f"Fact-check outcome: {factcheck.overall} ({factcheck.notes[:200]})\n\n"
             f"Script title: {draft.title}\nHook line: {draft.hook_line}\nBeats:\n"
@@ -83,7 +92,7 @@ class CriticAgent(Agent):
                 f"{i}. [{b.visual_type}: {b.visual_query[:60]}] {b.narration} (caption: {b.caption})"
                 for i, b in enumerate(draft.beats)
             )
-            + f"\n\nSources:\n{self.sources_block(sources, 400)}\n"
+            + f"\n\nSources:\n{self.sources_block(sources, 400, text_budget=3000)}\n"
         )
         with self.svc.tracker.agent(run, self.name, "review", {"script_id": script_id}) as span:
             try:
@@ -137,19 +146,9 @@ class CriticAgent(Agent):
     ) -> CriticResult:
         low = narration.lower()
         # The gate is computed here, not trusted from the model. Small models often emit a harsh headline
-        # score with no listed problems, so the headline is blended with the model's own sub-scores.
-        derived = (
-            (
-                result.hook_strength
-                + result.originality
-                + result.factual_support
-                + result.pacing
-                + result.payoff
-                + result.clarity
-            )
-            / 6
-            * 10
-        )
+        # score with no listed problems, so the headline is blended with the model's own sub-scores. Only the
+        # constitution-backed ones count toward the gate; hook/pacing/payoff/clarity are recorded, not gated.
+        derived = (result.originality + result.factual_support) / 2 * 10
         result.score = int(round(0.5 * result.score + 0.5 * derived))
         result.passed = result.score >= threshold
         for pat in banned:
@@ -166,10 +165,22 @@ class CriticAgent(Agent):
         # The V0 pipeline renders archival photos and generated cards only; it cannot produce synthetic
         # depictions of real people or altered footage, so those model flags are structural false positives.
         impossible = {"realistic depictions of real people", "altered real-world events"}
-        reasons = {r for r in result.elevated_review_reasons if r.strip().lower() not in impossible}
+        # Small models echo the whole topic list back (six of nine queued scripts, one about a moon of
+        # Jupiter, were flagged for every topic). A model flag counts only when it quotes the script.
+        text = _norm(" ".join([draft.title, draft.hook_line, narration]))
+        quoted = any(len(_norm(q)) >= 4 and _norm(q) in text for q in result.elevated_review_evidence)
+        reasons = (
+            {r for r in result.elevated_review_reasons if r.strip().lower() not in impossible}
+            if quoted
+            else set()
+        )
+        if result.elevated_review_reasons and not quoted:
+            result.problems.append("elevated-review flags dropped: no supporting quote from the script")
+        # The keyword backstop needs no quote. Matching at word starts keeps "cure" out of "secure".
         for topic, kws in ELEVATED_KEYWORDS.items():
-            if any(k in low for k in kws):
+            if any(re.search(r"\b" + re.escape(k), low) for k in kws):
                 reasons.add(topic)
+        result.elevated_review_required = False
         if reasons:
             result.elevated_review_required = True
             result.elevated_review_reasons = sorted(reasons)
