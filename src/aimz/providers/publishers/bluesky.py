@@ -28,7 +28,8 @@ Verified against the atproto lexicons and the Bluesky client source (2026-09-08)
 Platform limits honoured in code: 300 MB and 10 minutes per video (we send 2-6 MB / 20-90 s),
 caption files up to 20 kB, and the account's own daily video allowance, which is checked before
 any byte is sent so a quota block costs nothing. The kill switch and owner consent are checked
-first; a failed post is reported and never retried automatically.
+first. A failed post is never retried blindly: ``find_existing`` looks for it among the account's
+recent posts first (``com.atproto.repo.listRecords``), see agents/publisher.py.
 """
 
 from __future__ import annotations
@@ -45,7 +46,14 @@ from urllib.parse import urlparse
 
 import httpx
 
-from aimz.core.errors import OwnerApprovalRequired, ProviderError, ProviderUnavailable, PublishError
+from aimz.core.errors import (
+    CannotVerify,
+    OwnerApprovalRequired,
+    PermanentPublishError,
+    ProviderError,
+    ProviderUnavailable,
+    PublishError,
+)
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 from aimz.providers.publishers.captions import grapheme_len, hashtags, trim_graphemes
@@ -387,6 +395,17 @@ class BlueskyClient:
             token=session.access_jwt,
         )
 
+    def list_own_posts(self, limit: int = 50) -> list[dict[str, Any]]:
+        """The account's most recent post records, newest first (com.atproto.repo.listRecords)."""
+        session = self.session()
+        data = self._get(
+            session.pds_url,
+            "com.atproto.repo.listRecords",
+            {"repo": session.did, "collection": POST_COLLECTION, "limit": limit},
+            token=session.access_jwt,
+        )
+        return list(data.get("records") or [])
+
     # -- reads used by analytics -------------------------------------------------------
     def get_posts(self, uris: list[str]) -> list[dict[str, Any]]:
         session = self.session()
@@ -526,7 +545,7 @@ class BlueskyPublisher(Publisher):
                         "reply": {"root": root, "parent": root},
                     }
                 )
-            except ProviderError as exc:  # the video is already public, so do not retry
+            except Exception as exc:  # any error: the video is already public, so it must not look failed
                 log.warning("Bluesky sources reply failed: %s", exc)
                 note = " (sources reply failed; add it by hand)"
         return created, note
@@ -548,10 +567,10 @@ class BlueskyPublisher(Publisher):
         path = Path(video["file_path"])
         size = path.stat().st_size
         if size > MAX_VIDEO_BYTES:
-            raise PublishError(f"video is {size} bytes; Bluesky accepts up to {MAX_VIDEO_BYTES}")
+            raise PermanentPublishError(f"video is {size} bytes; Bluesky accepts up to {MAX_VIDEO_BYTES}")
         duration = float(video.get("duration_s") or 0)
         if duration > MAX_VIDEO_SECONDS:
-            raise PublishError(f"video is {duration}s; Bluesky accepts up to {MAX_VIDEO_SECONDS}s")
+            raise PermanentPublishError(f"video is {duration}s; Bluesky accepts up to {MAX_VIDEO_SECONDS}s")
 
         with self.authorized(ctx, "bluesky_post") as rec:
             limits = self.client.upload_limits()
@@ -622,6 +641,48 @@ class BlueskyPublisher(Publisher):
             message="Posted to Bluesky" + note,
             publish_id=job_id,
         )
+
+    def find_existing(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
+        """Look for the post among the account's recent posts (read-only).
+
+        The post record is saved to ``bluesky_request.json`` before ``createRecord`` is called, so with no
+        saved record no post was ever attempted. Otherwise a recent post with the same text and a video
+        embed, created no earlier than the first attempt, is the earlier attempt's post.
+        """
+        if publication.get("platform_video_id"):
+            uri = str(publication["platform_video_id"])
+            return PublishResult(
+                status="published", platform_video_id=uri, url=post_url(self.client.handle, uri)
+            )
+        request_file = Path(str(publication.get("package_dir") or "")) / "bluesky_request.json"
+        if not publication.get("package_dir") or not request_file.exists():
+            return None
+        try:
+            saved = json.loads(request_file.read_text(encoding="utf-8"))
+            text = str(saved["record"]["text"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise CannotVerify(f"saved Bluesky request unreadable: {exc}") from exc
+        since = str(publication.get("created_at") or "")[:19]
+        with self.authorized(ctx, "bluesky_find_existing"):
+            records = self.client.list_own_posts(50)
+            handle = self.client.session().handle
+        for rec in records:
+            value = rec.get("value") or {}
+            if value.get("text") != text:
+                continue
+            if (value.get("embed") or {}).get("$type") != "app.bsky.embed.video":
+                continue
+            if str(value.get("createdAt") or "")[:19] < since:
+                continue
+            uri = str(rec.get("uri") or "")
+            return PublishResult(
+                status="published",
+                platform_video_id=uri,
+                url=post_url(handle, uri),
+                privacy="public",
+                message="found on Bluesky from an earlier attempt; not posted again",
+            )
+        return None
 
     def poll(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
         """Finish a post whose video was still encoding when the cycle ended."""

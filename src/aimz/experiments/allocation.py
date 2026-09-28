@@ -90,12 +90,24 @@ def plan_allocation(
     cfg: dict[str, Any],
     rng: random.Random | None = None,
     explore_ratio_override: float | None = None,
+    available: set[str] | None = None,
+    pending: dict[str, int] | None = None,
 ) -> list[AllocationSlot]:
+    """``available``: families that have a candidate idea right now; slots only go to those (when any).
+    ``pending``: per family, videos still being made or awaiting their score. They count toward how
+    sampled a family is when exploring, so one family is not explored again and again before its first
+    result is in. They never enter a family's mean."""
     rng = rng or random.Random()
+    pending = pending or {}
     active = {k: v for k, v in families.items() if v.get("status") != "retired"}
     if not active:
         active = dict(families)
-    stats = family_stats(perf_rows, active)
+    all_stats = family_stats(perf_rows, active)
+    stats = all_stats
+    if available:
+        fillable = {k: s for k, s in all_stats.items() if k in available}
+        if fillable:
+            stats = fillable
     measured = sum(1 for r in perf_rows if r.get("score") is not None)
     ratio = (
         explore_ratio(measured, cfg)
@@ -106,20 +118,29 @@ def plan_allocation(
     conf_n = int(cfg.get("family_confidence_sample", 5))
 
     out: list[AllocationSlot] = []
-    tested = [k for k, s in stats.items() if s.n > 0]
+    tested = [k for k, s in all_stats.items() if s.n > 0]
+    planned: dict[str, int] = {}
     for _ in range(max(0, slots)):
         # Constitution: at least three distinguishable families must be tested before exploiting.
         force_explore = len(tested) < 3
         explore = force_explore or rng.random() < ratio
         if explore:
-            least = sorted(stats.values(), key=lambda s: (s.n, rng.random()))
-            pick = least[0]
+
+            def tried(s: FamilyStat) -> int:
+                return s.n + pending.get(s.key, 0) + planned.get(s.key, 0)
+
+            pick = sorted(stats.values(), key=lambda s: (tried(s), rng.random()))[0]
+            in_progress = pending.get(pick.key, 0)
             out.append(
                 AllocationSlot(
-                    "explore", pick.key, f"least-sampled family (n={pick.n}); explore ratio {ratio:.0%}"
+                    "explore",
+                    pick.key,
+                    f"least-sampled family (n={pick.n}"
+                    + (f", {in_progress} in progress" if in_progress else "")
+                    + f"); explore ratio {ratio:.0%}",
                 )
             )
-            pick.n += 1  # discourage picking the same family twice in one plan
+            planned[pick.key] = planned.get(pick.key, 0) + 1  # not the same family twice in one plan
         else:
             best = max(stats.values(), key=lambda s: _sample(s, conf_n, rng))
             out.append(

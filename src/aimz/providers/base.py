@@ -287,6 +287,16 @@ class Publisher(Provider):
         """For publications left in 'uploading': return the terminal result once the platform finishes."""
         return None
 
+    def find_existing(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
+        """Before a retry: did an earlier attempt for this publication already create the post?
+
+        Return the post as a PublishResult if it exists, None if the platform confirms it does not, and
+        raise ``CannotVerify`` when this publisher cannot tell. Read-only; never writes to the platform.
+        """
+        from aimz.core.errors import CannotVerify
+
+        raise CannotVerify(f"{self.name} cannot look up earlier posts")
+
 
 # --------------------------------------------------------------------------------------
 # Analytics

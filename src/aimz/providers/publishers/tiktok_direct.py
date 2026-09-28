@@ -16,7 +16,8 @@ Implemented against the developers.tiktok.com reference (verified 2026-09-07):
 Platform constraints honoured in code: unaudited apps may only post ``SELF_ONLY``; the privacy level
 must be one of the creator's ``privacy_level_options``; the video must be shorter than the creator's
 ``max_video_post_duration_sec``; ``is_aigc`` is set; the kill switch and owner consent are checked
-before any byte is sent; a failed post is never retried automatically.
+before any byte is sent. A failed post is never retried blindly: ``find_existing`` asks TikTok about the
+earlier attempt's publish_id first (see agents/publisher.py).
 
 Status: implemented to spec and unit-tested with a mock transport. It cannot be exercised against
 the live API until the owner registers a TikTok developer app (see docs/AUTONOMOUS_SETUP.md).
@@ -36,7 +37,14 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
-from aimz.core.errors import OwnerApprovalRequired, ProviderError, ProviderUnavailable, PublishError
+from aimz.core.errors import (
+    CannotVerify,
+    OwnerApprovalRequired,
+    PermanentPublishError,
+    ProviderError,
+    ProviderUnavailable,
+    PublishError,
+)
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 from aimz.providers.publishers.packages import write_common_package
@@ -339,12 +347,14 @@ class TikTokDirectPostPublisher(Publisher):
             info = self.client.creator_info()
             options = set(info.get("privacy_level_options") or [])
             if options and privacy not in options:
-                raise PublishError(
+                raise PermanentPublishError(
                     f"privacy {privacy} not allowed for this creator (options: {sorted(options)}); unaudited apps allow SELF_ONLY only"
                 )
             max_dur = int(info.get("max_video_post_duration_sec") or 0)
             if max_dur and float(video.get("duration_s") or 0) > max_dur:
-                raise PublishError(f"video is {video.get('duration_s')}s; creator limit is {max_dur}s")
+                raise PermanentPublishError(
+                    f"video is {video.get('duration_s')}s; creator limit is {max_dur}s"
+                )
             caption = build_caption(metadata.get("title", video["title"]), metadata.get("tags", []))
             post_info = {
                 "title": caption[:2200],
@@ -374,7 +384,7 @@ class TikTokDirectPostPublisher(Publisher):
             )
             try:
                 self.client.upload_file(init["upload_url"], path, int(init["chunk_size"]))
-            except Exception as exc:  # never retried automatically
+            except Exception as exc:  # retried only after find_existing confirms it did not post
                 raise PublishError(f"TikTok upload failed after init {init['publish_id']}: {exc}") from exc
             rec.extra["publish_id"] = init["publish_id"]
             username = info.get("creator_username", "")
@@ -406,6 +416,42 @@ class TikTokDirectPostPublisher(Publisher):
                         publish_id=init["publish_id"],
                     )
                 time.sleep(5)
+
+    def find_existing(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
+        """Ask TikTok about the earlier attempt's publish_id (read-only).
+
+        The publish_id is saved to ``tiktok_request.json`` right after init, before any byte is uploaded.
+        No saved id means init never answered, and a post cannot exist without its file upload.
+        """
+        publish_id = json.loads(publication.get("metadata_json") or "{}").get("publish_id")
+        request_file = Path(str(publication.get("package_dir") or "")) / "tiktok_request.json"
+        if not publish_id and publication.get("package_dir") and request_file.exists():
+            try:
+                publish_id = json.loads(request_file.read_text(encoding="utf-8")).get("publish_id")
+            except ValueError as exc:
+                raise CannotVerify(f"saved TikTok request unreadable: {exc}") from exc
+        if not publish_id:
+            return None
+        with self.authorized(ctx, "tiktok_find_existing"):
+            st = self.client.publish_status(str(publish_id))
+        status = st.get("status", "")
+        if status == "FAILED":
+            return None
+        if status == "PUBLISH_COMPLETE":
+            ids = st.get("publicaly_available_post_id") or []
+            vid = str(ids[0]) if ids else None
+            return PublishResult(
+                status="published",
+                platform_video_id=vid,
+                privacy=publication.get("privacy"),
+                message="found on TikTok from an earlier attempt; not posted again",
+                publish_id=str(publish_id),
+            )
+        if status in {"PROCESSING_UPLOAD", "PROCESSING_DOWNLOAD", "SEND_TO_USER_INBOX"}:
+            return PublishResult(
+                status="uploading", message=f"TikTok still processing ({status})", publish_id=str(publish_id)
+            )
+        raise CannotVerify(f"TikTok status {status or 'unknown'} for {publish_id}")
 
     def poll(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
         """Called for publications left in ``uploading``; returns the terminal result when TikTok is done."""

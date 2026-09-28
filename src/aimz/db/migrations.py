@@ -44,15 +44,17 @@ def apply_migrations(conn: sqlite3.Connection, directory: Path = MIGRATIONS_DIR)
         if version in done:
             continue
         sql = path.read_text(encoding="utf-8")
+        # The version row is written inside the same transaction as the migration: a crash between the
+        # two would otherwise re-apply a non-repeatable ALTER on the next start and break startup.
+        # version and name come from the filename regex (digits, [a-z0-9_]), so inlining them is safe.
+        record = (
+            "INSERT INTO schema_migrations (version, name, applied_at) "
+            f"VALUES ({version}, '{name}', '{now_iso()}');"
+        )
         try:
-            conn.executescript("BEGIN;\n" + sql + "\nCOMMIT;")
+            conn.executescript("BEGIN;\n" + sql + "\n" + record + "\nCOMMIT;")
         except Exception:
             conn.rollback()
             raise
-        conn.execute(
-            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
-            (version, name, now_iso()),
-        )
-        conn.commit()
         applied.append(f"{version:04d}_{name}")
     return applied

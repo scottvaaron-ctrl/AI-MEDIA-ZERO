@@ -8,12 +8,12 @@ live. Read this,
 
 | Item | State |
 |---|---|
-| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done, 5 real cycles run, 81 tests green, ruff + mypy clean |
+| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done and running twice daily; 154 tests green, ruff + mypy clean |
 | YouTube upload + analytics + comments | **Done and live** on the owner's machine: OAuth token stored, `YOUTUBE_ENABLED=true`, `YOUTUBE_MODE=public`, `YOUTUBE_ANALYTICS_ENABLED=true`, `AUTOPUBLISH_CONSENT=true` |
 | YouTube API compliance audit | **Submitted by the owner (or in progress)**. Until Google approves, uploads land as private. Evidence files are in `data/audit/` (not in git). Nothing in code changes when it's approved |
 | TikTok Direct Post + Display API analytics | **Live in sandbox** as of 2026-09-08: app registered, `TIKTOK_MODE=direct`, connected as `backhouse67`, one video posted `SELF_ONLY`. Posts are invisible to everyone but the owner and expose no metrics until TikTok audits the app, so TikTok adds no learning signal yet. The demo video for that audit still has to be filmed |
 | Bluesky (AT Protocol) post + analytics | **Done and live** as `@backhouse06.bsky.social`: video, alt text, WebVTT captions, hashtag facets and a threaded sources reply, all read back through the API. No audit exists on this platform, so it is public from the first post and is the only one currently producing usable engagement data alongside YouTube |
-| Scheduler | `aimz schedule install` works (tested install/status/remove). **Not installed** yet; the owner should run it once they are happy with the first uploads |
+| Scheduler | Installed. Since 2026-09-28 it is **one** task, "AI Media Zero", with a trigger per time (09:00, 18:00); `aimz schedule install` creates it and deletes the old per-time tasks ("AI Media Zero 0900"/"1800"). The runner takes a mutex and `aimz run` a file lock, so two cycles never overlap |
 | Repo | Public at https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO (main). Work on this machine at `C:\Users\scott\Documents\Agentic_Youtube`, venv `.venv`, Python 3.14 |
 | Local models | Ollama with `qwen3:8b` (default) and `qwen3:4b`; Piper voice downloaded; FFmpeg via winget and bundled imageio-ffmpeg |
 
@@ -25,7 +25,26 @@ Non-negotiables inherited from the owner (see `config/constitution.md`):
   "auto-posting" services with fees.
 - Every provider call goes through `Provider.authorized()` (budget + kill switch + usage row).
 - API writes require owner consent: per-video approval or `AUTOPUBLISH_CONSENT=true`.
-- Failed uploads are never retried automatically.
+- Failed uploads are never retried **blindly** (owner decision 2026-09-28; before that they were
+  never retried at all). A retry first asks the platform whether the earlier attempt posted
+  (`Publisher.find_existing`), at most `publishing.max_attempts` times, then the upload is closed
+  out as `abandoned` with an alert. See section 4a.
+
+## 4a. Reliability model (2026-09-28)
+
+Nothing that passed its checks is lost to a technical failure, and nothing is silently dropped:
+
+| Failure | What happens |
+|---|---|
+| Model down / timeout while writing | `TechnicalFailure`: idea back to `selected`, `ideas.tech_failures` +1, write stage stops. Parked after `pipeline.max_technical_failures` |
+| Critic scores below the pass mark but names no problem | Asked once more for reasons; if still none, the score does not gate (owner decision 2026-09-28) |
+| Render fails | Script stays `approved`, renders again next cycle; parked after `pipeline.max_render_attempts` |
+| Upload fails | `failed` + `next_attempt_at` + `failure_kind` (transient / uncertain / permanent). `PublishStage.retry_due()` checks the platform, then records the found post or re-sends. `abandoned` after the last attempt, or at once when permanent |
+| Run killed (shutdown, sleep, Ctrl+C) | Ctrl+C closes the run as `interrupted`. Otherwise the next cycle's `Orchestrator.recover()` marks it `abandoned` (an error, so that cycle alerts) and re-queues its ideas, failed renders and unfinishable uploads |
+| Post older than `analytics.measurement_window_days` | Collection stops; the video becomes `measured` |
+
+`python -m aimz status` lists everything that needs the owner under `needs_attention`, each with the
+command that clears it (`aimz publish retry <id>`, `aimz requeue idea|script <id>`).
 
 ## 2. First task: fix the sources link (real, and it affects every platform)
 
@@ -95,7 +114,7 @@ cli.py                               `aimz <platform> auth` (owner-only OAuth)
 docs/COMPLIANCE.md                   verified requirements + how the code honours them
 docs/AUTONOMOUS_SETUP.md             owner checklist
 tests/test_<platform>.py             httpx.MockTransport tests: happy path, consent gate,
-                                     kill switch, privacy/validation, failure not retried
+                                     kill switch, privacy/validation, find_existing
 ```
 
 `Publisher` contract (`providers/base.py`):
@@ -106,7 +125,11 @@ tests/test_<platform>.py             httpx.MockTransport tests: happy path, cons
   check `metadata["owner_approved"]`, then do the work inside `with self.authorized(ctx, "<purpose>")`.
 - Return `status="uploading"` with `publish_id` if the platform processes asynchronously and
   implement `poll(ctx, publication)`; `PublishStage.poll_pending()` calls it every cycle.
-- Raise `PublishError` on failure. Never loop/retry.
+- Raise `PublishError` on failure, `PermanentPublishError` when no retry can help (too long, too
+  large, refused privacy). Never loop/retry inside the publisher; `PublishStage` owns retries.
+- Implement `find_existing(ctx, publication)`: read-only, returns the post if an earlier attempt
+  made it, `None` if the platform confirms it did not, or raises `CannotVerify`. Without it, only
+  failures that provably sent nothing (expired login, connection refused) are retried.
 
 `AnalyticsProvider` contract: `fetch_metrics(ctx, publication) -> MetricsSnapshot | None`
 (map to `views, likes, comments, shares, avg_percent_viewed, followers_gained…`; put the raw
@@ -187,7 +210,7 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
 ```powershell
 cd $HOME\Documents\Agentic_Youtube; .\.venv\Scripts\Activate.ps1
 aimz doctor                      # everything should be OK
-pytest -q                        # 81 tests, offline
+pytest -q                        # 154 tests, offline
 ruff check src tests; ruff format src tests; mypy
 aimz run --stages publish        # re-run only publishing for rendered videos
 aimz publish list; aimz publish poll

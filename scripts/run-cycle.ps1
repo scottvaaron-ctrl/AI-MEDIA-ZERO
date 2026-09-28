@@ -4,8 +4,21 @@
 $root = 'C:\Users\scott\Documents\Agentic_Youtube'
 $py   = 'C:\Users\scott\Documents\Agentic_Youtube\.venv\Scripts\python.exe'
 $log  = 'C:\Users\scott\Documents\Agentic_Youtube\data\logs\scheduled.log'
+$skipLog = 'C:\Users\scott\Documents\Agentic_Youtube\data\logs\scheduled-skipped.log'
 
 Set-Location $root
+
+# One cycle at a time. Two copies used to start together when the laptop woke after both scheduled
+# times had passed; the second died writing to the log the first held open, with no line to show for it.
+# The mutex is taken before the log is touched; a second copy notes itself in a separate file and exits.
+# Windows releases the mutex if this process dies, so a crash never blocks the next cycle.
+$mutex = New-Object System.Threading.Mutex($false, 'Local\AIMediaZeroCycle')
+$owned = $false
+try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) {
+    try { "$(Get-Date -Format o) skipped: another cycle is already running" | Out-File -FilePath $skipLog -Append -Encoding utf8 } catch { }
+    exit 0
+}
 
 "=== cycle start $(Get-Date -Format o) ===" | Out-File -FilePath $log -Append -Encoding utf8
 
@@ -76,4 +89,5 @@ if ($code -ne 0) {
         "notification failed: $_" | Out-File -FilePath $log -Append -Encoding utf8
     }
 }
+$mutex.ReleaseMutex()
 exit $code

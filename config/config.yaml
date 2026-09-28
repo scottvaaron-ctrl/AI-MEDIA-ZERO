@@ -18,6 +18,16 @@ pipeline:
   qa_pass_threshold: 60
   # Days a source item stays "fresh" for trend-driven families.
   freshness_window_days: 14
+  # A technical failure (model down, timeout) sends an idea back to the queue instead of rejecting it.
+  # After this many in a row it is parked for the owner (`aimz status` lists it).
+  max_technical_failures: 5
+  # A render that fails is retried next cycle; after this many the script is parked for the owner.
+  max_render_attempts: 3
+
+analytics:
+  # Metrics are collected until a post is this old, then its video is closed out as "measured".
+  # The score itself is taken at 72 h; the rest of the window catches late views and subscribers.
+  measurement_window_days: 14
 
 allocation:
   # Cold start: mostly exploration. Moves toward exploitation as evidence accumulates.
@@ -57,6 +67,11 @@ content:
 publishing:
   # Owner approval is required before anything leaves the machine.
   require_owner_approval: true
+  # Failed uploads are retried automatically, but never blindly: the platform is checked first for a
+  # post an earlier attempt may have made (owner decision 2026-09-28). Attempts in total, then the
+  # upload is closed out ("abandoned") with an alert; `aimz publish retry <id>` re-sends it.
+  max_attempts: 3
+  retry_after_hours: 1
   ai_disclosure_text: "This video uses AI-generated narration and AI-assisted scripting. Sources are listed in the description."
   youtube:
     category_id: "27"   # Education

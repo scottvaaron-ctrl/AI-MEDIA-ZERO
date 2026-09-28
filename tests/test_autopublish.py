@@ -141,7 +141,7 @@ class FailingPublisher(RecordingPublisher):
 
 
 def test_failed_publication_is_skipped_until_the_owner_requeues_it(svc) -> None:  # noqa: ANN001
-    """A failure is never retried on its own; `requeue` is the deliberate owner action."""
+    """publish() never re-sends a failed row itself; only the checked retry (retry_due) or the owner does."""
     rec = FailingPublisher()
     svc.publishers = {"youtube": rec}
     stage = _stage(svc, consent=True)
@@ -171,7 +171,7 @@ def test_requeue_refuses_publications_that_did_not_fail(svc) -> None:  # noqa: A
     with svc.tracker.run("publish") as run:
         stage.publish(run, vid)
     pub_id = svc.db.one("SELECT * FROM publications")["id"]
-    with pytest.raises(ValueError, match="only failed or blocked"):
+    with pytest.raises(ValueError, match="only failed, blocked or abandoned"):
         stage.requeue(pub_id)
     with pytest.raises(ValueError, match="not found"):
         stage.requeue("pub_does_not_exist")

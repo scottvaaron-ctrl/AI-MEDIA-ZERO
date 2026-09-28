@@ -32,11 +32,35 @@ KPI_FIELDS = {
     "views": "views",
     "score": "score",
     "performance_score": "score",
+    # The strategist names the composite score in several ways; an unrecognised name used to read as
+    # "no data" forever, so its first experiment could never collect a sample.
+    "mean_score": "score",
+    "avg_score": "score",
+    "average_score": "score",
+    "composite_score": "score",
+    "engagement_score": "score",
 }
 
 
+def kpi_field(kpi: str) -> str | None:
+    return KPI_FIELDS.get(kpi.strip().lower().replace(" ", "_").replace("-", "_"))
+
+
 def kpi_value(row: dict[str, Any], kpi: str) -> float | None:
-    field = KPI_FIELDS.get(kpi.strip().lower(), kpi)
+    """A KPI for one performance row, read from the snapshot the video is scored on.
+
+    Rows from ``video_performance`` carry ``scored_metrics`` (None while the video is too young to
+    compare); other rows are read as they are.
+    """
+    field = kpi_field(kpi) or kpi
+    if field == "score":
+        val = row.get("score")
+        return float(val) if val is not None else None
+    if "scored_metrics" in row:
+        scored = row["scored_metrics"]
+        if scored is None:
+            return None
+        row = scored
     views = row.get("views") or 0
     if field == "shares_per_1000":
         return (row["shares"] / views * 1000) if views and row.get("shares") is not None else None
@@ -47,6 +71,17 @@ def kpi_value(row: dict[str, Any], kpi: str) -> float | None:
         return (gained / views * 1000) if views and gained is not None else None
     val = row.get(field)
     return float(val) if val is not None else None
+
+
+MEASURABLE_KPIS = (
+    "score",
+    "avg_percent_viewed",
+    "retention_3s",
+    "completion_rate",
+    "shares_per_1000",
+    "subscribers_per_1000",
+    "views",
+)
 
 
 def _norm_cdf(x: float) -> float:
@@ -129,6 +164,8 @@ class ExperimentEngine:
             return f"{var} arms must be in {sorted(allowed)}"
         if not p.primary_kpi.strip():
             return "primary_kpi required"
+        if kpi_field(p.primary_kpi) is None:
+            return f"primary_kpi {p.primary_kpi!r} is not a measured metric (allowed: {', '.join(MEASURABLE_KPIS)})"
         return None
 
     def propose(
@@ -182,8 +219,28 @@ class ExperimentEngine:
                 "updated_at": now_iso(),
             },
         )
+        # Ideas not yet being written are freed, so they do not publish under a retired experiment's
+        # label. Ideas already in production keep theirs: the arm shaped what was written.
+        self.db.execute(
+            "UPDATE ideas SET experiment_id=NULL, experiment_arm=NULL, updated_at=? "
+            "WHERE experiment_id=? AND status IN ('candidate','selected')",
+            [now_iso(), experiment_id],
+        )
 
     # -- assignment ------------------------------------------------------------------
+    def next_for_assignment(self) -> dict[str, Any] | None:
+        """The running experiment with the fewest ideas assigned, so a second one is not starved."""
+        running = self.running()
+        if not running:
+            return None
+        counts = {
+            r["experiment_id"]: int(r["c"])
+            for r in self.db.query(
+                "SELECT experiment_id, COUNT(*) c FROM ideas WHERE experiment_id IS NOT NULL GROUP BY experiment_id"
+            )
+        }
+        return min(running, key=lambda e: (counts.get(e["id"], 0), e["started_at"] or ""))
+
     def assign_arm(self, experiment: dict[str, Any], rng: random.Random | None = None) -> tuple[str, str]:
         """Return (arm, value) balancing arm counts across all ideas assigned so far."""
         rng = rng or random.Random()
@@ -206,12 +263,17 @@ class ExperimentEngine:
     def evaluate(self, experiment: dict[str, Any], perf_rows: list[dict[str, Any]]) -> dict[str, Any]:
         kpi = experiment["primary_kpi"]
         arms: dict[str, list[float]] = {"control": [], "treatment": []}
+        # One sample per video: a video measured on two platforms is not two independent results.
+        per_video: dict[tuple[str, str], list[float]] = {}
         for row in perf_rows:
             if row.get("experiment_id") != experiment["id"] or row.get("experiment_arm") not in arms:
                 continue
             v = kpi_value(row, kpi)
             if v is not None:
-                arms[row["experiment_arm"]].append(v)
+                key = (str(row["experiment_arm"]), str(row.get("video_id") or id(row)))
+                per_video.setdefault(key, []).append(v)
+        for (arm, _vid), vals in per_video.items():
+            arms[arm].append(sum(vals) / len(vals))
         a, b = summarize(arms["control"]), summarize(arms["treatment"])
         conf = welch_confidence(a, b)
         min_n = int(experiment["min_sample"])

@@ -37,7 +37,22 @@ class ProviderUnavailable(ProviderError):
 
 
 class PublishError(AimzError):
-    """A publish attempt failed. Never retried blindly."""
+    """A publish attempt failed. Never retried blindly: a retry first confirms the post is not already live."""
+
+
+class PermanentPublishError(PublishError):
+    """The platform can never accept this video as it is (too long, too large, refused format). Not retried."""
+
+
+class CannotVerify(AimzError):
+    """A publisher cannot tell whether an earlier attempt already created the post."""
+
+
+class TechnicalFailure(AimzError):
+    """A stage failed for a technical reason (model down, timeout), not an editorial judgement.
+
+    Work that hits this is set aside and retried later; it is never rejected as if the content were bad.
+    """
 
 
 class ValidationError(AimzError):

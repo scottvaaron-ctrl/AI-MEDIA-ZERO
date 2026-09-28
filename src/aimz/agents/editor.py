@@ -17,7 +17,7 @@ from aimz.core.runs import RunContext
 from aimz.domain.models import SelectionDecision
 from aimz.experiments.allocation import plan_allocation
 from aimz.experiments.engine import ExperimentEngine
-from aimz.util import now_iso
+from aimz.util import iso_ago, now_iso
 
 GOALS = (
     "Optimization goals in priority order: 1) viewer retention, 2) shares per 1,000 views, 3) followers/subscribers gained per 1,000 views, "
@@ -39,8 +39,8 @@ class EditorInChief(Agent):
     def expire_stale(self, max_age_days: int = 21) -> int:
         cur = self.svc.db.execute(
             "UPDATE ideas SET status='killed', eic_notes='expired: not selected within window', updated_at=? "
-            "WHERE status='candidate' AND created_at < datetime('now', ?)",
-            [now_iso(), f"-{max_age_days} days"],
+            "WHERE status='candidate' AND created_at < ?",
+            [now_iso(), iso_ago(days=max_age_days)],
         )
         return cur.rowcount or 0
 
@@ -74,10 +74,20 @@ class EditorInChief(Agent):
         for c in cands:
             if c.get("content_family"):
                 families.setdefault(c["content_family"], {"status": "new", "n": 0})
+        # Slots only go to families that have a candidate to fill them, and a family whose video is still
+        # being made or measured counts as already being tried. Otherwise the least-sampled family, with one
+        # stale idea the editor keeps turning down, won the explore slot every cycle and nothing was made.
+        available = {str(c["content_family"]) for c in cands if c.get("content_family")}
         slots = plan_allocation(
-            perf_rows, families, k, alloc_cfg, self.rng, strategy_state.get("explore_ratio")
+            perf_rows,
+            families,
+            k,
+            alloc_cfg,
+            self.rng,
+            strategy_state.get("explore_ratio"),
+            available=available,
+            pending=self.in_flight(perf_rows),
         )
-        running = self.experiments.running()
 
         selected: list[str] = []
         used: set[str] = set()
@@ -91,20 +101,31 @@ class EditorInChief(Agent):
                 pool = [c for c in cands if c["id"] not in used]
             if not pool:
                 break
-            shortlist = pool[:4]
-            choice = self._choose(run, strategy_state, shortlist, slot.mode, slot.reason)
+            mode, reason = slot.mode, slot.reason
+            choice, turned_down = self._choose(run, strategy_state, pool[:4], mode, reason)
+            used.update(turned_down)
             if choice is None:
-                continue
+                # The editor judged no idea in this family worth a video. Offer the slot to the rest.
+                rest = [c for c in cands if c["id"] not in used and c["content_family"] != slot.family]
+                if not rest:
+                    continue
+                mode, reason = "fallback", f"{slot.family} had no idea worth making; open shortlist"
+                choice, turned_down = self._choose(run, strategy_state, rest[:4], mode, reason)
+                used.update(turned_down)
+                if choice is None:
+                    continue
             used.add(choice["id"])
             selected.append(choice["id"])
             updates: dict[str, Any] = {
                 "status": "selected",
-                "allocation_mode": slot.mode,
-                "eic_notes": f"{slot.mode}: {slot.reason}",
+                "allocation_mode": mode,
+                "eic_notes": f"{mode}: {reason}",
                 "updated_at": now_iso(),
             }
-            # experiment arm assignment: force the variable's value onto the idea
-            for exp in running:
+            # experiment arm assignment: force the variable's value onto the idea. One experiment per idea
+            # keeps attribution clean; the least-filled one goes first so a second experiment is not starved.
+            exp = self.experiments.next_for_assignment()
+            if exp is not None:
                 arm, value = self.experiments.assign_arm(exp, self.rng)
                 updates["experiment_id"] = exp["id"]
                 updates["experiment_arm"] = arm
@@ -113,10 +134,25 @@ class EditorInChief(Agent):
                 elif exp["variable"] == "runtime":
                     with contextlib.suppress(ValueError):
                         updates["suggested_runtime_s"] = int(value)
-                break  # one experiment per idea keeps attribution clean
             self.svc.db.update("ideas", choice["id"], updates)
         run.note("selection", {"selected": len(selected), "slots": [f"{s.mode}:{s.family}" for s in slots]})
         return selected
+
+    def in_flight(self, perf_rows: list[dict[str, Any]]) -> dict[str, int]:
+        """Per family: ideas being written or rendered, plus published videos not scored yet."""
+        out: dict[str, int] = {}
+        for r in self.svc.db.query(
+            "SELECT content_family, COUNT(*) AS n FROM ideas WHERE status IN ('selected','scripted','produced') "
+            "GROUP BY content_family"
+        ):
+            out[r["content_family"]] = out.get(r["content_family"], 0) + int(r["n"])
+        scored = {r.get("video_id") for r in perf_rows if r.get("score") is not None}
+        for r in self.svc.db.query(
+            "SELECT v.id, i.content_family FROM videos v JOIN ideas i ON i.id = v.idea_id WHERE v.status='published'"
+        ):
+            if r["id"] not in scored:
+                out[r["content_family"]] = out.get(r["content_family"], 0) + 1
+        return out
 
     def _choose(
         self,
@@ -125,7 +161,13 @@ class EditorInChief(Agent):
         shortlist: list[dict[str, Any]],
         mode: str,
         reason: str,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, set[str]]:
+        """Return the chosen idea (or None) and the ids the editor rejected outright.
+
+        Picking one idea means passing over the others, which says nothing absolute about them, so they
+        stay candidates. Selecting *nothing* is the editor's verdict that none deserves a video: those
+        ideas are marked ``rejected`` so they are not offered again every cycle.
+        """
         lines = []
         for c in shortlist:
             lines.append(
@@ -156,18 +198,31 @@ class EditorInChief(Agent):
                     selected_idea_ids=[shortlist[0]["id"]], notes="fallback: top opportunity score"
                 )
             by_id = {c["id"]: c for c in shortlist}
-            for rej in decision.rejected:
-                if rej.idea_id in by_id and rej.idea_id not in decision.selected_idea_ids:
+            chosen = next((by_id[s] for s in decision.selected_idea_ids if s in by_id), None)
+            if chosen is None and decision.selected_idea_ids:
+                chosen = shortlist[0]  # the model named an id that is not on the shortlist
+            reasons = {r.idea_id: r.reason for r in decision.rejected if r.idea_id in by_id}
+            turned_down: set[str] = set()
+            for cid in by_id:
+                if chosen is not None and cid == chosen["id"]:
+                    continue
+                if chosen is None:
+                    why = reasons.get(cid) or "the editor selected nothing from this shortlist"
                     self.svc.db.update(
                         "ideas",
-                        rej.idea_id,
-                        {"eic_notes": f"rejected: {rej.reason[:300]}", "updated_at": now_iso()},
+                        cid,
+                        {
+                            "status": "rejected",
+                            "eic_notes": f"rejected: {why[:300]}",
+                            "updated_at": now_iso(),
+                        },
                     )
-            for sid in decision.selected_idea_ids:
-                if sid in by_id:
-                    span.output_refs["selected"] = sid
-                    return by_id[sid]
-            if not decision.selected_idea_ids:
-                span.output_refs["selected"] = None
-                return None
-        return shortlist[0]
+                    turned_down.add(cid)
+                elif cid in reasons:
+                    self.svc.db.update(
+                        "ideas",
+                        cid,
+                        {"eic_notes": f"passed over: {reasons[cid][:300]}", "updated_at": now_iso()},
+                    )
+            span.output_refs["selected"] = chosen["id"] if chosen else None
+        return chosen, turned_down

@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.table import Table
 
 from aimz import __version__
+from aimz.core.attention import attention
+from aimz.util import iso_ago
 
 app = typer.Typer(
     help="AI Media Zero: autonomous, $0/month AI media channel.", no_args_is_help=True, add_completion=False
@@ -114,19 +116,23 @@ def run(
     limit: Annotated[int | None, typer.Option(help="Max videos to produce this cycle")] = None,
 ) -> None:
     """Run one full autonomous cycle (or a subset of stages)."""
+    from aimz.core.lock import CycleAlreadyRunning
+
     svc = _svc()
     try:
         summary = _orch(svc).cycle(
             [s.strip() for s in stages.split(",")] if stages else None, produce_limit=limit
         )
-        last = svc.db.query(
-            "SELECT status, error FROM runs WHERE kind='cycle' ORDER BY started_at DESC LIMIT 1"
-        )
+        # This run's own row, not "the latest cycle", which could be another process's run.
+        mine = svc.db.get("runs", str(summary.get("run_id") or ""))
+    except CycleAlreadyRunning as exc:
+        console.print(f"[yellow]skipped[/]: {exc}")
+        return
     finally:
         svc.close()
     _print_json(summary)
-    if last and last[0]["status"] == "degraded":
-        console.print(f"[yellow]run degraded[/]: {last[0]['error']}")
+    if mine and mine["status"] == "degraded":
+        console.print(f"[yellow]run degraded[/]: {mine['error']}")
         # Exit 2 so the scheduler log and Task Scheduler's "last run result" show it.
         raise typer.Exit(2)
 
@@ -229,7 +235,11 @@ def publish_retry(
     publication_id: str,
     approved: Annotated[bool, typer.Option("--approved", help="Owner approval for API uploads")] = False,
 ) -> None:
-    """Re-queue a failed publication and publish it again (failures are never retried on their own)."""
+    """Re-send a failed, blocked or abandoned publication now, with a fresh set of automatic attempts.
+
+    Only that publication's platform is touched. This is a deliberate owner re-send: if the earlier attempt
+    may have posted, check the platform first.
+    """
     svc = _svc()
     try:
         orch = _orch(svc)
@@ -239,7 +249,9 @@ def publish_retry(
             f"(was: {info['cleared_error'] or 'no error recorded'})"
         )
         with svc.tracker.run("publish") as ctx:
-            res = orch.publisher.publish(ctx, info["video_id"], owner_approved=approved)
+            res = orch.publisher.publish(
+                ctx, info["video_id"], platforms=[info["platform"]], owner_approved=approved
+            )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     finally:
@@ -288,6 +300,36 @@ def approve(
             raise typer.BadParameter(f"{kind} {item_id} not found")
         svc.db.update(table, item_id, {"status": status, "updated_at": now_iso()})
         console.print(f"[green]{kind} {item_id} -> {status}[/]")
+    finally:
+        svc.close()
+
+
+@app.command()
+def requeue(kind: Annotated[str, typer.Argument(help="idea | script")], item_id: str) -> None:
+    """Put a parked idea or script back in the queue (publications: `aimz publish retry`)."""
+    from aimz.util import now_iso
+
+    svc = _svc(quiet=True)
+    try:
+        if kind not in {"idea", "script"}:
+            raise typer.BadParameter("kind must be idea or script")
+        table = "ideas" if kind == "idea" else "scripts"
+        row = svc.db.get(table, item_id)
+        if not row:
+            raise typer.BadParameter(f"{kind} {item_id} not found")
+        if row["status"] != "parked":
+            raise typer.BadParameter(
+                f"{kind} {item_id} is '{row['status']}'; only parked items are re-queued"
+            )
+        if kind == "idea":
+            values = {"status": "selected", "tech_failures": 0, "updated_at": now_iso()}
+        else:  # renders again next cycle, with a fresh set of attempts
+            svc.db.execute(
+                "UPDATE videos SET status='superseded' WHERE script_id=? AND status='failed'", [item_id]
+            )
+            values = {"status": "approved", "updated_at": now_iso()}
+        svc.db.update(table, item_id, values)
+        console.print(f"[green]{kind} {item_id} -> {values['status']}[/]")
     finally:
         svc.close()
 
@@ -468,12 +510,16 @@ def status() -> None:
                 "ideas": svc.db.count("ideas"),
                 "scripts_approved": svc.db.count("scripts", "status='approved'"),
                 "scripts_needing_review": svc.db.count("scripts", "status='needs_owner_review'"),
-                "videos_rendered": svc.db.count("videos", "status IN ('rendered','approved','published')"),
+                "videos_rendered": svc.db.count(
+                    "videos", "status IN ('rendered','approved','published','measured')"
+                ),
+                "videos_measured": svc.db.count("videos", "status='measured'"),
                 "publications": svc.db.count("publications"),
                 "metrics": svc.db.count("metrics"),
                 "experiments_running": svc.db.count("experiments", "status='running'"),
-                "errors_24h": svc.db.count("errors", "created_at > datetime('now','-1 day')"),
+                "errors_24h": svc.db.count("errors", "created_at > ?", [iso_ago(days=1)]),
             },
+            "needs_attention": attention(svc.db),
             "last_run": dict(last) if last else None,
         }
     finally:
@@ -670,12 +716,15 @@ def schedule_install(
     from aimz.settings import load_env_settings
 
     root = load_env_settings().project_root
+    wanted = [t.strip() for t in times.split(",") if t.strip()]
     try:
-        names = scheduler.install(root, [t.strip() for t in times.split(",") if t.strip()])
+        name, removed = scheduler.install(root, wanted)
     except RuntimeError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
-    console.print("[green]scheduled:[/] " + ", ".join(names))
+    console.print(f"[green]scheduled:[/] {name} daily at {', '.join(wanted)}")
+    if removed:
+        console.print("removed old tasks: " + ", ".join(removed))
     console.print(f"Runner: {root / 'scripts' / 'run-cycle.ps1'} · log: data/logs/scheduled.log")
 
 

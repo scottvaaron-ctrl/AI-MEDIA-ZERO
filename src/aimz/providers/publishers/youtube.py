@@ -14,17 +14,19 @@ Compliance notes (verified Sept 2026):
 * ``status.selfDeclaredMadeForKids`` is required for COPPA; we default to ``false``.
 * Developer Policy III.E.3.d: the user must expressly consent before write actions -> this
   publisher refuses unless ``metadata['owner_approved']`` is true.
-* Uploads are never retried automatically; a failure is recorded for owner review.
+* A failed upload is never retried blindly: before a retry, ``find_existing`` looks for it among the
+  channel's uploads, because a timed-out resumable upload can still complete (see agents/publisher.py).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from aimz.core.errors import OwnerApprovalRequired, ProviderUnavailable, PublishError
+from aimz.core.errors import CannotVerify, OwnerApprovalRequired, ProviderUnavailable, PublishError
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 from aimz.providers.publishers.packages import write_common_package
@@ -70,6 +72,27 @@ def run_oauth_flow(client_secret_file: Path, token_file: Path, scopes: list[str]
     token_file.parent.mkdir(parents=True, exist_ok=True)
     token_file.write_text(creds.to_json(), encoding="utf-8")
     return creds
+
+
+def sent_title(publication: dict[str, Any]) -> str:
+    """The title exactly as it was sent: from the saved request body, else the stored metadata."""
+    package = Path(str(publication.get("package_dir") or ""))
+    body_file = package / "youtube_request_body.json"
+    if publication.get("package_dir") and body_file.exists():
+        try:
+            return str(json.loads(body_file.read_text(encoding="utf-8"))["snippet"]["title"])
+        except (ValueError, KeyError, TypeError):
+            pass
+    meta = json.loads(publication.get("metadata_json") or "{}")
+    return str(meta.get("title") or "")[:100]
+
+
+def _parse_time(value: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def build_youtube(creds: Any) -> Any:
@@ -203,6 +226,57 @@ class YouTubePublisher(Publisher):
             privacy=body["status"]["privacyStatus"],
             message=f"uploaded as {body['status']['privacyStatus']}",
         )
+
+    def find_existing(self, ctx: ProviderContext, publication: dict[str, Any]) -> PublishResult | None:
+        """Look for this video among the channel's recent uploads (2 quota units, read-only).
+
+        A timed-out resumable upload can still finish on YouTube's side, so before a retry the uploads
+        playlist is searched for the exact title sent, posted no earlier than the first attempt.
+        """
+        if not self.enabled or self.mode == "draft":
+            raise CannotVerify("YouTube is in draft mode; nothing is uploaded")
+        if publication.get("platform_video_id"):
+            vid = str(publication["platform_video_id"])
+            return PublishResult(
+                status="uploaded", platform_video_id=vid, url=f"https://www.youtube.com/watch?v={vid}"
+            )
+        title = sent_title(publication)
+        if not title:
+            raise CannotVerify("no record of the title that was sent")
+        creds = load_credentials(self.token_file, ALL_SCOPES)
+        if creds is None:
+            raise ProviderUnavailable("YouTube OAuth token missing/invalid; run `aimz youtube auth`")
+        since = _parse_time(str(publication.get("created_at") or "")) - timedelta(hours=1)
+        with self.authorized(ctx, "youtube_find_existing") as rec:
+            yt = build_youtube(creds)
+            channels = yt.channels().list(part="contentDetails", mine=True).execute().get("items") or []
+            if not channels:
+                raise CannotVerify("the authorised account has no channel")
+            uploads = channels[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+            items = (
+                yt.playlistItems()
+                .list(part="snippet", playlistId=uploads, maxResults=50)
+                .execute()
+                .get("items")
+                or []
+            )
+            rec.extra["quota_units"] = 2
+        for item in items:
+            sn = item.get("snippet") or {}
+            if sn.get("title") != title:
+                continue
+            published = _parse_time(str(sn.get("publishedAt") or ""))
+            if published < since:
+                continue  # an older video with the same title, not this attempt
+            vid = str((sn.get("resourceId") or {}).get("videoId") or "")
+            if vid:
+                return PublishResult(
+                    status="uploaded",
+                    platform_video_id=vid,
+                    url=f"https://www.youtube.com/watch?v={vid}",
+                    message="found on the channel from an earlier attempt; not uploaded again",
+                )
+        return None
 
     @staticmethod
     def _notes(metadata: dict[str, Any], body: dict[str, Any]) -> str:

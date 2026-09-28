@@ -21,11 +21,13 @@ from aimz.agents.publisher import PublishStage
 from aimz.agents.research import ResearchAgent
 from aimz.agents.script import ScriptAgent
 from aimz.core.errors import BudgetDenied, KillSwitchEngaged
+from aimz.core.lock import exclusive_lock
 from aimz.core.runs import RunContext
 from aimz.experiments.engine import ExperimentEngine
+from aimz.providers.base import Publisher
 from aimz.providers.registry import Services
 from aimz.strategy.memory import StrategyMemory
-from aimz.util import dumps, now_iso
+from aimz.util import dumps, iso_ago, now_iso
 
 log = logging.getLogger("aimz.orchestrator")
 
@@ -64,8 +66,16 @@ class Orchestrator:
 
     # -- full cycle ---------------------------------------------------------------------
     def cycle(self, stages: list[str] | None = None, produce_limit: int | None = None) -> dict[str, Any]:
-        stages = stages or STAGES
+        """Run one cycle. Raises ``CycleAlreadyRunning`` if another cycle holds the lock."""
+        with exclusive_lock(self.svc.env.data_dir / "cycle.lock"):
+            return self._cycle(stages or STAGES, produce_limit)
+
+    def _cycle(self, stages: list[str], produce_limit: int | None) -> dict[str, Any]:
         with self.svc.tracker.run("cycle") as run:
+            run.note("run_id", run.id)
+            # Holding the lock means no other cycle is alive, so anything a dead one left half-done is
+            # finished or set back before this cycle starts on new work.
+            self._safe(run, "recover", lambda: self.recover(run))
             state = self.strategy.current()
             if "research" in stages:
                 self._safe(run, "research", lambda: self.research.run(run))
@@ -92,6 +102,81 @@ class Orchestrator:
             run.note("finished_at", now_iso())
             return dict(run.summary)
 
+    # -- recovery -------------------------------------------------------------------------
+    def recover(self, run: RunContext) -> dict[str, int]:
+        """Close runs that never finished and return the work they left half-done to the queue.
+
+        A shutdown, sleep or crash stops a cycle with no chance to clean up. Nothing it was working on
+        is dropped: ideas go back to ``selected``, a video caught mid-render is marked failed so its
+        (still approved) script renders again, and an upload nobody can finish becomes a failure for the
+        checked retry. Each abandoned run is recorded as an error, so this cycle ends ``degraded`` and the
+        owner is alerted once.
+        """
+        db, tracker = self.svc.db, self.svc.tracker
+        out = {"runs": 0, "ideas": 0, "videos": 0, "uploads": 0}
+        stale = [
+            dict(r)
+            for r in db.query(
+                "SELECT * FROM runs WHERE status='running' AND id<>? AND (kind='cycle' OR started_at < ?)",
+                [run.id, iso_ago(hours=4)],
+            )
+        ]
+        for r in stale:
+            db.update(
+                "runs",
+                r["id"],
+                {
+                    "status": "abandoned",
+                    "ended_at": now_iso(),
+                    "error": f"never finished (shutdown, sleep or crash); closed by {run.id}",
+                },
+            )
+            tracker.record_error(
+                run.id,
+                "orchestrator",
+                "recover",
+                RuntimeError(f"run {r['id']} (started {r['started_at']}) never finished; marked abandoned"),
+            )
+            out["runs"] += 1
+        stale_ids = [r["id"] for r in stale]
+        if stale_ids:
+            marks = ",".join("?" * len(stale_ids))
+            db.execute(
+                f"UPDATE scripts SET status='interrupted', updated_at=? WHERE run_id IN ({marks}) "
+                "AND status IN ('draft','factchecked','qa_passed','qa_failed')",
+                [now_iso(), *stale_ids],
+            )
+        # An idea marked 'scripted' with no live script behind it was being written when its run died.
+        for idea in db.query(
+            "SELECT * FROM ideas i WHERE i.status='scripted' AND i.updated_at < ? AND NOT EXISTS ("
+            "SELECT 1 FROM scripts s WHERE s.idea_id=i.id AND s.status IN ('approved','needs_owner_review','parked'))",
+            [iso_ago(hours=1)],
+        ):
+            self._set_aside(run, dict(idea), RuntimeError("the run writing it never finished"))
+            out["ideas"] += 1
+        # A render that stopped mid-way: the script is still approved, so it renders again this cycle.
+        for v in db.query(
+            "SELECT id FROM videos WHERE status='rendering' AND updated_at < ?", [iso_ago(hours=2)]
+        ):
+            db.update(
+                "videos",
+                v["id"],
+                {"status": "failed", "error": "interrupted mid-render", "updated_at": now_iso()},
+            )
+            out["videos"] += 1
+        # An upload that no poll can finish. The post may or may not exist, so it goes to the checked retry.
+        for pub in db.query("SELECT * FROM publications WHERE status='uploading'"):
+            publisher = self.svc.publishers.get(pub["platform"])
+            can_poll = publisher is not None and type(publisher).poll is not Publisher.poll
+            if pub["updated_at"] < iso_ago(hours=24 if can_poll else 1):
+                self.publisher.record_failure(
+                    run, pub["id"], "upload interrupted before the platform answered", "uncertain"
+                )
+                out["uploads"] += 1
+        if any(out.values()):
+            run.note("recovered", out)
+        return out
+
     def _safe(self, run: RunContext, stage: str, fn: Any) -> Any:
         try:
             return fn()
@@ -117,12 +202,53 @@ class Orchestrator:
         ]
         limit = limit or int(self.svc.config.get("pipeline.max_productions_per_cycle", 2))
         approved: list[str] = []
+        interrupted = 0
         for idea in ideas[:limit]:
-            sid = self.write_one(run, idea, state)
+            try:
+                sid = self.write_one(run, idea, state)
+            except (KillSwitchEngaged, BudgetDenied) as exc:
+                self._set_aside(run, idea, exc, count=False)
+                raise
+            except Exception as exc:
+                log.warning("writing %s failed for a technical reason: %s", idea["id"], exc)
+                self._set_aside(run, idea, exc)
+                interrupted += 1
+                break  # an outage hits every idea alike; stop rather than burn through the queue
             if sid:
                 approved.append(sid)
-        run.note("write", {"approved_scripts": len(approved)})
+        note: dict[str, Any] = {"approved_scripts": len(approved)}
+        if interrupted:
+            note["interrupted"] = interrupted
+        run.note("write", note)
         return approved
+
+    def _set_aside(
+        self, run: RunContext, idea: dict[str, Any], exc: BaseException, count: bool = True
+    ) -> None:
+        """A technical failure is not an editorial verdict: the idea goes back to ``selected`` for the next
+        cycle. After ``pipeline.max_technical_failures`` in a row it is parked for the owner, not rejected."""
+        db = self.svc.db
+        db.execute(
+            "UPDATE scripts SET status='interrupted', updated_at=? WHERE idea_id=? AND run_id=? "
+            "AND status IN ('draft','factchecked','qa_passed','qa_failed')",
+            [now_iso(), idea["id"], run.id],
+        )
+        fresh = db.get("ideas", idea["id"])
+        n = int((fresh["tech_failures"] if fresh else 0) or 0) + (1 if count else 0)
+        limit = int(self.svc.config.get("pipeline.max_technical_failures", 5))
+        why = f"{type(exc).__name__}: {exc}"[:200]
+        if count and n >= limit:
+            status, note = "parked", f"parked after {n} technical failures (last: {why})"
+            self.svc.tracker.record_error(
+                run.id, "orchestrator", "write", RuntimeError(f"idea {idea['id']} {note}")
+            )
+        else:
+            status, note = "selected", f"technical failure {n}/{limit}, retried next cycle: {why}"
+        db.update(
+            "ideas",
+            idea["id"],
+            {"status": status, "tech_failures": n, "eic_notes": note, "updated_at": now_iso()},
+        )
 
     def write_one(self, run: RunContext, idea: dict[str, Any], state: dict[str, Any]) -> str | None:
         max_rounds = int(self.svc.config.get("pipeline.max_revision_rounds", 2))
@@ -171,6 +297,8 @@ class Orchestrator:
                 return script_id if status == "approved" else None
             if round_no > max_rounds:
                 break
+            if not required and not critique.problems:
+                break  # nothing to act on: another round would return the same draft
             feedback = required + [f"Critic score {critique.score}: " + "; ".join(critique.problems[:4])]
             previous = draft
         # revision budget exhausted without a pass
@@ -202,22 +330,35 @@ class Orchestrator:
         scripts = [
             dict(r)
             for r in self.svc.db.query(
-                "SELECT s.* FROM scripts s WHERE s.status='approved' AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.script_id=s.id AND v.status<>'failed') ORDER BY s.created_at LIMIT ?",
+                "SELECT s.* FROM scripts s WHERE s.status='approved' AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.script_id=s.id AND v.status NOT IN ('failed','superseded')) ORDER BY s.created_at LIMIT ?",
                 [limit],
             )
         ]
         out: list[str] = []
+        max_renders = int(self.svc.config.get("pipeline.max_render_attempts", 3))
         for s in scripts:
             try:
                 out.append(self.producer.produce(run, s["id"]))
             except Exception as exc:
                 log.exception("production failed for %s", s["id"])
                 self.svc.tracker.record_error(run.id, "producer", "produce", exc)
+                # A failed render is retried next cycle (the script stays approved). A script that keeps
+                # failing is parked for the owner rather than retried forever.
+                failures = self.svc.db.count("videos", "script_id=? AND status='failed'", [s["id"]])
+                if failures >= max_renders:
+                    self.svc.db.update("scripts", s["id"], {"status": "parked", "updated_at": now_iso()})
+                    self.svc.tracker.record_error(
+                        run.id,
+                        "producer",
+                        "produce",
+                        RuntimeError(f"script {s['id']} parked after {failures} failed renders"),
+                    )
         run.note("produce", {"rendered": len(out)})
         return out
 
     def publish_rendered(self, run: RunContext) -> list[dict[str, Any]]:
         self.publisher.poll_pending(run)
+        self.publisher.retry_due(run)
         videos = [
             dict(r)
             for r in self.svc.db.query(

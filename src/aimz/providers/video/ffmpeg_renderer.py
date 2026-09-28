@@ -62,6 +62,10 @@ def _fmt_ass_time(t: float) -> str:
     return f"{h:d}:{m:02d}:{s:05.2f}"
 
 
+RENDER_TIMEOUT_S = 1800  # a 60-90 s Short renders in a few minutes; this is only a hang guard
+PROBE_TIMEOUT_S = 60
+
+
 def _fmt_srt_time(t: float) -> str:
     t = max(0.0, t)
     h = int(t // 3600)
@@ -112,33 +116,43 @@ class FFmpegRenderer(VideoProvider):
     def _run(self, args: list[str], cwd: Path, label: str) -> None:
         assert self.ffmpeg
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *args]
-        proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+        # A wedged encode used to hold the whole cycle until the task's 4-hour limit killed it mid-run.
+        try:
+            proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=RENDER_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(f"ffmpeg {label} did not finish within {RENDER_TIMEOUT_S} s") from exc
         if proc.returncode != 0:
             raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
 
     def probe_duration(self, path: Path) -> float:
         if self.ffprobe:
-            proc = subprocess.run(
-                [
-                    self.ffprobe,
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=nw=1:nk=1",
-                    str(path),
-                ],
-                capture_output=True,
-                text=True,
-            )
             try:
+                proc = subprocess.run(
+                    [
+                        self.ffprobe,
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=nw=1:nk=1",
+                        str(path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=PROBE_TIMEOUT_S,
+                )
                 return float(proc.stdout.strip())
-            except ValueError:
+            except (ValueError, subprocess.TimeoutExpired):
                 pass
         if not self.ffmpeg:
             raise ProviderUnavailable("ffmpeg not available")
-        proc = subprocess.run([self.ffmpeg, "-i", str(path)], capture_output=True, text=True)
+        try:
+            proc = subprocess.run(
+                [self.ffmpeg, "-i", str(path)], capture_output=True, text=True, timeout=PROBE_TIMEOUT_S
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(f"could not probe duration of {path}: timed out") from exc
         m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", proc.stderr)
         if not m:
             raise ProviderError(f"could not probe duration of {path}")

@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from aimz.domain.models import MetricsSnapshot
 from aimz.providers.registry import Services, build_services
 from aimz.settings import load_feeds, read_text, save_feeds, update_env_file
-from aimz.util import loads, new_id, now_iso
+from aimz.util import iso_ago, loads, new_id, now_iso
 
 HERE = Path(__file__).parent
 
@@ -76,11 +76,12 @@ def create_app(svc: Services | None = None) -> FastAPI:
             "scripts_approved": svc.db.count("scripts", "status='approved'"),
             "scripts_review": svc.db.count("scripts", "status='needs_owner_review'"),
             "videos_rendered": svc.db.count("videos", "status='rendered'"),
-            "videos_published": svc.db.count("videos", "status='published'"),
+            # 'measured' videos are still live; their measurement window has closed.
+            "videos_published": svc.db.count("videos", "status IN ('published','measured')"),
             "publications": svc.db.count("publications"),
             "metrics": svc.db.count("metrics"),
             "experiments_running": svc.db.count("experiments", "status='running'"),
-            "errors_24h": svc.db.count("errors", "created_at > datetime('now','-1 day')"),
+            "errors_24h": svc.db.count("errors", "created_at > ?", [iso_ago(days=1)]),
         }
         return render(
             request,

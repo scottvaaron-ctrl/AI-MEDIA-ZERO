@@ -231,6 +231,37 @@ def test_failed_post_is_reported_not_retried(svc, tmp_path: Path) -> None:  # no
     assert sum(1 for m, p in fake.calls if p.endswith("/video/init/")) == 1
 
 
+def test_find_existing_asks_tiktok_about_the_saved_publish_id(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    pub = TikTokDirectPostPublisher(_client(tmp_path, FakeTikTok()), privacy_level="SELF_ONLY")
+    package = svc.env.data_dir / "pkg"
+    # no publish_id anywhere: init never answered, and a post cannot exist without its upload
+    assert pub.find_existing(svc.ctx(), {"package_dir": str(package), "metadata_json": "{}"}) is None
+    package.mkdir(parents=True)
+    (package / "tiktok_request.json").write_text(json.dumps({"publish_id": "v_pub_file~1"}), encoding="utf-8")
+    found = pub.find_existing(svc.ctx(), {"package_dir": str(package), "metadata_json": "{}"})
+    assert found is not None and found.status == "published" and found.publish_id == "v_pub_file~1"
+
+    failed = TikTokDirectPostPublisher(_client(tmp_path, FakeTikTok(fail=True)), privacy_level="SELF_ONLY")
+    meta = json.dumps({"publish_id": "v_pub_file~1"})
+    assert failed.find_existing(svc.ctx(), {"package_dir": "", "metadata_json": meta}) is None
+
+    busy = TikTokDirectPostPublisher(
+        _client(tmp_path, FakeTikTok(complete_after=99)), privacy_level="SELF_ONLY"
+    )
+    still = busy.find_existing(svc.ctx(), {"package_dir": "", "metadata_json": meta})
+    assert still is not None and still.status == "uploading"
+
+
+def test_privacy_the_creator_cannot_use_is_permanent(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    from aimz.core.errors import PermanentPublishError
+
+    fake = FakeTikTok(privacy_options=("SELF_ONLY",))
+    pub = TikTokDirectPostPublisher(_client(tmp_path, fake), privacy_level="PUBLIC_TO_EVERYONE")
+    video, script, meta = _video(svc)
+    with pytest.raises(PermanentPublishError, match="not allowed"):
+        pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+
+
 def test_token_refresh_when_expired(tmp_path: Path) -> None:
     fake = FakeTikTok()
     client = _client(tmp_path, fake)

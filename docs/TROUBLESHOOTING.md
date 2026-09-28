@@ -35,10 +35,14 @@ Run `aimz doctor` first; it names the missing piece and the fix. Logs: `data/log
 | Dashboard shows stale `.env` values | Restart `aimz dashboard` after editing `.env` (settings are read at startup) |
 | Scheduled task reports success but nothing ran | Windows Smart App Control blocks the unsigned `aimz.exe` shim in `.venv\Scripts`, and PowerShell does not fold a native launch failure into its own exit code. The task launches `python -m aimz` instead; `aimz schedule install` regenerates the runner. Check `data\logs\scheduled.log` for a `FATAL:` line |
 | Scheduled cycle never fires overnight | The task must allow battery, wake, and catch-up. `aimz schedule install` sets all three. It still cannot run while no one is signed in; it catches up at the next logon |
+| Two `=== cycle start` lines a fraction of a second apart, task result 1, no end line (before 2026-09-28) | The old 0900 and 1800 tasks both caught up at wake; the second copy died on the log the first held open. Fixed: one task, a mutex in the runner and a lock in `aimz run`. Re-run `python -m aimz schedule install` if `aimz schedule status` still lists "AI Media Zero 0900"/"1800" |
+| Runs left at `running` in `aimz status` | The machine shut down or slept mid-cycle. The next cycle marks them `abandoned`, re-queues their work and finishes `degraded` so you get one alert |
+| An upload shows `failed` | Retried automatically after the platform confirms it is not already posted (`next_attempt_at`). `abandoned` means its attempts ran out: `python -m aimz publish retry <id>` |
 
 Every scheduled run appends to `data\logs\scheduled.log`, bracketed by `=== cycle start ===`
 and `=== cycle end ... exit=N ===`. A missing end marker means the run was cut short; a non-zero
-`exit` is the cycle's own exit code.
+`exit` is the cycle's own exit code. A copy started while a cycle was running writes one line to
+`data\logs\scheduled-skipped.log` and exits 0.
 
 ## Resetting
 

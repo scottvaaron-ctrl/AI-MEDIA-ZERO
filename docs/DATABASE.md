@@ -50,14 +50,16 @@ erDiagram
 ## Status vocabularies
 
 - `source_items.status`: `new` → `used` | `ignored`
-- `ideas.status`: `candidate` → `selected` → `scripted` → `produced` → `published`; or `rejected` / `killed`
-- `scripts.status`: `draft` → `factchecked` → `qa_passed`/`qa_failed` → `approved` | `needs_owner_review` | `rejected`
-- `videos.status`: `planned` → `rendering` → `rendered` → `approved` → `published`; or `failed` / `rejected`
-- `publications.status`: `pending` → `packaged` | `uploading` → `uploaded` → `published`; or `blocked` / `failed`
+- `runs.status`: `running` → `ok` | `degraded` | `failed` | `killed` | `interrupted` (Ctrl+C) | `abandoned` (never finished; closed by the next cycle)
+- `ideas.status`: `candidate` → `selected` → `scripted` → `produced` → `published`; or `rejected` / `killed` / `parked` (repeated technical failures; `aimz requeue idea`)
+- `scripts.status`: `draft` → `factchecked` → `qa_passed`/`qa_failed` → `approved` | `needs_owner_review` | `rejected`; `interrupted` (its run died); `parked` (renders kept failing; `aimz requeue script`). Each revision round is its own row, so `qa_failed` counts rounds
+- `videos.status`: `planned` → `rendering` → `rendered` → `approved` → `published` → `measured` (measurement window closed); or `failed` / `rejected` / `superseded`
+- `publications.status`: `pending` → `packaged` | `uploading` → `uploaded` → `published`; or `blocked` / `failed` (a checked retry is due at `next_attempt_at`) / `abandoned` (closed out; `aimz publish retry`)
 - `experiments.status`: `proposed` → `running` → `concluded` | `retired`
 
 ## Adding a migration
 
-Create `src/aimz/db/migrations/0002_<name>.sql`; it is applied on the next `connect()`.
-Migrations run inside a transaction and are recorded with a timestamp. Keep them additive
+Create `src/aimz/db/migrations/NNNN_<name>.sql` (next free number); it is applied on the next
+`connect()`. Each migration and its `schema_migrations` row are written in one transaction, so a
+crash can never re-apply a non-repeatable `ALTER`. Keep them additive
 (new tables/columns) so older code paths keep working during a rollout.

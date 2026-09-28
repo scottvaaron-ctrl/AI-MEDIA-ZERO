@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -17,6 +17,31 @@ def utcnow() -> datetime:
 def now_iso() -> str:
     """ISO-8601 UTC timestamp with second precision (sortable, Postgres-compatible)."""
     return utcnow().replace(microsecond=0).isoformat()
+
+
+def iso_ago(*, days: float = 0, hours: float = 0) -> str:
+    """``now_iso()`` shifted into the past, for comparing against stored timestamps.
+
+    Stored timestamps are ISO text with a ``T``; SQLite's ``datetime('now', ...)`` uses a space, and
+    ``'T' > ' '`` makes a text comparison between the two wrong by up to a day.
+    """
+    return (utcnow() - timedelta(days=days, hours=hours)).replace(microsecond=0).isoformat()
+
+
+def iso_ahead(*, hours: float) -> str:
+    return (utcnow() + timedelta(hours=hours)).replace(microsecond=0).isoformat()
+
+
+def hours_since(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        then = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=UTC)
+    return (utcnow() - then).total_seconds() / 3600
 
 
 def month_key(dt: datetime | None = None) -> str:

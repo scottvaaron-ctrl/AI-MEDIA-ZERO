@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from aimz.agents.base import Agent
+from aimz.core.errors import TechnicalFailure
 from aimz.core.runs import RunContext
 from aimz.domain.models import CriticResult, FactCheckResult, ScriptDraft, SourceItemView
 from aimz.util import dumps, now_iso
@@ -53,6 +54,13 @@ AI_SLOP_PATTERNS = [
 ]
 
 
+REASK = (
+    "\n\nYour review scored this script {score}, below the pass mark of {threshold}, but listed no problems "
+    "and no required revisions. List the concrete problems that cost it points, and any change that MUST be "
+    "made (fixable using only the sources). If you find no concrete problem, return empty lists."
+)
+
+
 def _norm(s: str) -> str:
     return " ".join(re.sub(r"[^\w\s$%.]", " ", s.lower()).split())
 
@@ -95,33 +103,50 @@ class CriticAgent(Agent):
             + f"\n\nSources:\n{self.sources_block(sources, 400, text_budget=3000)}\n"
         )
         with self.svc.tracker.agent(run, self.name, "review", {"script_id": script_id}) as span:
-            try:
-                result = self.ask(
-                    self.pctx(run, script_id, span),
-                    "Critic / QA agent",
-                    user,
-                    CriticResult,
-                    "critic_review",
-                    temperature=0.2,
-                    max_tokens=2000,
+
+            def ask(prompt: str) -> CriticResult:
+                try:
+                    return self.ask(
+                        self.pctx(run, script_id, span),
+                        "Critic / QA agent",
+                        prompt,
+                        CriticResult,
+                        "critic_review",
+                        temperature=0.2,
+                        max_tokens=2000,
+                    )
+                except Exception as exc:
+                    # Still fails closed (nothing is approved), but as a technical failure: the idea is
+                    # retried later instead of being rejected as if the script were bad.
+                    raise TechnicalFailure(f"critic model call failed: {type(exc).__name__}: {exc}") from exc
+
+            def gate(r: CriticResult, waive: bool = False) -> CriticResult:
+                return self._overrides(
+                    r.model_copy(deep=True),
+                    draft,
+                    narration,
+                    factcheck,
+                    threshold,
+                    cfg.banned_patterns,
+                    waive_unexplained=waive,
                 )
-            except Exception as exc:
-                self.log.warning("critic model call failed: %s; failing closed", exc)
-                result = CriticResult.model_validate(
-                    {
-                        "pass": False,
-                        "score": 0,
-                        "problems": [f"critic unavailable: {exc}"],
-                        "required_revisions": ["Critic unavailable; retry"],
-                        "hook_strength": 0,
-                        "originality": 0,
-                        "factual_support": 0,
-                        "pacing": 0,
-                        "payoff": 0,
-                        "clarity": 0,
-                    }
-                )
-            result = self._overrides(result, draft, narration, factcheck, threshold, cfg.banned_patterns)
+
+            raw = ask(user)
+            result = gate(raw)
+            if not result.passed and self._unexplained(raw) and gate(raw, waive=True).passed:
+                # The only thing failing the script is a score or verdict the critic gave no reason for,
+                # and the rewrite loop cannot act on no feedback. Ask once for the reasons (owner decision
+                # 2026-09-28); if it still names none, the unexplained score does not gate.
+                span.output_refs["reasked"] = True
+                second = ask(user + REASK.format(score=result.score, threshold=threshold))
+                if self._unexplained(second):
+                    result = gate(second, waive=True)
+                    result.problems.append(
+                        f"critic scored {result.score} (below {threshold}) twice without giving a reason; "
+                        "not gated"
+                    )
+                else:
+                    result = gate(second)
             self.svc.db.update(
                 "scripts",
                 script_id,
@@ -136,6 +161,13 @@ class CriticAgent(Agent):
         return result
 
     @staticmethod
+    def _unexplained(result: CriticResult) -> bool:
+        """The model named no problem and no required change (its own output, before any override)."""
+        return not [p for p in result.problems if p.strip()] and not [
+            r for r in result.required_revisions if r.strip()
+        ]
+
+    @staticmethod
     def _overrides(
         result: CriticResult,
         draft: ScriptDraft,
@@ -143,14 +175,18 @@ class CriticAgent(Agent):
         factcheck: FactCheckResult,
         threshold: int,
         banned: list[str],
+        *,
+        waive_unexplained: bool = False,
     ) -> CriticResult:
+        """Apply the deterministic gate. ``waive_unexplained`` drops the two gates that need no stated
+        reason (the score threshold and the deserves-video verdict); every other gate still applies."""
         low = narration.lower()
         # The gate is computed here, not trusted from the model. Small models often emit a harsh headline
         # score with no listed problems, so the headline is blended with the model's own sub-scores. Only the
         # constitution-backed ones count toward the gate; hook/pacing/payoff/clarity are recorded, not gated.
         derived = (result.originality + result.factual_support) / 2 * 10
         result.score = int(round(0.5 * result.score + 0.5 * derived))
-        result.passed = result.score >= threshold
+        result.passed = result.score >= threshold or waive_unexplained
         for pat in banned:
             if pat in low or pat in draft.title.lower():
                 result.required_revisions.append(f"Remove banned phrase: '{pat}'")
@@ -191,9 +227,9 @@ class CriticAgent(Agent):
         ):
             result.passed = False
             result.required_revisions.append("High policy/deception/copyright risk flagged.")
-        if not result.deserves_video:
+        if not result.deserves_video and not waive_unexplained:
             result.passed = False
-        if result.score < threshold:
+        if result.score < threshold and not waive_unexplained:
             result.passed = False
         if result.required_revisions:
             result.passed = False

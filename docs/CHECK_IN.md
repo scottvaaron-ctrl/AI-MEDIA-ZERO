@@ -81,12 +81,16 @@ happily over-fit if you let it draw conclusions early.
 
 - `aimz status` showing `errors_24h` climbing. Reddit `429` responses were the old recurring one;
   the user agent has since been fixed, so new 429s would mean something changed.
-- `aimz publish list` showing `failed` rows. Failures are never retried automatically, by design.
-  Re-queue one deliberately with `aimz publish retry <publication_id> --approved`.
-- Rows stuck at `uploading`. Bluesky was still encoding when the cycle ended; `aimz publish poll`
-  finishes them.
-- `data\logs\scheduled.log` not growing. The machine was asleep, or the tasks were removed
-  (`aimz schedule status` lists them).
+- Anything under `needs_attention` in `python -m aimz status`. Each entry carries the command that
+  clears it. Since 2026-09-28 a failed upload is retried automatically after the platform confirms
+  the post is not already there; `uploads_closed_out` are the ones that used up their attempts
+  (re-send with `aimz publish retry <publication_id>`). `ideas_parked` / `scripts_parked` hit
+  repeated technical failures (`aimz requeue idea|script <id>`).
+- Rows stuck at `uploading`. Bluesky was still encoding when the cycle ended; the next cycle
+  finishes them. An upload nobody can finish is turned into a checked retry automatically.
+- `data\logs\scheduled.log` not growing. The machine was asleep or off, or the task was removed
+  (`aimz schedule status` lists it: one task, "AI Media Zero"). A copy that started while a cycle
+  was running logs to `data\logs\scheduled-skipped.log` instead.
 - Videos citing anything other than a real article URL. Wikipedia citations were fixed on
   2026-09-08 and verified against the live feeds; a regression there quietly undermines the
   channel's whole claim to be checkable.

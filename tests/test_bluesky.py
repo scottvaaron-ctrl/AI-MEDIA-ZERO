@@ -173,6 +173,14 @@ class FakeBluesky:
                     ]
                 },
             )
+        if nsid == "com.atproto.repo.listRecords":
+            assert params["repo"] == "did:plc:aimz" and params["collection"] == "app.bsky.feed.post"
+            suffixes = [""] + [f"-reply{i}" for i in range(2, len(self.records) + 1)]
+            recs = [
+                {"uri": POST_URI + s, "cid": "bafycid", "value": r}
+                for s, r in zip(suffixes, self.records, strict=True)
+            ]
+            return httpx.Response(200, json={"records": list(reversed(recs))})
         if nsid == "app.bsky.actor.getProfile":
             return httpx.Response(200, json={"handle": "aimz.bsky.social", "followersCount": 120})
         if nsid == "app.bsky.feed.getPostThread":
@@ -435,6 +443,42 @@ def test_failed_sources_reply_does_not_lose_the_post(svc, tmp_path: Path) -> Non
     video, script, meta = _video(svc)
     res = pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
     assert res.status == "published" and "sources reply failed" in res.message
+
+
+def test_a_timed_out_sources_reply_does_not_fail_a_live_post(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    """Only ProviderError was caught: a timeout on the reply escaped, and the post was made again next cycle."""
+
+    class ReplyTimesOut(FakeBluesky):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("com.atproto.repo.createRecord") and self.records:
+                raise httpx.ReadTimeout("reply timed out", request=request)
+            return super().handler(request)
+
+    fake = ReplyTimesOut()
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    res = pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    assert res.status == "published" and "sources reply failed" in res.message
+    assert len(fake.records) == 1
+
+
+def test_find_existing_sees_a_post_an_earlier_attempt_made(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    from aimz.util import iso_ago
+
+    fake = FakeBluesky()
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    package = svc.env.data_dir / "pkg"
+    publication = {"package_dir": str(package), "created_at": iso_ago(hours=1), "metadata_json": "{}"}
+    # nothing was ever attempted: no saved request, so nothing can exist
+    assert pub.find_existing(svc.ctx(), publication) is None
+    pub.publish(svc.ctx(), video, script, meta, package)  # say the answer was lost on the way back
+    found = pub.find_existing(svc.ctx(), publication)
+    assert found is not None and found.status == "published" and found.platform_video_id == POST_URI
+    assert sum(1 for _m, nsid in fake.calls if nsid == "com.atproto.repo.createRecord") == 2  # post + reply
+    # a post older than the first attempt is someone else's (an earlier video with the same text)
+    later = {**publication, "created_at": "2999-01-01T00:00:00+00:00"}
+    assert pub.find_existing(svc.ctx(), later) is None
 
 
 def test_create_record_failure_raises_publish_error(svc, tmp_path: Path) -> None:  # noqa: ANN001

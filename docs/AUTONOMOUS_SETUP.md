@@ -169,15 +169,19 @@ or you approve the video.
 aimz schedule install --times 09:00,18:00
 ```
 
-This registers two Windows Task Scheduler jobs that run `aimz run` daily at those times and log to
-`data\logs\scheduled.log`. `aimz schedule status` lists them; `aimz schedule remove` deletes them.
-The laptop must be on (not asleep) at those times; set Power options to "never sleep when plugged in".
+This registers **one** Windows Task Scheduler job, "AI Media Zero", with a daily trigger for each
+time; it runs `aimz run` and logs to `data\logs\scheduled.log`. Installing also deletes any other
+"AI Media Zero ..." task, including the old one-task-per-time layout ("AI Media Zero 0900" /
+"1800") used before 2026-09-28: those two could both catch up at wake and run at once.
+`aimz schedule status` lists it; `aimz schedule remove` deletes it. The laptop must be on (not
+asleep) at those times; set Power options to "never sleep when plugged in".
 
-The tasks are registered at the root of the Task Scheduler Library (not inside a subfolder): open
+The task is registered at the root of the Task Scheduler Library (not inside a subfolder): open
 Task Scheduler, click **Task Scheduler Library** itself, and look in the middle pane for
-"AI Media Zero 0900" and "AI Media Zero 1800". Both already have "Wake the computer to run this
-task" and "Run task as soon as possible after a scheduled start is missed" set (see `_task_xml`).
-If they are missing, run `python -m aimz schedule install --times 09:00,18:00` again.
+"AI Media Zero". It already has "Wake the computer to run this task" and "Run task as soon as
+possible after a scheduled start is missed" set (see `_task_xml`). If it is missing, run
+`python -m aimz schedule install --times 09:00,18:00` again. A copy that starts while a cycle is
+still running exits at once and notes it in `data\logs\scheduled-skipped.log`.
 
 `scripts/run-cycle.ps1` starts `ollama serve` itself if the Ollama API is not answering, and waits
 up to 60 s for it before running the cycle (added 2026-09-13 after scheduled runs failed with

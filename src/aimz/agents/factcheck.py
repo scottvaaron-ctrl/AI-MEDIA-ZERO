@@ -14,8 +14,9 @@ from __future__ import annotations
 import re
 
 from aimz.agents.base import Agent
+from aimz.core.errors import TechnicalFailure
 from aimz.core.runs import RunContext
-from aimz.domain.models import ClaimVerdict, FactCheckResult, ScriptDraft, SourceItemView
+from aimz.domain.models import FactCheckResult, ScriptDraft, SourceItemView
 from aimz.util import dumps, now_iso
 
 _NUM_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d{3,})(?![\w.])")
@@ -85,15 +86,9 @@ class FactCheckAgent(Agent):
                     max_tokens=2500,
                 )
             except Exception as exc:
-                self.log.warning("fact-check model call failed: %s; treating all claims as weak", exc)
-                result = FactCheckResult(
-                    verdicts=[
-                        ClaimVerdict(claim_index=i, status="weak", note="model unavailable")
-                        for i in range(len(draft.claims))
-                    ],
-                    overall="revise",
-                    notes=str(exc)[:200],
-                )
+                # A dead model says nothing about the claims. Softening every claim as "weak" turned an
+                # outage into a content revision; it is a technical failure, retried later.
+                raise TechnicalFailure(f"fact-check model call failed: {type(exc).__name__}: {exc}") from exc
             revisions = self._apply(script_id, draft, result, flagged)
             span.output_refs["overall"] = result.overall
             span.output_refs["flagged_specifics"] = flagged

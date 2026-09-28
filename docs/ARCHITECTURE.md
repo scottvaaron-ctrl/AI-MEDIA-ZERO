@@ -127,9 +127,15 @@ file. Everything runs from a `work/` directory with relative paths to avoid Wind
 
 - Every top-level invocation gets a `run_id`; every agent operation an `agent_runs` span with
   input/output refs, duration, error, estimated and actual cost.
-- Idempotent operations (feed fetch, model calls) use bounded retries; uploads never do.
-- Publications are a state machine keyed by `(video, platform, mode)`; a failed upload waits
-  for an explicit owner retry.
+- Idempotent operations (feed fetch, model calls) use bounded retries; uploads never do so
+  blindly.
+- Publications are a state machine keyed by `(video, platform, mode)`. A failed upload is retried
+  by `PublishStage.retry_due()` only after `Publisher.find_existing()` confirms the earlier
+  attempt did not post, up to `publishing.max_attempts`, then closed out as `abandoned` with an
+  alert (owner decision 2026-09-28).
+- A technical failure (model outage, timeout) is `TechnicalFailure`, never an editorial verdict:
+  the idea goes back to the queue. A cycle holds a file lock; at its start `Orchestrator.recover()`
+  closes runs that never finished and re-queues their work.
 - The kill switch is a sentinel file **and** a DB flag; either engages it.
 - Structured JSON logs at `data/logs/aimz.jsonl`.
 

@@ -53,12 +53,59 @@ def test_venv_python_falls_back_to_current_interpreter(tmp_path: Path) -> None:
 
 
 def test_task_xml_survives_battery_and_sleep(project: Path) -> None:
-    xml = scheduler._task_xml("09:00", project / "scripts" / "run-cycle.ps1", project)
+    xml = scheduler._task_xml(["09:00"], project / "scripts" / "run-cycle.ps1", project)
     assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in xml
     assert "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" in xml
     assert "<StartWhenAvailable>true</StartWhenAvailable>" in xml
     assert "<WakeToRun>true</WakeToRun>" in xml
     assert "T09:00:00</StartBoundary>" in xml
+
+
+def test_one_task_carries_every_time_so_they_cannot_overlap(project: Path) -> None:
+    """Two tasks both caught up at wake and ran together; one task's IgnoreNew skips the second trigger."""
+    xml = scheduler._task_xml(["09:00", "18:00"], project / "scripts" / "run-cycle.ps1", project)
+    assert xml.count("<CalendarTrigger>") == 2
+    assert "T09:00:00</StartBoundary>" in xml and "T18:00:00</StartBoundary>" in xml
+    assert "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" in xml
+    assert scheduler.task_name() == "AI Media Zero"
+    assert scheduler.task_name("09:00") == "AI Media Zero 0900"  # the old layout, found for removal
+
+
+def test_runner_takes_the_mutex_before_touching_the_log(project: Path) -> None:
+    body = scheduler.runner_script(project).read_text(encoding="utf-8")
+    assert "System.Threading.Mutex($false, 'Local\\AIMediaZeroCycle')" in body
+    assert body.index("$mutex.WaitOne(0)") < body.index("=== cycle start")
+    # a skipped copy writes to its own file, never to the log the running cycle holds open
+    skip = body[body.index("if (-not $owned)") : body.index("=== cycle start")]
+    assert "$skipLog" in skip and "$log " not in skip and "exit 0" in skip
+    assert "$mutex.ReleaseMutex()" in body
+
+
+def test_install_creates_the_new_task_before_removing_old_ones(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    tasks = ["AI Media Zero 0900", "AI Media Zero 1800"]
+
+    class Proc:
+        returncode = 0
+        stdout = stderr = ""
+
+    def fake_run(cmd: list[str], **_kw: object) -> Proc:
+        calls.append(cmd)
+        if cmd[1] == "/Create":
+            tasks.append(cmd[4])
+        elif cmd[1] == "/Delete":
+            tasks.remove(cmd[4])
+        return Proc()
+
+    monkeypatch.setattr(scheduler.os, "name", "nt")
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+    monkeypatch.setattr(scheduler, "list_tasks", lambda: list(tasks))
+    name, removed = scheduler.install(project, ["09:00", "18:00"])
+    assert name == "AI Media Zero" and tasks == ["AI Media Zero"]
+    assert sorted(removed) == ["AI Media Zero 0900", "AI Media Zero 1800"]
+    assert calls[0][1] == "/Create"  # created (and confirmed) before anything is deleted
 
 
 def test_cron_line_also_uses_the_interpreter(project: Path) -> None:

@@ -23,8 +23,8 @@ from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import StrategyUpdate
 from aimz.experiments.allocation import family_stats
-from aimz.experiments.engine import ExperimentEngine
-from aimz.util import now_iso
+from aimz.experiments.engine import MEASURABLE_KPIS, ExperimentEngine
+from aimz.util import hours_since, iso_ago, now_iso
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -71,7 +71,8 @@ class AnalystAgent(Agent):
         pubs = [
             dict(r)
             for r in self.svc.db.query(
-                "SELECT * FROM publications WHERE status IN ('uploaded','published') AND platform_video_id IS NOT NULL"
+                "SELECT * FROM publications WHERE status IN ('uploaded','published') AND platform_video_id IS NOT NULL "
+                "AND metrics_closed_at IS NULL"
             )
         ]
         for pub in pubs:
@@ -91,7 +92,55 @@ class AnalystAgent(Agent):
                     self.svc.analytics_store.record(pub, snap, source="api")
                     n += 1
         run.note("metrics_collected", n)
+        closed = self.close_measurement_windows()
+        if closed["publications"] or closed["videos"]:
+            run.note("measurement_closed", closed)
         return n
+
+    def close_measurement_windows(self) -> dict[str, int]:
+        """End metric collection for posts older than ``analytics.measurement_window_days``.
+
+        The score is taken at 72 h; collection carries on to catch late views, likes and subscribers, then
+        stops so every cycle does not keep spending API quota on finished videos. A publication is closed
+        only after at least one snapshot taken past the window (or when its platform reports no metrics at
+        all). A video whose every live publication is closed becomes ``measured``.
+        """
+        db = self.svc.db
+        days = float(self.svc.config.get("analytics.measurement_window_days", 14))
+        window_h = days * 24
+        closed_pubs = 0
+        for pub in db.query(
+            "SELECT * FROM publications WHERE status IN ('uploaded','published') AND metrics_closed_at IS NULL "
+            "AND posted_at IS NOT NULL"
+        ):
+            age = hours_since(pub["posted_at"])
+            if age is None or age < window_h:
+                continue
+            measurable = pub["platform_video_id"] is not None and pub["platform"] in self.svc.remote_analytics
+            final = db.one(
+                "SELECT 1 FROM metrics WHERE publication_id=? AND hours_since_post >= ? LIMIT 1",
+                [pub["id"], window_h],
+            )
+            if measurable and final is None:
+                continue  # take one snapshot past the window first (next collection does)
+            db.update("publications", pub["id"], {"metrics_closed_at": now_iso(), "updated_at": now_iso()})
+            closed_pubs += 1
+        closed_videos = 0
+        for v in db.query("SELECT id FROM videos WHERE status='published'"):
+            open_pubs = db.count(
+                "publications",
+                "video_id=? AND status IN ('uploaded','published') AND metrics_closed_at IS NULL",
+                [v["id"]],
+            )
+            live = db.count("publications", "video_id=? AND status IN ('uploaded','published')", [v["id"]])
+            if live and not open_pubs:
+                db.update(
+                    "videos",
+                    v["id"],
+                    {"status": "measured", "measured_at": now_iso(), "updated_at": now_iso()},
+                )
+                closed_videos += 1
+        return {"publications": closed_pubs, "videos": closed_videos}
 
     # -- 2-6. learning --------------------------------------------------------------------
     def source_stats(self) -> list[dict[str, Any]]:
@@ -103,9 +152,12 @@ class AnalystAgent(Agent):
     def evidence(self, perf_rows: list[dict[str, Any]], strategy_state: dict[str, Any]) -> dict[str, Any]:
         fam = family_stats(perf_rows, strategy_state["families"])
         return {
-            "measured_videos": sum(1 for r in perf_rows if r.get("score") is not None),
-            "published_videos": self.svc.db.count("publications", "status IN ('uploaded','published')"),
-            "rendered_videos": self.svc.db.count("videos", "status IN ('rendered','approved','published')"),
+            "measured_videos": len({r.get("video_id") for r in perf_rows if r.get("score") is not None}),
+            "late_scores": sum(1 for r in perf_rows if r.get("score_late")),
+            "published_videos": self.published_video_count(),
+            "rendered_videos": self.svc.db.count(
+                "videos", "status IN ('rendered','approved','published','measured')"
+            ),
             "families": {
                 k: {"n": v.n, "mean": round(v.mean, 3) if v.n else None, "status": v.status}
                 for k, v in fam.items()
@@ -119,19 +171,31 @@ class AnalystAgent(Agent):
             "family_stat_objs": fam,
         }
 
+    def published_video_count(self) -> int:
+        """Distinct videos live on at least one platform (not publications: one video posts to three)."""
+        return int(
+            self.svc.db.scalar(
+                "SELECT COUNT(DISTINCT video_id) FROM publications WHERE status IN ('uploaded','published')",
+                [],
+                0,
+            )
+            or 0
+        )
+
     def _bottlenecks(self) -> dict[str, Any]:
         avg_prod = self.svc.db.scalar(
             "SELECT AVG(production_seconds) FROM videos WHERE production_seconds IS NOT NULL", [], None
         )
         failed = self.svc.db.count("videos", "status='failed'")
-        rejected = self.svc.db.count("scripts", "status='rejected'")
+        rejected = self.svc.db.count("ideas", "status='rejected' AND eic_notes='failed QA after revisions'")
+        # Each revision round is its own script row, so this counts rounds, not scripts.
         qa_fail = self.svc.db.count("scripts", "status='qa_failed'")
-        errors = self.svc.db.count("errors", "created_at > datetime('now','-7 days')")
+        errors = self.svc.db.count("errors", "created_at > ?", [iso_ago(days=7)])
         return {
             "avg_production_seconds": round(float(avg_prod), 1) if avg_prod else None,
             "failed_renders": failed,
-            "rejected_scripts": rejected,
-            "qa_failed_scripts": qa_fail,
+            "ideas_rejected_by_qa": rejected,
+            "qa_failed_rounds": qa_fail,
             "errors_7d": errors,
         }
 
@@ -179,8 +243,10 @@ class AnalystAgent(Agent):
             "Do not declare winners from tiny samples; do not let one video lock the strategy. Propose at most one new experiment, only if none is running on that variable. "
             "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels), "
             "runtime (two integer runtimes in seconds), or target_platform (tiktok, youtube_shorts, both). "
+            f"Its primary_kpi must be one of the measured metrics: {', '.join(MEASURABLE_KPIS)}. "
             "Suggest an explore ratio between 0.25 and 0.8 that fits the evidence (more evidence -> less exploration). Write a one-paragraph audience model and a concise change_summary.\n\n"
-            f"Measured videos: {ev['measured_videos']} (published {ev['published_videos']}, rendered {ev['rendered_videos']})\n"
+            f"Measured videos: {ev['measured_videos']} (published {ev['published_videos']}, rendered {ev['rendered_videos']}; "
+            f"{ev['late_scores']} scored later than 120 h after posting because collection missed the 72 h window)\n"
             f"Families:\n{fam_lines}\nHooks:\n{hook_lines}\nRuntime buckets:\n{rt_lines}\nSources:\n{src_lines}\nExperiments:\n{exp_lines}\n"
             f"Top videos:\n{top_lines}\nProduction bottlenecks: {ev['bottlenecks']}\n"
             f"Audience requests so far: {'; '.join(strategy_state.get('audience_requests', [])) or 'none'}\n"
@@ -271,6 +337,7 @@ class AnalystAgent(Agent):
             "",
             f"Strategy version: {state.get('version')}  |  confidence: {state.get('confidence', 0):.2f}  |  explore ratio: {state.get('explore_ratio', 0.7):.0%}",
             f"Measured videos: {ev['measured_videos']}  |  published: {ev['published_videos']}  |  rendered: {ev['rendered_videos']}",
+            f"Scored late (after 120 h; collection missed the 72 h window): {ev['late_scores']}",
             "",
             "## What changed",
             change_summary or "(no change)",
@@ -370,14 +437,15 @@ class AnalystAgent(Agent):
         perf = self.svc.analytics_store.video_performance()
         measured = [r for r in perf if r.get("score") is not None]
         fams = {r["content_family"] for r in measured if r.get("content_family")}
-        published = self.svc.db.count("publications", "status IN ('uploaded','published')")
+        published = self.published_video_count()
+        n_measured = len({r.get("video_id") for r in measured})
         return {
             "published_videos": published,
             "target_published": 30,
-            "measured_videos": len(measured),
+            "measured_videos": n_measured,
             "distinct_families_measured": len(fams),
             "target_families": 3,
             "strategy_versions": len(self.strategy.history(500)),
             "experiments_concluded": self.svc.db.count("experiments", "status='concluded'"),
-            "validated": published >= 30 and len(fams) >= 3 and len(measured) >= 20,
+            "validated": published >= 30 and len(fams) >= 3 and n_measured >= 20,
         }

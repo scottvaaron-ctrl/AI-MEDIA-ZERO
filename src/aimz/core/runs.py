@@ -79,6 +79,11 @@ class RunTracker:
             self.record_error(ctx.id, "run", kind, exc)
             self.finish(ctx, "failed", f"{type(exc).__name__}: {exc}")
             raise
+        except (
+            BaseException
+        ) as exc:  # Ctrl+C, console closed, SystemExit: close the row, not leave it running
+            self.finish(ctx, "interrupted", f"{type(exc).__name__}: {exc}"[:500])
+            raise
         else:
             degraded = self.error_summary(ctx.id)
             self.finish(ctx, "degraded" if degraded else "ok", degraded)

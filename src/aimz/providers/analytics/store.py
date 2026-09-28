@@ -30,6 +30,8 @@ RATE_PRIOR_VIEWS = 200
 # Videos are compared at the same age: the first snapshot at least this old. Views level off within
 # about two days, and YouTube Analytics (retention, shares, subscribers) lags one to two days.
 SCORE_AT_HOURS = 72.0
+# A score taken after this age was not taken on time (collection missed the window), so it is flagged.
+LATE_SCORE_HOURS = 120.0
 
 
 def _shrunk(pct: float, views: int) -> float:
@@ -169,9 +171,17 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
             pub = self.db.get("publications", m["publication_id"])
             snap = self.scoring_snapshot(m)
             score = performance_score(snap) if snap else None
+            age = snap.get("hours_since_post") if snap else None
             out.append(
                 {
                     **m,
+                    # The snapshot the score comes from, and how old the video was then. A video whose
+                    # 72-hour window was missed (an outage) is scored later; that is flagged, not hidden.
+                    "scored_metrics": snap,
+                    "score_age_h": age,
+                    "score_late": bool(
+                        score is not None and age is not None and float(age) > LATE_SCORE_HOURS
+                    ),
                     "title": v["title"],
                     "duration_s": v["duration_s"],
                     "content_family": idea["content_family"] if idea else None,

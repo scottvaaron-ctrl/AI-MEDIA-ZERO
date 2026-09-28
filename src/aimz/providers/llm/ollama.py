@@ -99,16 +99,20 @@ class OllamaProvider(LLMProvider):
                     raise _Fatal(f"Ollama error {r.status_code}: {r.text[:300]}")
                 return r.json()
 
+            # Server errors and a refused connection are retried. A timeout is not: it already waited
+            # timeout_s (10 min), and three of them in a row held a cycle for half an hour per call.
             try:
                 data = retry(
                     _call,
                     attempts=3,
                     base_delay=2.0,
-                    retry_on=(ProviderError, httpx.TimeoutException),
+                    retry_on=(ProviderError,),
                     label="ollama chat",
                 )
             except _Fatal as exc:
                 raise ProviderError(str(exc)) from exc
+            except httpx.TimeoutException as exc:
+                raise ProviderError(f"Ollama did not answer within {self.timeout_s} s") from exc
 
             msg = data.get("message", {}) or {}
             text = msg.get("content", "") or ""
