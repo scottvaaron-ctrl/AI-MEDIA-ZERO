@@ -1,9 +1,9 @@
 # Strategy Memory (AI-editable within the constitution)
 
-_Version 32 — updated 2026-09-29T13:04:39+00:00 — confidence 0.10_
+_Version 33 — updated 2026-09-29T20:37:06+00:00 — confidence 0.10_
 
 ## Current audience model
-Cold start: curious, general-interest short-form viewers with no prior engagement data. Assume minimal historical knowledge and interest in niche topics until verified. Prioritize clarity and relevance over complexity. Longer formats (35-60s) show higher engagement than shorter videos (<35s).
+Cold start: curious, general-interest short-form viewers with minimal historical knowledge. Prioritize clarity and relevance. Longer formats (35-60s) show higher engagement than shorter videos (<35s).
 
 ## Exploration ratio
 70% of production slots explore.
