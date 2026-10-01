@@ -1,12 +1,12 @@
 # AI Media Zero — Privacy Policy
 
-_Last updated: 2026-09-08_
+_Last updated: 2026-10-01_
 
 AI Media Zero ("the software") is an open-source desktop program that a single person runs on
 their own computer to produce short educational videos and publish them to that person's own
 accounts on YouTube, TikTok and Bluesky. It is not a hosted service and has no accounts, sign-up,
-or third-party users. Each platform integration is authorized separately by the person running the
-software, for their own account only.
+or third-party users. The person running it may connect several of their own YouTube channels; each
+channel is authorized separately, for that channel only, and its data is kept separately.
 
 ## Use of YouTube API Services
 
@@ -22,12 +22,16 @@ consent screen, with these scopes:
 | Scope | Purpose |
 |---|---|
 | `youtube.upload` | upload videos the software produced to the authorizing user's own channel |
-| `youtube.readonly` | read comments posted on the authorizing user's own videos |
-| `yt-analytics.readonly` | read the authorizing user's own channel analytics (views, watch time, average view percentage, shares, subscribers gained) |
+| `youtube.readonly` | identify the authorized channel; read the view, like and comment counts of the channel's own videos and its subscriber and total view counts; check the channel's own uploads list so an interrupted upload is never posted twice; read comments posted on the channel's own videos |
+| `yt-analytics.readonly` | read the channel's own analytics (views, watch time, average view duration and percentage, likes, comments, shares, subscribers gained) |
+| `yt-analytics-monetary.readonly` | read the channel's own estimated revenue reports (estimated revenue, ad revenue, CPM) once the channel is in the YouTube Partner Program |
 
-The software does not access any other channel's private data, and does not collect personal
-information about viewers. Public comment text is read only to classify audience feedback for the
-channel owner.
+The software does not access any other channel's private data. The only information about other
+people it handles is the **public comments** on the channel's own videos: the commenter's display name
+and the comment text. They are used only to classify audience feedback (for example a request for a
+topic) for the channel owner, are never published or shared, and are deleted as described below. The
+software computes its own internal score from the channel's statistics to decide what kind of video to
+make next; that score is not shown to anyone outside the owner's computer.
 
 ## Use of TikTok APIs
 
@@ -58,16 +62,29 @@ own follower count, and replies to its own posts. Revoking the app password imme
 
 ## Where data is stored and for how long
 
-All data (analytics numbers, comment text, OAuth tokens) is stored **only on the computer where
-the software runs**, in a local SQLite database file and local token files. Nothing is sent to any
-server operated by the software's authors. Analytics data is refreshed on each run and kept until
-the owner deletes the local database. Data is not sold, shared, or transferred to any third party.
+All data (statistics, comments, OAuth tokens) is stored **only on the computer where the software
+runs**, in a local SQLite database file and local token files, one set per channel. Nothing is sent to
+any server operated by the software's authors. Data is not sold, shared, or transferred to any third
+party.
+
+- **YouTube statistics and analytics** (counts and percentages for the channel's own videos) are kept
+  while the channel's authorization remains valid. Each video's figures are collected for 14 days after
+  it is posted. The software checks on every run that it is still authorized.
+- **YouTube comments** (commenter display name and text) are refreshed while the software still reads
+  that video's comments, and are **deleted automatically once they have not been refreshed for 30
+  days**, together with any comment text copied into a topic lead.
+- **Upload responses** returned by YouTube are reduced to the video's id after 30 days.
+- **If the authorization is revoked or stops working** for 7 days, or has not been confirmed for 30
+  days, all YouTube data for that channel (statistics, analytics, comments, upload responses, video ids
+  and links, and the token) is **deleted automatically**.
 
 ## Deleting data and revoking access
 
 - Delete all stored data at any time by deleting the local `data/` folder, and all stored
   credentials by deleting the local `secrets/` folder.
-- Revoke Google access at <https://security.google.com/settings/security/permissions>.
+- Revoke Google access at <https://security.google.com/settings/security/permissions>. The software
+  then deletes that channel's YouTube data within 7 days (see above). To revoke and delete at once, the
+  owner runs `python -m aimz youtube revoke` for that channel.
 - Revoke TikTok access in the TikTok app: Settings -> Security and permissions -> Manage app permissions.
 - Revoke Bluesky access by deleting the app password in Bluesky settings.
 
@@ -83,5 +100,5 @@ An AI disclosure and a source list accompany every video.
 
 ## Contact
 
-Questions about this policy: open an issue on the project's source repository or contact the
-channel owner listed on the channel's About page.
+Questions about this policy or the data described here: email backhousegroupnj@gmail.com, or open an
+issue on the project's source repository.

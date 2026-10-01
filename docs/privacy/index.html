@@ -34,12 +34,12 @@
   <a href="https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO">Source</a>
 </nav>
 <h1>AI Media Zero — Privacy Policy</h1>
-<p><em>Last updated: 2026-09-08</em></p>
+<p><em>Last updated: 2026-10-01</em></p>
 <p>AI Media Zero ("the software") is an open-source desktop program that a single person runs on
 their own computer to produce short educational videos and publish them to that person's own
 accounts on YouTube, TikTok and Bluesky. It is not a hosted service and has no accounts, sign-up,
-or third-party users. Each platform integration is authorized separately by the person running the
-software, for their own account only.</p>
+or third-party users. The person running it may connect several of their own YouTube channels; each
+channel is authorized separately, for that channel only, and its data is kept separately.</p>
 <h2>Use of YouTube API Services</h2>
 <p>The software uses <strong>YouTube API Services</strong>. By using it you agree to be bound by the
 <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. Google's handling of your data is
@@ -61,17 +61,28 @@ consent screen, with these scopes:</p>
 </tr>
 <tr>
 <td><code>youtube.readonly</code></td>
-<td>read comments posted on the authorizing user's own videos</td>
+<td>identify the authorized channel; read the view, like and comment counts of the channel's own videos
+and its subscriber and total view counts; check the channel's own uploads list so an interrupted upload is
+never posted twice; read comments posted on the channel's own videos</td>
 </tr>
 <tr>
 <td><code>yt-analytics.readonly</code></td>
-<td>read the authorizing user's own channel analytics (views, watch time, average view percentage, shares, subscribers gained)</td>
+<td>read the channel's own analytics (views, watch time, average view duration and percentage, likes,
+comments, shares, subscribers gained)</td>
+</tr>
+<tr>
+<td><code>yt-analytics-monetary.readonly</code></td>
+<td>read the channel's own estimated revenue reports (estimated revenue, ad revenue, CPM) once the
+channel is in the YouTube Partner Program</td>
 </tr>
 </tbody>
 </table>
-<p>The software does not access any other channel's private data, and does not collect personal
-information about viewers. Public comment text is read only to classify audience feedback for the
-channel owner.</p>
+<p>The software does not access any other channel's private data. The only information about other
+people it handles is the <strong>public comments</strong> on the channel's own videos: the commenter's
+display name and the comment text. They are used only to classify audience feedback (for example a
+request for a topic) for the channel owner, are never published or shared, and are deleted as described
+below. The software computes its own internal score from the channel's statistics to decide what kind
+of video to make next; that score is not shown to anyone outside the owner's computer.</p>
 <h2>Use of TikTok APIs</h2>
 <p>The software optionally uses TikTok's <strong>Login Kit</strong>, <strong>Content Posting API</strong> (Direct Post) and
 <strong>Display API</strong>, authorized by the account owner through TikTok's own OAuth consent screen. Use of
@@ -114,15 +125,29 @@ owner creates and can revoke at any time in Bluesky under Settings -&gt; Privacy
 Passwords. It reads back only its own posts' like, reply, repost and quote counts, the account's
 own follower count, and replies to its own posts. Revoking the app password immediately ends access.</p>
 <h2>Where data is stored and for how long</h2>
-<p>All data (analytics numbers, comment text, OAuth tokens) is stored <strong>only on the computer where
-the software runs</strong>, in a local SQLite database file and local token files. Nothing is sent to any
-server operated by the software's authors. Analytics data is refreshed on each run and kept until
-the owner deletes the local database. Data is not sold, shared, or transferred to any third party.</p>
+<p>All data (statistics, comments, OAuth tokens) is stored <strong>only on the computer where the
+software runs</strong>, in a local SQLite database file and local token files, one set per channel.
+Nothing is sent to any server operated by the software's authors. Data is not sold, shared, or
+transferred to any third party.</p>
+<ul>
+<li><strong>YouTube statistics and analytics</strong> (counts and percentages for the channel's own
+  videos) are kept while the channel's authorization remains valid. Each video's figures are collected
+  for 14 days after it is posted. The software checks on every run that it is still authorized.</li>
+<li><strong>YouTube comments</strong> (commenter display name and text) are refreshed while the
+  software still reads that video's comments, and are <strong>deleted automatically once they have
+  not been refreshed for 30 days</strong>, together with any comment text copied into a topic lead.</li>
+<li><strong>Upload responses</strong> returned by YouTube are reduced to the video's id after 30 days.</li>
+<li><strong>If the authorization is revoked or stops working</strong> for 7 days, or has not been
+  confirmed for 30 days, all YouTube data for that channel (statistics, analytics, comments, upload
+  responses, video ids and links, and the token) is <strong>deleted automatically</strong>.</li>
+</ul>
 <h2>Deleting data and revoking access</h2>
 <ul>
 <li>Delete all stored data at any time by deleting the local <code>data/</code> folder, and all stored
   credentials by deleting the local <code>secrets/</code> folder.</li>
-<li>Revoke Google access at <a href="https://security.google.com/settings/security/permissions">https://security.google.com/settings/security/permissions</a>.</li>
+<li>Revoke Google access at <a href="https://security.google.com/settings/security/permissions">https://security.google.com/settings/security/permissions</a>.
+  The software then deletes that channel's YouTube data within 7 days (see above). To revoke and delete
+  at once, the owner runs <code>python -m aimz youtube revoke</code> for that channel.</li>
 <li>Revoke TikTok access in the TikTok app: Settings -&gt; Security and permissions -&gt; Manage app permissions.</li>
 <li>Revoke Bluesky access by deleting the app password in Bluesky settings.</li>
 </ul>
@@ -134,11 +159,12 @@ declares this to the platform it is posted on: YouTube's altered/synthetic conte
 <code>is_aigc</code> AI-generated content label, and an explicit "AI-narrated" line in the Bluesky post text.
 An AI disclosure and a source list accompany every video.</p>
 <h2>Contact</h2>
-<p>Questions about this policy: open an issue on the project's source repository or contact the
-channel owner listed on the channel's About page.</p>
+<p>Questions about this policy or the data described here: email
+<a href="mailto:backhousegroupnj@gmail.com">backhousegroupnj@gmail.com</a>, or open an issue on the project's
+source repository.</p>
 <footer>
   AI Media Zero is free, open-source software (MIT). Generated from
-  <a href="https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO/blob/main/PRIVACY.md">PRIVACY.md</a> on 2026-09-08.
+  <a href="https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO/blob/main/PRIVACY.md">PRIVACY.md</a> on 2026-10-01.
 </footer>
 </body>
 </html>
