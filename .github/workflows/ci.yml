@@ -29,7 +29,7 @@ jobs:
         run: ruff format --check src tests
       - name: Type check
         run: mypy
-      - name: Tests (offline: fixture LLM, silent TTS, bundled ffmpeg)
+      - name: "Tests (offline: fixture LLM, silent TTS, bundled ffmpeg)"
         env:
           LLM_PROVIDER: fixture
           TTS_PROVIDER: silent
