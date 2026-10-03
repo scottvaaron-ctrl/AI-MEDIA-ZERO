@@ -43,7 +43,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         snap = svc.budget.snapshot()
         base = {
             "request": request,
-            "title": svc.config.get("dashboard.title", "AI Media Zero"),
+            "title": svc.config.get("dashboard.title", svc.config.get("project.name", "AI Media Zero")),
             "kill": ks,
             "budget": snap,
             "env": svc.env,
@@ -209,7 +209,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
             md=row["markdown"] if row else "",
             state=state,
             history=orch.strategy.history(20),
-            constitution=read_text(svc.env.config_dir / "constitution.md"),
+            constitution=read_text(svc.env.constitution_file),
         )
 
     @app.get("/feeds", response_class=HTMLResponse)
@@ -237,7 +237,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         return render(
             request,
             "controls.html",
-            constitution=read_text(svc.env.config_dir / "constitution.md"),
+            constitution=read_text(svc.env.constitution_file),
             state=orch.strategy.current(),
             env_text=_masked_env(svc.env.env_file),
         )
@@ -305,7 +305,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
 
     @app.post("/controls/constitution")
     def edit_constitution(content: str = Form(...)) -> RedirectResponse:
-        (svc.env.config_dir / "constitution.md").write_text(content, encoding="utf-8")
+        (svc.env.constitution_file).write_text(content, encoding="utf-8")
         record_config("constitution", content)
         return RedirectResponse("/strategy", status_code=303)
 

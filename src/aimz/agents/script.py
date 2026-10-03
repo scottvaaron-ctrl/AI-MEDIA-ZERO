@@ -13,6 +13,14 @@ from aimz.util import dumps, estimate_speech_seconds, new_id, now_iso, words
 WORDS_PER_SECOND = 2.6
 
 
+def _clip_words(text: str, limit: int) -> str:
+    """At most ``limit`` characters, cut at a word boundary. (A cut at exactly 60 characters used to end
+    on-screen captions mid-word, e.g. "calibration and valida".) The card shrinks its font to fit."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:-")
+
+
 class ScriptAgent(Agent):
     name = "script"
 
@@ -42,18 +50,31 @@ class ScriptAgent(Agent):
                 f"({int(min_s * WORDS_PER_SECOND)}-{int(max_s * WORDS_PER_SECOND)} spoken words); let the facts in the sources decide."
             )
         hook_type = (idea.get("hook_type") or "").lower()
+        if hook_type and self.hook_type_under_test(idea):
+            # The ideation hook line may be of the other arm's type; both arms write the opening from the
+            # assigned type alone, so the prompt never contradicts itself and the arms are treated alike.
+            hook_lines = (
+                f"Hook type: {hook_type} (this idea is in a hook-type experiment). Write the opening line "
+                f"yourself as a {hook_type} hook, from the premise and the sources.\n"
+            )
+        else:
+            hook_lines = f"Hook: {idea['hook']}\n" + (
+                f"Hook type chosen for this idea: {hook_type}.\n" if hook_type else ""
+            )
         banned = ", ".join(f"'{b}'" for b in cfg.banned_patterns)
         # Only the channel's own choices (from ideation, the editor and its experiments), the constitution,
         # and what the renderer can physically do go in here. Structure, pacing and style are the AI's call.
         user = (
             f"Write a vertical short-form video script.\n\n"
-            f"Title: {idea['title']}\nPremise: {idea['premise']}\nHook: {idea['hook']}\n"
-            + (f"Hook type chosen for this idea: {hook_type}.\n" if hook_type else "")
+            f"Title: {idea['title']}\nPremise: {idea['premise']}\n"
+            + hook_lines
             + f"Content family: {idea['content_family']}\n{runtime_line} Narration is read at about {WORDS_PER_SECOND} words per second.\n\n"
             f"How the video is built: the script is a sequence of {ScriptDraft.MIN_BEATS}-{ScriptDraft.MAX_BEATS} beats; the renderer shows one visual per beat while its narration plays. "
             "Each beat has a caption (on-screen text; more than about 8 words will not fit) and a visual: 'image' with a visual_query "
             "(a search phrase for a licensed archival photo, so it must name something photographable), or 'text_card' / 'stat_card' / 'quote_card' "
-            "with the card text in visual_query.\n"
+            "with the card text in visual_query. The narration is also shown as subtitles below the card, so a caption "
+            "that repeats the narration would appear twice and is left off the card. A beat may set zoom (in, out or none) for the camera move on its visual; "
+            "leave it empty for the channel's default.\n"
             f"Banned phrases: {banned}. Do not address the viewer with engagement bait.\n"
             "List every factual claim (dates, numbers, names, events) in `claims` with the beat index and the source ids that support it. "
             "Only use facts present in the sources below; if the sources do not say it, do not say it.\n\n"
@@ -88,7 +109,7 @@ class ScriptAgent(Agent):
         known = {s.id for s in sources}
         for b in draft.beats:
             b.narration = re.sub(r"\s+", " ", b.narration).strip()
-            b.caption = b.caption.strip()[:60]
+            b.caption = _clip_words(b.caption.strip(), 120)
             b.source_refs = [r for r in b.source_refs if r in known]
         for c in draft.claims:
             c.source_refs = [r for r in c.source_refs if r in known]
@@ -144,6 +165,13 @@ class ScriptAgent(Agent):
             return False
         exp = self.svc.db.get("experiments", idea["experiment_id"])
         return bool(exp and exp["variable"] == "runtime")
+
+    def hook_type_under_test(self, idea: dict[str, Any]) -> bool:
+        """True when the idea is an arm of a running experiment on hook type."""
+        if not idea.get("experiment_id"):
+            return False
+        exp = self.svc.db.get("experiments", idea["experiment_id"])
+        return bool(exp and exp["variable"] == "hook_type" and exp["status"] == "running")
 
     @staticmethod
     def word_budget_ok(

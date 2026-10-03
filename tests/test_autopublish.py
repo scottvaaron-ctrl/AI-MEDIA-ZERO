@@ -142,6 +142,9 @@ class FailingPublisher(RecordingPublisher):
 
 def test_failed_publication_is_skipped_until_the_owner_requeues_it(svc) -> None:  # noqa: ANN001
     """publish() never re-sends a failed row itself; only the checked retry (retry_due) or the owner does."""
+    from tests.conftest import relax_posting_limits
+
+    relax_posting_limits(svc)
     rec = FailingPublisher()
     svc.publishers = {"youtube": rec}
     stage = _stage(svc, consent=True)

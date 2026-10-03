@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 from pathlib import Path
@@ -25,6 +26,7 @@ tiktok_app = typer.Typer(help="Owner-only TikTok OAuth helpers.", no_args_is_hel
 bluesky_app = typer.Typer(help="Owner-only Bluesky account helpers.", no_args_is_help=True)
 schedule_app = typer.Typer(help="Run the cycle automatically (Windows Task Scheduler).", no_args_is_help=True)
 strategy_app = typer.Typer(help="Inspect or edit strategy memory.", no_args_is_help=True)
+instance_app = typer.Typer(help="Several channels: one instance per channel.", no_args_is_help=True)
 app.add_typer(metric_app, name="metric")
 app.add_typer(publish_app, name="publish")
 app.add_typer(youtube_app, name="youtube")
@@ -32,7 +34,31 @@ app.add_typer(tiktok_app, name="tiktok")
 app.add_typer(bluesky_app, name="bluesky")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(strategy_app, name="strategy")
+app.add_typer(instance_app, name="instance")
 console = Console()
+
+
+@app.callback()
+def _root(
+    instance: Annotated[
+        str, typer.Option("--instance", "-i", help="Channel instance to act on (default: main)")
+    ] = "main",
+) -> None:
+    """Select the channel instance before any command loads its settings."""
+    import os
+
+    from aimz import instances
+
+    if instance != instances.MAIN:
+        root = instances.root_of(instance)
+        if not (root / ".env").exists():
+            console.print(
+                f"[red]no instance {instance!r}[/] at {root}; create it with "
+                f"`python -m aimz instance create {instance} --channel-name ...`"
+            )
+            raise typer.Exit(1)
+        os.environ["AIMZ_PROJECT_ROOT"] = str(root)
+    os.environ["AIMZ_INSTANCE"] = instance
 
 
 def _svc(quiet: bool = False):  # noqa: ANN202
@@ -243,6 +269,11 @@ def publish_retry(
     svc = _svc()
     try:
         orch = _orch(svc)
+        allowed, why = orch.publisher.gate().check()
+        if not allowed:
+            # The owner's posting limits (config.yaml publishing.limits) apply to re-sends too.
+            console.print(f"[yellow]not sent now:[/] {why}. Run it again later; nothing was changed.")
+            return
         info = orch.publisher.requeue(publication_id)
         console.print(
             f"re-queued {info['platform']} publication {publication_id} "
@@ -335,6 +366,23 @@ def requeue(kind: Annotated[str, typer.Argument(help="idea | script")], item_id:
 
 
 @app.command()
+def settings() -> None:
+    """Show the per-video settings the AI can test, their status, and the evidence so far (read-only)."""
+    from aimz.experiments.allocation import per_video
+    from aimz.experiments.settings import SettingsEngine, capabilities
+
+    svc = _svc(quiet=True)
+    try:
+        eng = SettingsEngine(svc.db, caps=capabilities(svc))
+        text = eng.evidence_text(per_video(svc.analytics_store.video_performance()), max_lines=200)
+        console.print(text, markup=False, highlight=False)
+        n = svc.db.scalar("SELECT COUNT(DISTINCT video_id) FROM video_settings", [], 0)
+        console.print(f"videos with recorded settings: {n}")
+    finally:
+        svc.close()
+
+
+@app.command()
 def analytics(
     collect: Annotated[
         bool, typer.Option("--collect", help="Pull metrics from enabled platform APIs")
@@ -348,11 +396,34 @@ def analytics(
             with svc.tracker.run("analytics") as ctx:
                 n = orch.analyst.collect_metrics(ctx)
                 console.print(f"collected {n} snapshots")
-        t = Table("video", "platform", "family", "hook", "views", "avg%", "shares", "subs", "score")
-        for r in svc.analytics_store.video_performance():
+        from aimz.experiments.allocation import per_video
+
+        # One row per video (the learning loop counts a video once, however many platforms it went to).
+        # Metric columns are from the publication the score comes from, else the first one found.
+        perf = svc.analytics_store.video_performance()
+        platforms: dict[str, list[str]] = {}
+        for r in perf:
+            platforms.setdefault(r["video_id"], []).append(r["platform"])
+        t = Table(
+            "video",
+            "platforms",
+            "family",
+            "hook",
+            "views",
+            "avg%",
+            "shares",
+            "subs",
+            "score",
+            "parts",
+            "note",
+        )
+        for r in per_video(perf):
+            note = "reach only" if r.get("score_reach_only") else "late" if r.get("score_late") else ""
+            if r["score"] is None:
+                note = "waiting"
             t.add_row(
                 r["title"][:40],
-                r["platform"],
+                ",".join(sorted(platforms.get(r["video_id"], []))),
                 r["content_family"] or "",
                 r["hook_type"] or "",
                 str(r.get("views") or ""),
@@ -360,6 +431,8 @@ def analytics(
                 str(r.get("shares") or ""),
                 str(r.get("subscribers_gained") or r.get("followers_gained") or ""),
                 f"{r['score']:.2f}" if r["score"] is not None else "",
+                " ".join(f"{k[:4]}={v:.2f}" for k, v in (r.get("score_parts") or {}).items()),
+                note,
             )
         console.print(t)
         _print_json(orch.analyst.milestone())
@@ -486,7 +559,54 @@ def experiments() -> None:
 
 
 @app.command()
-def status() -> None:
+def status(
+    all_instances: Annotated[bool, typer.Option("--all", help="Summarise every channel instance")] = False,
+) -> None:
+    """System status: kill switch, budget, counts, posting, last run (``--all``: every channel)."""
+    if all_instances:
+        _status_all()
+        return
+    _status_one()
+
+
+def _status_all() -> None:
+    """One line per channel. Each instance runs in its own process (settings are per process)."""
+    import subprocess
+    import sys
+
+    from aimz import instances
+
+    t = Table(
+        "instance", "last run", "videos", "posting runs today", "may post now", "errors 24h", "attention"
+    )
+    for name in instances.list_instances():
+        proc = subprocess.run(
+            [sys.executable, "-m", "aimz", "--instance", name, "status"],
+            capture_output=True,
+            text=True,
+            cwd=str(instances.REPO_ROOT),
+            timeout=120,
+        )
+        try:
+            info = json.loads(proc.stdout[proc.stdout.index("{") :])
+        except ValueError:
+            t.add_row(name, "status failed", "", "", "", "", (proc.stderr or proc.stdout)[-80:])
+            continue
+        last = info.get("last_run") or {}
+        posting = info.get("posting") or {}
+        t.add_row(
+            name,
+            f"{last.get('kind', '')} {str(last.get('started_at', ''))[:16]} {last.get('status', '')}",
+            str(info["counts"]["videos_rendered"]),
+            str(posting.get("posting_runs_today", "")),
+            str(posting.get("may_post_now", "")),
+            str(info["counts"]["errors_24h"]),
+            str(len(info.get("needs_attention") or [])),
+        )
+    console.print(t)
+
+
+def _status_one() -> None:
     """System status: kill switch, budget, counts, last run."""
     svc = _svc(quiet=True)
     try:
@@ -521,6 +641,17 @@ def status() -> None:
             },
             "needs_attention": attention(svc.db),
             "last_run": dict(last) if last else None,
+        }
+        from aimz.pipeline.posting import PostingGate, PostingLimits
+
+        gate = PostingGate(svc.db, PostingLimits.from_config(svc.config))
+        last_post = gate.last_run()
+        info["posting"] = {
+            "limits": dataclasses.asdict(gate.limits),
+            "posting_runs_today": gate.runs_today(),
+            "last_posting_run": last_post["started_at"] if last_post else None,
+            "may_post_now": gate.next_allowed(),
+            "videos_waiting": gate.waiting_videos(),
         }
     finally:
         svc.close()
@@ -564,14 +695,57 @@ def dashboard(host: str | None = None, port: int | None = None) -> None:
     uvicorn.run(create_app(), host=host, port=port, log_level="warning")
 
 
-@youtube_app.command("auth")
-def youtube_auth() -> None:
-    """Owner-only: run the Google OAuth consent flow and store the token locally."""
-    from aimz.providers.publishers.youtube import ALL_SCOPES, run_oauth_flow
+@youtube_app.command("whoami")
+def youtube_whoami() -> None:
+    """Which YouTube channel this instance's login posts to (read-only, 1 quota unit)."""
+    from aimz.providers.publishers.youtube import build_youtube, load_credentials
 
     svc = _svc(quiet=True)
     try:
-        run_oauth_flow(svc.env.youtube_client_secret_file, svc.env.youtube_token_file, ALL_SCOPES)
+        creds = load_credentials(svc.env.youtube_token_file)
+        if creds is None:
+            console.print(f"[red]no YouTube login[/] for instance {svc.env.instance}; run `youtube auth`")
+            raise typer.Exit(1)
+        items = build_youtube(creds).channels().list(part="snippet", mine=True).execute().get("items") or []
+        for ch in items:
+            sn = ch.get("snippet", {})
+            console.print(f"{svc.env.instance}: {sn.get('title')} ({ch.get('id')}) {sn.get('customUrl', '')}")
+        if not items:
+            console.print("the login has no YouTube channel")
+    finally:
+        svc.close()
+
+
+@youtube_app.command("revoke")
+def youtube_revoke(
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation question")] = False,
+) -> None:
+    """Owner: disconnect this instance's YouTube channel and delete its YouTube API data.
+
+    Revokes the login with Google, deletes the token, YouTube metrics, comments, saved upload responses
+    and the video ids/links (YouTube Developer Policies: delete within 7 days of revocation)."""
+    from aimz import youtube_data
+
+    svc = _svc(quiet=True)
+    try:
+        if not yes and not typer.confirm(
+            f"Disconnect YouTube for instance '{svc.env.instance}' and delete its YouTube data? This cannot be undone."
+        ):
+            raise typer.Exit(1)
+        result = youtube_data.revoke(svc.db, svc.env.data_dir, svc.env.youtube_token_file)
+        console.print_json(data=result)
+    finally:
+        svc.close()
+
+
+@youtube_app.command("auth")
+def youtube_auth() -> None:
+    """Owner-only: run the Google OAuth consent flow and store the token locally."""
+    from aimz.providers.publishers.youtube import AUTH_SCOPES, run_oauth_flow
+
+    svc = _svc(quiet=True)
+    try:
+        run_oauth_flow(svc.env.youtube_client_secret_file, svc.env.youtube_token_file, AUTH_SCOPES)
         console.print(f"[green]token stored[/] at {svc.env.youtube_token_file}")
     finally:
         svc.close()
@@ -711,29 +885,38 @@ def publish_poll() -> None:
 def schedule_install(
     times: Annotated[str, typer.Option(help="Comma-separated HH:MM local times")] = "09:00,18:00",
 ) -> None:
-    """Register daily Task Scheduler jobs that run `aimz run`."""
-    from aimz import scheduler
-    from aimz.settings import load_env_settings
+    """Register daily Task Scheduler jobs that run `aimz run`, within the owner's posting limits."""
+    from aimz import instances, scheduler
+    from aimz.pipeline.posting import PostingLimits, check_schedule
+    from aimz.settings import load_app_config, load_env_settings
 
-    root = load_env_settings().project_root
+    env = load_env_settings()
+    root = instances.REPO_ROOT
     wanted = [t.strip() for t in times.split(",") if t.strip()]
+    problem = check_schedule(wanted, PostingLimits.from_config(load_app_config(env.config_dir)))
+    if problem:
+        console.print(f"[red]schedule breaks the posting limits:[/] {problem}")
+        raise typer.Exit(1)
     try:
-        name, removed = scheduler.install(root, wanted)
+        name, removed = scheduler.install(root, wanted, env.instance, env.project_root)
     except RuntimeError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
     console.print(f"[green]scheduled:[/] {name} daily at {', '.join(wanted)}")
     if removed:
         console.print("removed old tasks: " + ", ".join(removed))
-    console.print(f"Runner: {root / 'scripts' / 'run-cycle.ps1'} · log: data/logs/scheduled.log")
+    console.print(f"log: {env.data_dir / 'logs' / 'scheduled.log'}")
 
 
 @schedule_app.command("remove")
 def schedule_remove() -> None:
-    """Delete the scheduled jobs."""
+    """Delete this instance's scheduled job (other channels keep theirs)."""
+    import os
+
     from aimz import scheduler
 
-    console.print("removed: " + (", ".join(scheduler.remove()) or "none"))
+    instance = os.environ.get("AIMZ_INSTANCE", "main")
+    console.print("removed: " + (", ".join(scheduler.remove(instance=instance)) or "none"))
 
 
 @schedule_app.command("status")
@@ -745,6 +928,101 @@ def schedule_status() -> None:
     console.print(
         "\n".join(tasks) if tasks else "no AI Media Zero tasks scheduled (run `aimz schedule install`)"
     )
+
+
+@app.command()
+def money() -> None:
+    """Partner Program progress, niches ranked by expected value, and the score's parts and weights."""
+    from aimz.experiments.allocation import per_video
+    from aimz.experiments.value import niche_value_text, niche_values, ypp_progress, ypp_text
+
+    svc = _svc(quiet=True)
+    try:
+        rows = per_video(svc.analytics_store.video_performance())
+        console.print(ypp_text(ypp_progress(svc.db)), markup=False)
+        console.print("Niche value per video:", markup=False)
+        console.print(niche_value_text(niche_values(rows), limit=30), markup=False, highlight=False)
+        weights = {k: v for k, v in svc.analytics_store.weights.items()}
+        console.print(f"Score weights (config.yaml scoring.weights): {weights}", markup=False)
+    finally:
+        svc.close()
+
+
+@instance_app.command("create")
+def instance_create(
+    name: Annotated[str, typer.Argument(help="Short id, e.g. 'space' (lowercase, digits, - or _)")],
+    channel_name: Annotated[str, typer.Option("--channel-name", help="The YouTube channel's display name")],
+) -> None:
+    """Owner: set up a new channel instance. Then authorise its YouTube account and schedule it."""
+    from aimz import instances
+
+    try:
+        root = instances.create(name, channel_name)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"[green]created[/] {root}")
+    console.print("Next, as the owner:")
+    console.print(f"  python -m aimz --instance {name} youtube auth      (pick the '{channel_name}' channel)")
+    console.print(f"  python -m aimz --instance {name} youtube whoami    (check it is the right channel)")
+    console.print(f"  python -m aimz instance consent {name}             (allow automatic uploads to it)")
+    # Stagger each channel 15 minutes after the one before, so their cycles rarely wait for the GPU.
+    offset = 15 * (instances.list_instances().index(name) if name in instances.list_instances() else 1)
+    times = ",".join(f"{h + (offset // 60):02d}:{offset % 60:02d}" for h in (9, 18))
+    console.print(f"  python -m aimz --instance {name} schedule install --times {times}")
+
+
+@instance_app.command("consent")
+def instance_consent(
+    name: Annotated[str, typer.Argument(help="Instance to change (e.g. 'space', or 'main')")],
+    off: Annotated[bool, typer.Option("--off", help="Withdraw consent: videos wait for approval")] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation question")] = False,
+) -> None:
+    """Owner: allow (or stop) automatic uploads for ONE channel, after seeing which channel it is.
+
+    YouTube's Developer Policies (III.I) need the owner's prior, specific consent before automated uploads,
+    so a new instance starts without it and consent is never copied from another channel."""
+    from aimz import instances
+    from aimz.providers.publishers.youtube import build_youtube, load_credentials
+
+    root = instances.root_of(name)
+    if not (root / ".env").exists():
+        raise typer.BadParameter(f"no instance {name!r} at {root}")
+    if off:
+        instances.set_env(root, "AUTOPUBLISH_CONSENT", "false")
+        console.print(f"{name}: automatic uploads [yellow]off[/]; videos wait for `approve video <id>`")
+        return
+    token = root / "secrets" / "youtube_token.json"
+    creds = load_credentials(token)
+    if creds is None:
+        console.print(
+            f"[red]no YouTube login[/] for {name}; run `python -m aimz --instance {name} youtube auth`"
+        )
+        raise typer.Exit(1)
+    items = build_youtube(creds).channels().list(part="snippet", mine=True).execute().get("items") or []
+    if len(items) != 1:
+        console.print(f"[red]the login for {name} has {len(items)} channels; expected exactly one[/]")
+        raise typer.Exit(1)
+    title, channel_id = items[0].get("snippet", {}).get("title"), items[0].get("id")
+    console.print(f"{name} uploads to: [bold]{title}[/] (https://www.youtube.com/channel/{channel_id})")
+    if not yes and not typer.confirm(f"Allow this app to upload videos to '{title}' automatically?"):
+        raise typer.Exit(1)
+    instances.set_env(root, "AUTOPUBLISH_CONSENT", "true")
+    instances.set_env(root, "YOUTUBE_CONSENTED_CHANNEL_ID", str(channel_id))
+    console.print(f"{name}: automatic uploads [green]on[/] for {title}")
+
+
+@instance_app.command("list")
+def instance_list() -> None:
+    """Every channel instance, where it lives and its dashboard port."""
+    from aimz import instances
+
+    t = Table("instance", "root", "dashboard port", "youtube login")
+    for name in instances.list_instances():
+        root = instances.root_of(name)
+        env = instances._read_env(root / ".env")
+        token = root / "secrets" / "youtube_token.json"
+        t.add_row(name, str(root), env.get("DASHBOARD_PORT", "8420"), "yes" if token.exists() else "no")
+    console.print(t)
 
 
 if __name__ == "__main__":  # pragma: no cover

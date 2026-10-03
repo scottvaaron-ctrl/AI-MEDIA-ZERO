@@ -32,42 +32,82 @@ RATE_PRIOR_VIEWS = 200
 SCORE_AT_HOURS = 72.0
 # A score taken after this age was not taken on time (collection missed the window), so it is flagged.
 LATE_SCORE_HOURS = 120.0
+# At 72 h YouTube Analytics often has no rows yet, and a score without them is almost all reach. A YouTube
+# video is scored on its first snapshot with Analytics rows; if none has arrived by this age, it is scored
+# on reach alone and flagged ``reach_only``.
+REACH_ONLY_AFTER_HOURS = 120.0
+# Platforms whose score depends on Analytics rows (retention, shares, subscribers) arriving after the views.
+ANALYTICS_LAG_PLATFORMS = {"youtube"}
 
 
 def _shrunk(pct: float, views: int) -> float:
     return (clamp(pct / 100.0, 0, 1) * views + PRIOR_PERCENT * PRIOR_VIEWS) / (views + PRIOR_VIEWS)
 
 
-def performance_score(m: dict[str, Any]) -> float | None:
-    """0..1 composite from a metrics row. Returns None when nothing usable is present.
+# Plan stage 6: parts that point at money. Their weights come from config.yaml `scoring` and are the
+# owner's decision (they define what success is); at weight 0 they are shown but change nothing.
+# watch_time: watch minutes per view (a proxy for the watch hours YouTube's Partner Program counts);
+# revenue: estimated revenue per 1,000 views, from the monetary scope once the channel earns.
+EXTRA_WEIGHTS = {"watch_time": 0.0, "revenue": 0.0}
+WATCH_MINUTES_PER_VIEW_MAX = 1.0  # a Short watched for a full minute per view scores 1
+REVENUE_PER_1000_MAX = 0.20  # USD per 1,000 views that scores 1 (Shorts RPM is usually a few cents)
 
-    Every component is computed the same way at every view count, so a video that reached few
-    people cannot outscore one that reached many just because some metrics were skipped for it.
-    """
+
+def score_weights(cfg: Any = None) -> dict[str, float]:
+    """Base weights plus the stage-6 parts, overridden by config.yaml ``scoring.weights``."""
+    weights = {**WEIGHTS, **EXTRA_WEIGHTS}
+    raw = (cfg.get("scoring.weights", {}) if cfg is not None else {}) or {}
+    for k, v in dict(raw).items():
+        if k in weights:
+            weights[k] = max(0.0, float(v))
+    return weights
+
+
+def score_parts(m: dict[str, Any], weights: dict[str, float] | None = None) -> dict[str, float] | None:
+    """Each score part (0..1) that this metrics row can support, or None without a view count."""
     if m.get("views") is None:
         return None  # no denominator (Bluesky reports none): rates and reach cannot be compared
     views = int(m["views"])
-    parts: list[tuple[float, float]] = []
+    parts: dict[str, float] = {}
     pct = m.get("avg_percent_viewed")
     if pct is None:
         pct = m.get("retention_3s")
     if pct is not None:
-        parts.append((WEIGHTS["retention"], _shrunk(float(pct), views)))
+        parts["retention"] = _shrunk(float(pct), views)
     if m.get("shares") is not None:
         # per 1,000 views, with RATE_PRIOR_VIEWS added to the denominator so 1 share on 5 views is not 200/1k
         rate = m["shares"] * 1000 / (views + RATE_PRIOR_VIEWS)
-        parts.append((WEIGHTS["shares"], clamp(rate / 15.0, 0, 1)))  # 15 shares/1k = max
+        parts["shares"] = clamp(rate / 15.0, 0, 1)  # 15 shares/1k = max
     gained = m.get("subscribers_gained")
     if gained is None:
         gained = m.get("followers_gained")
     if gained is not None:
         rate = gained * 1000 / (views + RATE_PRIOR_VIEWS)
-        parts.append((WEIGHTS["subs"], clamp(rate / 10.0, 0, 1)))  # 10 subs/1k = max
+        parts["subs"] = clamp(rate / 10.0, 0, 1)  # 10 subs/1k = max
     if m.get("completion_rate") is not None:
-        parts.append((WEIGHTS["completion"], _shrunk(float(m["completion_rate"]), views)))
-    parts.append((WEIGHTS["reach"], clamp(math.log10(1 + views) / 4.0, 0, 1)))  # 10,000 views = max
-    wsum = sum(w for w, _ in parts)
-    return sum(w * v for w, v in parts) / wsum
+        parts["completion"] = _shrunk(float(m["completion_rate"]), views)
+    parts["reach"] = clamp(math.log10(1 + views) / 4.0, 0, 1)  # 10,000 views = max
+    if m.get("watch_time_minutes") is not None and views:
+        parts["watch_time"] = clamp(float(m["watch_time_minutes"]) / views / WATCH_MINUTES_PER_VIEW_MAX, 0, 1)
+    if m.get("revenue_usd") is not None:
+        rpm = float(m["revenue_usd"]) * 1000 / (views + RATE_PRIOR_VIEWS)
+        parts["revenue"] = clamp(rpm / REVENUE_PER_1000_MAX, 0, 1)
+    return parts
+
+
+def performance_score(m: dict[str, Any], weights: dict[str, float] | None = None) -> float | None:
+    """0..1 composite from a metrics row. Returns None when nothing usable is present.
+
+    Every component is computed the same way at every view count, so a video that reached few
+    people cannot outscore one that reached many just because some metrics were skipped for it.
+    """
+    parts = score_parts(m)
+    if parts is None:
+        return None
+    w = weights or {**WEIGHTS, **EXTRA_WEIGHTS}
+    used = [(w.get(k, 0.0), v) for k, v in parts.items() if w.get(k, 0.0) > 0]
+    wsum = sum(x for x, _ in used)
+    return sum(x * v for x, v in used) / wsum if wsum else None
 
 
 class SQLiteAnalyticsProvider(AnalyticsProvider):
@@ -75,8 +115,9 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
     platform = "*"
     is_paid = False
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, weights: dict[str, float] | None = None):
         self.db = db
+        self.weights = weights or score_weights()
 
     def health(self) -> HealthStatus:
         n = self.db.count("metrics")
@@ -86,16 +127,37 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
         return None  # this provider stores; remote providers fetch
 
     # -- writes ------------------------------------------------------------------------
-    def record(self, publication: dict[str, Any], snap: MetricsSnapshot, source: str) -> str:
-        hours = None
-        if publication.get("posted_at"):
-            from datetime import datetime
+    @staticmethod
+    def hours_live(publication: dict[str, Any], at: str | None = None) -> float | None:
+        """Hours since the post went public. A scheduled upload (``scheduled_for`` later than ``posted_at``)
+        is counted from its publish time, and a snapshot taken before that counts as 0, never negative."""
+        from datetime import UTC, datetime
 
+        start = None
+        for key in ("posted_at", "scheduled_for"):
             try:
-                posted = datetime.fromisoformat(publication["posted_at"])
-                hours = round((datetime.fromisoformat(now_iso()) - posted).total_seconds() / 3600, 2)
+                t = datetime.fromisoformat(str(publication.get(key) or ""))
             except ValueError:
-                hours = None
+                continue
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=UTC)  # stored times are UTC
+            start = t if start is None else max(start, t)
+        if start is None:
+            return None
+        hours = (datetime.fromisoformat(at or now_iso()) - start).total_seconds() / 3600
+        return round(max(0.0, hours), 2)
+
+    def record(self, publication: dict[str, Any], snap: MetricsSnapshot, source: str) -> str:
+        hours = self.hours_live(publication)
+        # API revenue is lifetime-to-date, so only the increase since the last snapshot is new money.
+        new_revenue = snap.revenue_usd
+        if snap.revenue_usd is not None and source != "manual":
+            before = self.db.scalar(
+                "SELECT MAX(revenue_usd) FROM metrics WHERE publication_id=? AND source != 'manual'",
+                [publication["id"]],
+                None,
+            )
+            new_revenue = snap.revenue_usd - float(before or 0)
         mid = new_id("met")
         self.db.insert(
             "metrics",
@@ -125,11 +187,11 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
                 "raw_json": dumps(snap.raw) if snap.raw else None,
             },
         )
-        if snap.revenue_usd:
+        if new_revenue and new_revenue > 0:
             from aimz.core.budget import BudgetManager
 
             BudgetManager(self.db, 0.0).record_revenue(
-                snap.revenue_usd, note=f"metrics {mid}", content_id=publication["video_id"]
+                new_revenue, note=f"metrics {mid}", content_id=publication["video_id"]
             )
         return mid
 
@@ -145,16 +207,33 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
         """The snapshot a publication is scored on, or None while it is too young to compare.
 
         The first API snapshot at least SCORE_AT_HOURS old, so every video is judged at the same age.
-        Owner-entered (manual) numbers and snapshots with no known age are used as they are.
+        On YouTube that snapshot must also carry Analytics rows (``avg_percent_viewed``); without them the
+        score is mostly reach. If none has arrived by REACH_ONLY_AFTER_HOURS, the first snapshot past that
+        age is used and marked ``reach_only``. Owner-entered (manual) numbers and snapshots with no known
+        age are used as they are.
         """
         if latest.get("source") == "manual" or latest.get("hours_since_post") is None:
             return latest
+        if latest.get("platform") not in ANALYTICS_LAG_PLATFORMS:
+            row = self.db.one(
+                "SELECT * FROM metrics WHERE publication_id=? AND hours_since_post >= ? "
+                "ORDER BY hours_since_post LIMIT 1",
+                [latest["publication_id"], SCORE_AT_HOURS],
+            )
+            return dict(row) if row else None
+        row = self.db.one(
+            "SELECT * FROM metrics WHERE publication_id=? AND hours_since_post >= ? "
+            "AND avg_percent_viewed IS NOT NULL ORDER BY hours_since_post LIMIT 1",
+            [latest["publication_id"], SCORE_AT_HOURS],
+        )
+        if row:
+            return dict(row)
         row = self.db.one(
             "SELECT * FROM metrics WHERE publication_id=? AND hours_since_post >= ? "
             "ORDER BY hours_since_post LIMIT 1",
-            [latest["publication_id"], SCORE_AT_HOURS],
+            [latest["publication_id"], REACH_ONLY_AFTER_HOURS],
         )
-        return dict(row) if row else None
+        return {**dict(row), "reach_only": True} if row else None
 
     def video_performance(self) -> list[dict[str, Any]]:
         """One row per published video with its latest metrics, idea attributes, and composite score.
@@ -170,7 +249,7 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
             idea = self.db.get("ideas", v["idea_id"])
             pub = self.db.get("publications", m["publication_id"])
             snap = self.scoring_snapshot(m)
-            score = performance_score(snap) if snap else None
+            score = performance_score(snap, self.weights) if snap else None
             age = snap.get("hours_since_post") if snap else None
             out.append(
                 {
@@ -179,12 +258,18 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
                     # 72-hour window was missed (an outage) is scored later; that is flagged, not hidden.
                     "scored_metrics": snap,
                     "score_age_h": age,
+                    # Reach-only scores are taken at 120 h by design, so they are not "late".
                     "score_late": bool(
-                        score is not None and age is not None and float(age) > LATE_SCORE_HOURS
+                        score is not None
+                        and age is not None
+                        and float(age) > LATE_SCORE_HOURS
+                        and not (snap or {}).get("reach_only")
                     ),
+                    "score_reach_only": bool(score is not None and (snap or {}).get("reach_only")),
                     "title": v["title"],
                     "duration_s": v["duration_s"],
                     "content_family": idea["content_family"] if idea else None,
+                    "angle": idea["angle"] if idea else None,
                     "hook_type": idea["hook_type"] if idea else None,
                     "experiment_id": idea["experiment_id"] if idea else None,
                     "experiment_arm": idea["experiment_arm"] if idea else None,
@@ -192,6 +277,11 @@ class SQLiteAnalyticsProvider(AnalyticsProvider):
                     "source_item_ids_json": idea["source_item_ids_json"] if idea else "[]",
                     "posted_at": pub["posted_at"] if pub else None,
                     "score": score,
+                    "score_parts": score_parts(snap) if snap else None,
                 }
             )
+        # Niches the strategist merged count as one (the label the idea was written under is kept).
+        from aimz.experiments.niches import aliases, canonicalize_rows
+
+        canonicalize_rows(out, aliases(self.db))
         return out

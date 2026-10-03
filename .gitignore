@@ -13,6 +13,9 @@ oauth_token*.json
 *session*
 .credentials/
 
+# --- channel instances: each holds its own .env, token, database and videos ---
+instances/
+
 # --- runtime data ---
 data/
 !data/.gitkeep

@@ -17,6 +17,7 @@ from aimz.providers.base import (
     LLMProvider,
     LLMResponse,
     ProviderContext,
+    SpeechOptions,
     TTSProvider,
     TTSResult,
 )
@@ -39,7 +40,12 @@ class PaidTTSProviderExample(TTSProvider):
         return HealthStatus(False, "disabled example provider")
 
     def synthesize(
-        self, ctx: ProviderContext, text: str, out_path: Path, purpose: str = "narration"
+        self,
+        ctx: ProviderContext,
+        text: str,
+        out_path: Path,
+        purpose: str = "narration",
+        options: SpeechOptions | None = None,
     ) -> TTSResult:
         with self.authorized(ctx, purpose, chars=len(text)):
             raise NotImplementedError(

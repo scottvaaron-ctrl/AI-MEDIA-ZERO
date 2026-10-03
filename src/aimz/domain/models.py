@@ -69,7 +69,10 @@ class IdeaDraft(BaseModel):
     premise: str = Field(min_length=10)
     hook: str = Field(min_length=5, description="The literal first sentence the viewer hears.")
     hook_type: str
-    content_family: str
+    content_family: str = Field(
+        description="The niche: the subject area a viewer would follow a channel for."
+    )
+    angle: str = Field(default="", description="The kind of story within the niche.")
     target_platform: Platform = "both"
     suggested_runtime_s: int = Field(ge=15, le=900)
     source_refs: list[str] = Field(description="Ids of the source items this idea is built on.")
@@ -106,6 +109,9 @@ class Beat(BaseModel):
     visual_type: VisualType = "text_card"
     visual_query: str = Field(default="", description="Search phrase for a free image, or the card text.")
     source_refs: list[str] = Field(default_factory=list)
+    zoom: Literal["in", "out", "none", ""] = Field(
+        default="", description="Camera move on this beat's visual; empty uses the channel's default."
+    )
 
 
 class ClaimDraft(BaseModel):
@@ -204,6 +210,37 @@ class FamilyUpdate(BaseModel):
     note: str = ""
 
 
+class SettingChange(BaseModel):
+    """Open a production setting to test 2-4 values per video, lock it to one value, or turn it off."""
+
+    variable: str
+    action: Literal["open", "lock", "off"]
+    values: list[float | str] = Field(default_factory=list, description="For open: 2-4 values within bounds.")
+    locked_value: float | str | None = Field(default=None, description="For lock: the value to always use.")
+    reason: str = ""
+
+
+class ChannelIdentityProposal(BaseModel):
+    """This channel's genre, voice and look; distinct from the owner's other channels."""
+
+    genre: str = Field(
+        default="", description="What the channel is about and how, e.g. 'space history explainers'."
+    )
+    genre_note: str = Field(default="", description="One line on the format viewers can expect.")
+    voice: str | None = None
+    template: str | None = None
+    palette_hue: float | None = None
+    reason: str = ""
+
+
+class NicheMerge(BaseModel):
+    """Two niche labels that mean the same niche: ``alias`` is counted as ``into`` from now on."""
+
+    alias: str
+    into: str
+    reason: str = ""
+
+
 class StrategyUpdate(BaseModel):
     audience_model: str
     family_updates: list[FamilyUpdate] = Field(default_factory=list)
@@ -215,6 +252,9 @@ class StrategyUpdate(BaseModel):
     audience_requests: list[str] = Field(default_factory=list)
     new_experiments: list[ExperimentProposal] = Field(default_factory=list)
     retire_experiment_ids: list[str] = Field(default_factory=list)
+    setting_changes: list[SettingChange] = Field(default_factory=list)
+    niche_merges: list[NicheMerge] = Field(default_factory=list)
+    channel_identity: ChannelIdentityProposal | None = None
     explore_ratio_suggestion: float = Field(ge=0.0, le=1.0, default=0.7)
     confidence: float = Field(ge=0.0, le=1.0, default=0.1)
     change_summary: str
@@ -294,6 +334,18 @@ class Scene(BaseModel):
     audio_path: str | None = None
     image_path: str | None = None
     caption_chunks: list[tuple[float, float, str]] = Field(default_factory=list)
+    clip_path: str | None = None  # a stock video clip shown under the (transparent) card layer
+
+
+class CaptionStyle(BaseModel):
+    """How burned narration captions look. Defaults are the renderer's behaviour before stage 2."""
+
+    font: str = "default"  # a family from assets/fonts/licenses.json, or the renderer's own font
+    size: float = 0.036  # fraction of the frame height
+    position: Literal["bottom", "low", "mid_low"] = "low"
+    color: str = "white"
+    outline: float = 4.0
+    max_words: int | None = None  # re-split each timed chunk into pieces of at most this many words
 
 
 class Timeline(BaseModel):
@@ -307,6 +359,13 @@ class Timeline(BaseModel):
     disclosure_text: str = ""
     sources: list[dict[str, str]] = Field(default_factory=list)
     attributions: list[str] = Field(default_factory=list)
+    caption_style: CaptionStyle = Field(default_factory=CaptionStyle)
+    # Audio bed (plan stage 5): a music loop ducked under the narration, and a sound at each cut.
+    music_path: str | None = None
+    music_volume_db: float = -14.0
+    sfx_path: str | None = None
+    sfx_volume_db: float = -14.0
+    sfx_times: list[float] = Field(default_factory=list)
 
 
 class RenderResult(BaseModel):

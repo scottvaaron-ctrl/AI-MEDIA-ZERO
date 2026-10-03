@@ -247,5 +247,6 @@ def render_markdown(state: dict[str, Any]) -> str:
         f"## Recurring audience requests\n{bullets(state.get('audience_requests', []))}\n\n"
         f"## Active experiments\n{bullets(state.get('active_experiments', []))}\n\n"
         f"## Retired experiments\n{bullets(state.get('retired_experiments', []))}\n\n"
+        f"## Settings evidence\n{state.get('settings_evidence') or '_No per-video settings recorded yet_'}\n\n"
         f"## Notes\n{state.get('notes', '')}\n"
     )

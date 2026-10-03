@@ -80,7 +80,7 @@ def test_young_api_snapshot_is_not_scored_yet(svc) -> None:  # noqa: ANN001
 def test_scored_at_first_snapshot_past_72_hours(svc) -> None:  # noqa: ANN001
     pub = _publication(svc, "2026-01-01T00:00:00+00:00")
     for hours, views in [(40, 100), (80, 150), (300, 160)]:
-        svc.analytics_store.record(pub, MetricsSnapshot(views=views), source="api")
+        svc.analytics_store.record(pub, MetricsSnapshot(views=views, avg_percent_viewed=40.0), source="api")
         svc.db.execute(
             "UPDATE metrics SET hours_since_post=? WHERE id=(SELECT id FROM metrics ORDER BY rowid DESC LIMIT 1)",
             [hours],

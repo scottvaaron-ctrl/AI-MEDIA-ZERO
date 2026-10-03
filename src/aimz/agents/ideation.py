@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from aimz import identity, instances
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import IdeaBatch, IdeaDraft, SourceItemView
+from aimz.experiments import niches, shared
 from aimz.util import clamp, dumps, new_id, now_iso
 
 # Equal weights: the model rates each criterion; no human view of which matters most is layered on top.
@@ -92,6 +94,14 @@ class IdeationAgent(Agent):
             if leads is not None
             else self.pick_leads(int(cfg.get("pipeline.research_items_per_cycle", 24)))
         )
+        taken = shared.sources_used_elsewhere(self.svc.env.instance)
+        if taken:  # never two of the owner's channels on one story (YouTube spam policy: channel networks)
+            leads = [
+                s
+                for s in leads
+                if (row := self.svc.db.one("SELECT url_hash FROM source_items WHERE id=?", [s.id])) is None
+                or row["url_hash"] not in taken
+            ]
         if not leads:
             run.note("ideation", {"ideas": 0, "reason": "no fresh leads"})
             return []
@@ -107,14 +117,35 @@ class IdeationAgent(Agent):
                 for r in self.svc.db.query("SELECT DISTINCT hook_type FROM ideas WHERE hook_type IS NOT NULL")
             }
         )
+        used_angles = sorted(
+            {
+                r["angle"]
+                for r in self.svc.db.query("SELECT DISTINCT angle FROM ideas WHERE angle IS NOT NULL")
+            }
+        )
+        amap = niches.aliases(self.svc.db)
+        own_counts = {k: int(v.get("n") or 0) for k, v in families.items()}
+        claimed = instances.claimed_niches(self.svc.env.instance, own_counts)
+        others_text = shared.other_channels_text(self.svc.env.instance)
         sf = cfg.short_form
         user = (
             f"{self.strategy.prompt_summary(strategy_state)}\n\n"
+            f"{identity.genre_line(self.svc.db)}"
             f"Generate {n_ideas} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
             "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
-            "content_family and hook_type are your own labels (snake_case) for grouping ideas so results can be compared; reuse a label when an idea belongs to it, or create a new one. "
+            "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "
+            "within that niche. content_family, angle and hook_type are your own labels (snake_case) for grouping ideas so results "
+            "can be compared; reuse a label when an idea belongs to it, or create a new one. "
             "Score each criterion 0-10 honestly; do not inflate. zero_budget_feasibility must consider that visuals are limited to licensed archival photos, generated cards, charts and maps.\n\n"
-            f"Content families so far:\n{fam_lines or '- none yet'}\n\n"
+            f"Niches (content families) so far:\n{fam_lines or '- none yet'}\n\n"
+            f"Angles used so far: {', '.join(used_angles) or 'none yet'}\n"
+            + (
+                f"Niches held by the owner's other channels; ideas in them are dropped: {', '.join(sorted(claimed))}\n"
+                if claimed
+                else ""
+            )
+            + (f"The owner's other channels:\n{others_text}\n" if others_text else "")
+            + "\n"
             f"Hook types used so far: {', '.join(used_hooks) or 'none yet'}\n\nLeads:\n{self.sources_block(leads, 500)}\n"
         )
         with self.svc.tracker.agent(run, self.name, "generate", {"leads": [s.id for s in leads]}) as span:
@@ -140,7 +171,9 @@ class IdeationAgent(Agent):
                 seen_titles.add(key)
                 if d.scores.zero_budget_feasibility < 7 or d.scores.production_feasibility < 5:
                     continue
-                fam_key = d.content_family.strip().lower().replace(" ", "_").replace("-", "_")
+                fam_key = niches.canonical(niches.norm_label(d.content_family), amap) or ""
+                if fam_key in claimed:  # another channel already exploits this niche
+                    continue
                 fam_state = families.get(fam_key)
                 if fam_state and fam_state.get("status") == "retired":
                     continue
@@ -156,6 +189,7 @@ class IdeationAgent(Agent):
                         "hook": d.hook.strip(),
                         "hook_type": d.hook_type.strip().lower().replace(" ", "_").replace("-", "_"),
                         "content_family": fam_key,
+                        "angle": niches.norm_label(d.angle) or None,
                         "target_platform": d.target_platform,
                         "format": "short",
                         "suggested_runtime_s": int(

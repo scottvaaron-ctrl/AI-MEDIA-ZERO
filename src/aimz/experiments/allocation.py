@@ -50,13 +50,34 @@ def explore_ratio(total_measured: int, cfg: dict[str, Any]) -> float:
     return cold + (floor - cold) * t
 
 
+def per_video(perf_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per video from per-publication rows: a video posted to three platforms is one sample.
+
+    The row kept is a scored publication's (else the first seen); ``score`` becomes the mean of the video's
+    scored publications. Safe to apply twice.
+    """
+    base: dict[str, dict[str, Any]] = {}
+    scores: dict[str, list[float]] = {}
+    for row in perf_rows:
+        key = str(row.get("video_id") or id(row))
+        scored = row.get("score") is not None
+        if key not in base or (scored and key not in scores):
+            base[key] = dict(row)
+        if scored:
+            scores.setdefault(key, []).append(float(row["score"]))
+    for key, row in base.items():
+        vals = scores.get(key)
+        row["score"] = sum(vals) / len(vals) if vals else None
+    return list(base.values())
+
+
 def family_stats(
     perf_rows: list[dict[str, Any]], families: dict[str, dict[str, Any]]
 ) -> dict[str, FamilyStat]:
     stats: dict[str, FamilyStat] = {
         k: FamilyStat(key=k, status=str(v.get("status", "hypothesis"))) for k, v in families.items()
     }
-    for row in perf_rows:
+    for row in per_video(perf_rows):
         fam = row.get("content_family")
         score = row.get("score")
         if not fam or score is None:
@@ -108,7 +129,7 @@ def plan_allocation(
         fillable = {k: s for k, s in all_stats.items() if k in available}
         if fillable:
             stats = fillable
-    measured = sum(1 for r in perf_rows if r.get("score") is not None)
+    measured = sum(1 for r in per_video(perf_rows) if r.get("score") is not None)
     ratio = (
         explore_ratio(measured, cfg)
         if explore_ratio_override is None

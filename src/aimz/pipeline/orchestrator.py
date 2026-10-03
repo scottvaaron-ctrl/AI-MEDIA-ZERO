@@ -59,7 +59,7 @@ class Orchestrator:
         self.script = ScriptAgent(svc, self.strategy)
         self.factcheck = FactCheckAgent(svc, self.strategy)
         self.critic = CriticAgent(svc, self.strategy)
-        self.producer = ProducerAgent(svc, self.strategy)
+        self.producer = ProducerAgent(svc, self.strategy, rng)
         self.publisher = PublishStage(svc, self.strategy)
         self.analyst = AnalystAgent(svc, self.strategy, self.experiments)
         self.comments = CommentAgent(svc, self.strategy)
@@ -326,6 +326,12 @@ class Orchestrator:
 
     # -- produce / publish ---------------------------------------------------------------------
     def produce_approved(self, run: RunContext, limit: int | None = None) -> list[str]:
+        # Backlog guard: under the owner's posting limits, rendering faster than posting only piles up
+        # videos. Production pauses; the limits never loosen.
+        full, why = self.publisher.gate().backlog_full()
+        if full:
+            run.note("produce", {"rendered": 0, "paused": why})
+            return []
         limit = limit or int(self.svc.config.get("pipeline.max_productions_per_cycle", 2))
         scripts = [
             dict(r)
@@ -357,15 +363,18 @@ class Orchestrator:
         return out
 
     def publish_rendered(self, run: RunContext) -> list[dict[str, Any]]:
+        """Post what is waiting, oldest first, within the owner's posting limits (``pipeline/posting.py``)."""
         self.publisher.poll_pending(run)
-        self.publisher.retry_due(run)
-        videos = [
-            dict(r)
-            for r in self.svc.db.query(
-                "SELECT * FROM videos WHERE status IN ('rendered','approved') ORDER BY created_at"
-            )
-        ]
-        results = []
-        for v in videos:
-            results += self.publisher.publish(run, v["id"], owner_approved=(v["status"] == "approved"))
+        results: list[dict[str, Any]] = []
+        with self.publisher.posting(run) as session:
+            if not session.allowed:
+                run.note("posting", {"allowed": False, "reason": session.reason})
+                return results
+            self.publisher.retry_due(run)
+            api = self.publisher.api_platforms()
+            for v in self.publisher.postable_videos():
+                if api and session.full(api):
+                    break
+                results += self.publisher.publish(run, v["id"], owner_approved=(v["status"] == "approved"))
+            run.note("posting", {"allowed": True, "posts": dict(session.counts)})
         return results

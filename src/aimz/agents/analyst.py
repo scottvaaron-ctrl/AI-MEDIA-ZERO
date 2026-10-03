@@ -14,16 +14,21 @@ The next cycle's Editor-in-Chief and Ideation agents consume the saved strategy.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aimz import identity, instances
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import StrategyUpdate
-from aimz.experiments.allocation import family_stats
+from aimz.experiments import niches, shared
+from aimz.experiments.allocation import family_stats, per_video
 from aimz.experiments.engine import MEASURABLE_KPIS, ExperimentEngine
+from aimz.experiments.settings import SettingsEngine, capabilities
+from aimz.experiments.value import niche_value_text, niche_values, ypp_progress, ypp_text
 from aimz.util import hours_since, iso_ago, now_iso
 
 
@@ -33,7 +38,7 @@ def _mean(xs: list[float]) -> float | None:
 
 def group_stats(rows: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
     groups: dict[str, list[float]] = defaultdict(list)
-    for r in rows:
+    for r in per_video(rows):
         if r.get("score") is None or not r.get(key):
             continue
         groups[str(r[key])].append(float(r["score"]))
@@ -51,7 +56,7 @@ def runtime_buckets(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return ">60s"
 
     groups: dict[str, list[float]] = defaultdict(list)
-    for r in rows:
+    for r in per_video(rows):
         if r.get("score") is None:
             continue
         groups[bucket(r.get("duration_s"))].append(float(r["score"]))
@@ -64,6 +69,7 @@ class AnalystAgent(Agent):
     def __init__(self, svc: Any, strategy: Any, experiments: ExperimentEngine):
         super().__init__(svc, strategy)
         self.experiments = experiments
+        self.settings = SettingsEngine(svc.db, caps=capabilities(svc))
 
     # -- 1. metrics ---------------------------------------------------------------------
     def collect_metrics(self, run: RunContext) -> int:
@@ -92,10 +98,50 @@ class AnalystAgent(Agent):
                     self.svc.analytics_store.record(pub, snap, source="api")
                     n += 1
         run.note("metrics_collected", n)
+        self.collect_channel_stats(run)
         closed = self.close_measurement_windows()
         if closed["publications"] or closed["videos"]:
             run.note("measurement_closed", closed)
+        self.enforce_youtube_retention(run)
         return n
+
+    def enforce_youtube_retention(self, run: RunContext) -> None:
+        """30-day limits and deletion after lost authorization (YouTube Developer Policies; youtube_data.py)."""
+        from aimz import youtube_data
+
+        env = self.svc.env
+        uses_youtube = env.youtube_enabled or env.youtube_analytics_enabled
+        try:
+            result = youtube_data.enforce(
+                self.svc.db, env.data_dir, env.youtube_token_file, check=uses_youtube
+            )
+        except Exception as exc:  # never lose a cycle over this; it runs again next cycle
+            self.log.warning("YouTube data retention check failed: %s", exc)
+            self.svc.tracker.record_error(run.id, self.name, "youtube_retention", exc)
+            return
+        if any(result.get(k) for k in ("comments_deleted", "responses_minimised", "purged")):
+            run.note("youtube_retention", result)
+        if result.get("purged"):
+            self.svc.tracker.record_error(
+                run.id,
+                self.name,
+                "youtube_retention",
+                RuntimeError(f"YouTube data purged: {result['purge_reason']}"),
+            )
+
+    def collect_channel_stats(self, run: RunContext) -> None:
+        """Subscriber count and total views, for Partner Program progress (plan stage 6)."""
+        provider = self.svc.remote_analytics.get("youtube")
+        if provider is None or not hasattr(provider, "channel_statistics"):
+            return
+        with self.svc.tracker.agent(run, self.name, "channel_stats", {}) as span:
+            try:
+                stats = provider.channel_statistics(self.pctx(run, span=span))
+            except Exception as exc:
+                self.log.warning("channel statistics failed: %s", exc)
+                return
+        if stats:
+            self.svc.db.set_state("youtube_channel_stats", json.dumps({**stats, "captured_at": now_iso()}))
 
     def close_measurement_windows(self) -> dict[str, int]:
         """End metric collection for posts older than ``analytics.measurement_window_days``.
@@ -153,7 +199,8 @@ class AnalystAgent(Agent):
         fam = family_stats(perf_rows, strategy_state["families"])
         return {
             "measured_videos": len({r.get("video_id") for r in perf_rows if r.get("score") is not None}),
-            "late_scores": sum(1 for r in perf_rows if r.get("score_late")),
+            "late_scores": sum(1 for r in per_video(perf_rows) if r.get("score_late")),
+            "reach_only_scores": sum(1 for r in per_video(perf_rows) if r.get("score_reach_only")),
             "published_videos": self.published_video_count(),
             "rendered_videos": self.svc.db.count(
                 "videos", "status IN ('rendered','approved','published','measured')"
@@ -203,6 +250,13 @@ class AnalystAgent(Agent):
         perf_rows = self.svc.analytics_store.video_performance()
         exp_results = self.experiments.evaluate_all(perf_rows)
         ev = self.evidence(perf_rows, strategy_state)
+        instance = self.svc.env.instance
+        settings_text = self.settings.evidence_text(
+            shared.pooled_rows(instance, per_video(perf_rows), self.settings)
+        )
+        others_text = shared.other_channels_text(instance)
+        value_text = niche_value_text(niche_values(per_video(perf_rows)))
+        ypp_line = ypp_text(ypp_progress(self.svc.db))
         fam_objs = ev.pop("family_stat_objs")
         fam_lines = "\n".join(
             f"- family={k}: n={v['n']} mean_score={v['mean']} status={v['status']}"
@@ -230,7 +284,9 @@ class AnalystAgent(Agent):
             )
             or "- none"
         )
-        top = sorted([r for r in perf_rows if r.get("score") is not None], key=lambda r: -r["score"])[:5]
+        top = sorted(
+            [r for r in per_video(perf_rows) if r.get("score") is not None], key=lambda r: -r["score"]
+        )[:5]
         top_lines = (
             "\n".join(
                 f"- {r['title'][:60]} | family={r['content_family']} hook={r['hook_type']} score={r['score']:.2f} views={r.get('views')}"
@@ -241,16 +297,35 @@ class AnalystAgent(Agent):
         user = (
             "Update the strategy memory using ONLY the evidence below. Be conservative: with fewer than ~5 measured videos per family, keep statuses at 'testing' or 'hypothesis'. "
             "Do not declare winners from tiny samples; do not let one video lock the strategy. Propose at most one new experiment, only if none is running on that variable. "
-            "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels), "
-            "runtime (two integer runtimes in seconds), or target_platform (tiktok, youtube_shorts, both). "
+            "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels) "
+            "or runtime (two integer runtimes in seconds). "
             f"Its primary_kpi must be one of the measured metrics: {', '.join(MEASURABLE_KPIS)}. "
             "Suggest an explore ratio between 0.25 and 0.8 that fits the evidence (more evidence -> less exploration). Write a one-paragraph audience model and a concise change_summary.\n\n"
             f"Measured videos: {ev['measured_videos']} (published {ev['published_videos']}, rendered {ev['rendered_videos']}; "
-            f"{ev['late_scores']} scored later than 120 h after posting because collection missed the 72 h window)\n"
+            f"{ev['late_scores']} scored later than 120 h after posting because collection missed the 72 h window; "
+            f"{ev['reach_only_scores']} scored on views alone because YouTube returned no retention/shares/subscribers by 120 h)\n"
             f"Families:\n{fam_lines}\nHooks:\n{hook_lines}\nRuntime buckets:\n{rt_lines}\nSources:\n{src_lines}\nExperiments:\n{exp_lines}\n"
             f"Top videos:\n{top_lines}\nProduction bottlenecks: {ev['bottlenecks']}\n"
+            "The owner's goal is a niche that earns passive ad revenue, while still learning. "
+            f"Niche value per video:\n{value_text}\n{ypp_line}\n"
             f"Audience requests so far: {'; '.join(strategy_state.get('audience_requests', [])) or 'none'}\n"
             f"Your last experiment proposal that could not run: {self.svc.db.get_state('last_rejected_experiment') or 'none'}\n\n"
+            "Production settings: the system gives every video a value of each open setting, chosen independently of the idea, "
+            "so their effects can be measured. You decide which settings to test: in setting_changes, open one with 2-4 values "
+            "inside its bounds, lock it to one value, or turn it off (the renderer default). Scores are per video.\n"
+            f"Settings and evidence:\n{settings_text}\n"
+            f"Your last setting changes or niche merges that were refused: {self.svc.db.get_state('last_rejected_setting') or 'none'}\n"
+            "If two niche labels mean the same niche, you may merge them in niche_merges (alias -> into); results are then counted together.\n"
+            + (
+                "The owner runs other channels too. Their niches (a niche another channel already works with at least "
+                f"{instances.CLAIM_MIN_VIDEOS} measured videos is theirs; ideas in it are dropped):\n{others_text}\n"
+                if others_text
+                else ""
+            )
+            + "\n"
+            "Channel identity: every channel the owner runs must be clearly distinct in genre, voice and look, and "
+            "you may experiment with all three. Set or change them in channel_identity (leave it empty to keep them).\n"
+            f"{identity.prompt_text(self.svc.db, instance, self.starting_genres())}\n\n"
             f"Current strategy:\n{self.strategy.prompt_summary(strategy_state)}"
         )
         with self.svc.tracker.agent(
@@ -300,7 +375,23 @@ class AnalystAgent(Agent):
                     if e["status"] in {"concluded", "retired"}
                 ][:10],
             }
+            merged = self.apply_setting_changes(upd)
+            if upd.channel_identity is not None:
+                refused = identity.propose(
+                    self.svc.db, instance, upd.channel_identity.model_dump(), self.settings.catalog
+                )
+                self.svc.db.set_state(identity.REJECTED_KEY, refused or "")
             new_state = self.strategy.apply_update(strategy_state, upd, fam_objs, exps)
+            for alias in merged:  # a merged niche's results now count under its canonical label
+                new_state["families"].pop(alias, None)
+            own = per_video(self.svc.analytics_store.video_performance())
+            new_state["settings_evidence"] = self.settings.evidence_text(
+                shared.pooled_rows(instance, own, self.settings)
+            )
+            try:  # other channels read this; a failure to write it must not stop learning
+                shared.publish(instance, new_state, own, self.settings)
+            except OSError as exc:
+                self.log.warning("could not write the shared channel summary: %s", exc)
             version = self.strategy.save(
                 new_state, created_by="ai", run_id=run.id, change_summary=upd.change_summary[:500]
             )
@@ -316,6 +407,31 @@ class AnalystAgent(Agent):
             "experiments": exp_results,
             "change_summary": upd.change_summary,
         }
+
+    def starting_genres(self) -> list[str]:
+        """The owner's starting guidance for a channel's genre (config.yaml channels.starting_genres)."""
+        return [str(g) for g in self.svc.config.get("channels.starting_genres", []) or []]
+
+    def apply_setting_changes(self, upd: StrategyUpdate) -> list[str]:
+        """Apply the strategist's setting changes and niche merges; refusals go back into the next prompt.
+
+        Returns the niche labels that were merged away.
+        """
+        refused: list[str] = []
+        for ch in upd.setting_changes[:6]:
+            why = self.settings.change(ch.variable, ch.action, list(ch.values), ch.locked_value, by="ai")
+            if why:
+                refused.append(f"{ch.action} {ch.variable}: {why}")
+        merged: list[str] = []
+        for m in upd.niche_merges[:6]:
+            why = niches.merge(self.svc.db, m.alias, m.into, m.reason, by="ai")
+            if why:
+                refused.append(f"merge {m.alias} -> {m.into}: {why}")
+            else:
+                merged.append(niches.norm_label(m.alias))
+        if upd.setting_changes or upd.niche_merges:
+            self.svc.db.set_state("last_rejected_setting", "; ".join(refused)[:1000] if refused else "")
+        return merged
 
     # -- reports ----------------------------------------------------------------------------
     def reports_dir(self) -> Path:
@@ -338,6 +454,7 @@ class AnalystAgent(Agent):
             f"Strategy version: {state.get('version')}  |  confidence: {state.get('confidence', 0):.2f}  |  explore ratio: {state.get('explore_ratio', 0.7):.0%}",
             f"Measured videos: {ev['measured_videos']}  |  published: {ev['published_videos']}  |  rendered: {ev['rendered_videos']}",
             f"Scored late (after 120 h; collection missed the 72 h window): {ev['late_scores']}",
+            f"Scored on views alone (no YouTube Analytics rows by 120 h): {ev['reach_only_scores']}",
             "",
             "## What changed",
             change_summary or "(no change)",
@@ -357,6 +474,11 @@ class AnalystAgent(Agent):
                 or ["- none running"]
             ),
             "",
+            "## Niche value",
+            niche_value_text(niche_values(per_video(self.svc.analytics_store.video_performance()))),
+            "",
+            ypp_text(ypp_progress(self.svc.db)),
+            "",
             "## Bottlenecks",
             f"{ev['bottlenecks']}",
             "",
@@ -367,7 +489,7 @@ class AnalystAgent(Agent):
     def review(self, kind: str = "weekly") -> Path:
         """Deterministic weekly/monthly review answering the validation questions."""
         days = {"daily": 1, "weekly": 7, "monthly": 30}.get(kind, 7)
-        perf = self.svc.analytics_store.video_performance()
+        perf = per_video(self.svc.analytics_store.video_performance())
         measured = [r for r in perf if r.get("score") is not None]
         measured.sort(key=lambda r: r.get("posted_at") or r.get("captured_at") or "")
         half = len(measured) // 2
@@ -434,7 +556,7 @@ class AnalystAgent(Agent):
         return path
 
     def milestone(self) -> dict[str, Any]:
-        perf = self.svc.analytics_store.video_performance()
+        perf = per_video(self.svc.analytics_store.video_performance())
         measured = [r for r in perf if r.get("score") is not None]
         fams = {r["content_family"] for r in measured if r.get("content_family")}
         published = self.published_video_count()

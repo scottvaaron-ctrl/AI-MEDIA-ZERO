@@ -98,7 +98,10 @@ def run_checks(svc: Services, fix: bool = False) -> list[Check]:
         h = svc.tts.health()
         if not h.ok and fix and "voice" in h.detail.lower():
             try:
-                svc.tts.ensure_voice()  # type: ignore[attr-defined]
+                from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES
+
+                for voice in COMMERCIAL_SAFE_VOICES:  # no default voice: fetch every cleared one
+                    svc.tts.ensure_voice(voice)  # type: ignore[attr-defined]
                 h = svc.tts.health()
             except Exception as exc:
                 h.detail += f" (auto-download failed: {exc})"
@@ -120,9 +123,11 @@ def run_checks(svc: Services, fix: bool = False) -> list[Check]:
         checks.append(Check("Database", False, str(exc), "aimz init"))
 
     # Config files
-    for name in ("config.yaml", "feeds.yaml", "constitution.md"):
+    for name in ("config.yaml", "feeds.yaml"):
         p = env.config_dir / name
         checks.append(Check(f"config/{name}", p.exists(), str(p) if p.exists() else "missing", "aimz init"))
+    p = env.constitution_file  # shared by every channel instance
+    checks.append(Check("constitution", p.exists(), str(p) if p.exists() else "missing", "aimz init"))
     checks.append(
         Check(
             ".env",

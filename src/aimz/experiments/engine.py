@@ -19,12 +19,12 @@ from aimz.db import Database
 from aimz.domain.models import ExperimentProposal
 from aimz.util import new_id, now_iso
 
+# Only metrics a connected platform actually returns. 3-second retention and completion rate are not in
+# any API (YouTube gives average percentage viewed; TikTok posts are private), so an experiment on them
+# would stay at n=0 forever. Add them back only when a platform provides them.
 KPI_FIELDS = {
-    "3_second_retention": "retention_3s",
-    "retention_3s": "retention_3s",
     "avg_percent_viewed": "avg_percent_viewed",
     "average_percentage_viewed": "avg_percent_viewed",
-    "completion_rate": "completion_rate",
     "shares_per_1000": "shares_per_1000",
     "subscribers_per_1000": "subs_per_1000",
     "subs_per_1000": "subs_per_1000",
@@ -76,8 +76,6 @@ def kpi_value(row: dict[str, Any], kpi: str) -> float | None:
 MEASURABLE_KPIS = (
     "score",
     "avg_percent_viewed",
-    "retention_3s",
-    "completion_rate",
     "shares_per_1000",
     "subscribers_per_1000",
     "views",
@@ -118,8 +116,12 @@ def welch_confidence(a: ArmSummary, b: ArmSummary) -> float:
 ASSIGNABLE_VARIABLES: dict[str, set[str] | None] = {
     "hook_type": None,  # any label the channel uses (validated against config hook_types only if set)
     "runtime": None,  # integer seconds
-    "target_platform": {"tiktok", "youtube_shorts", "both"},
+    # target_platform is left out until publishing routes a video to its target platform only; today every
+    # video goes to every platform, so an experiment on it would compare nothing.
 }
+
+# Ideas that will never become a video. They do not count toward arm balance.
+DEAD_IDEA_STATUSES = ("rejected", "killed")
 
 
 class ExperimentEngine:
@@ -221,32 +223,39 @@ class ExperimentEngine:
         )
         # Ideas not yet being written are freed, so they do not publish under a retired experiment's
         # label. Ideas already in production keep theirs: the arm shaped what was written.
+        # Rejected ideas are freed too: they never became a video, so they carry no result.
         self.db.execute(
             "UPDATE ideas SET experiment_id=NULL, experiment_arm=NULL, updated_at=? "
-            "WHERE experiment_id=? AND status IN ('candidate','selected')",
+            "WHERE experiment_id=? AND status IN ('candidate','selected','rejected','killed')",
             [now_iso(), experiment_id],
         )
 
     # -- assignment ------------------------------------------------------------------
     def next_for_assignment(self) -> dict[str, Any] | None:
-        """The running experiment with the fewest ideas assigned, so a second one is not starved."""
+        """The running experiment with the fewest live ideas assigned, so a second one is not starved."""
         running = self.running()
         if not running:
             return None
         counts = {
             r["experiment_id"]: int(r["c"])
             for r in self.db.query(
-                "SELECT experiment_id, COUNT(*) c FROM ideas WHERE experiment_id IS NOT NULL GROUP BY experiment_id"
+                "SELECT experiment_id, COUNT(*) c FROM ideas WHERE experiment_id IS NOT NULL "
+                f"AND status NOT IN {DEAD_IDEA_STATUSES} GROUP BY experiment_id"
             )
         }
         return min(running, key=lambda e: (counts.get(e["id"], 0), e["started_at"] or ""))
 
     def assign_arm(self, experiment: dict[str, Any], rng: random.Random | None = None) -> tuple[str, str]:
-        """Return (arm, value) balancing arm counts across all ideas assigned so far."""
+        """Return (arm, value) balancing arms on ideas that published or still can.
+
+        Rejected ideas are not counted: an arm whose scripts fail QA more often would otherwise get fewer
+        videos while looking balanced.
+        """
         rng = rng or random.Random()
         counts = {"control": 0, "treatment": 0}
         for r in self.db.query(
-            "SELECT experiment_arm, COUNT(*) c FROM ideas WHERE experiment_id=? GROUP BY experiment_arm",
+            "SELECT experiment_arm, COUNT(*) c FROM ideas WHERE experiment_id=? "
+            f"AND status NOT IN {DEAD_IDEA_STATUSES} GROUP BY experiment_arm",
             [experiment["id"]],
         ):
             if r["experiment_arm"] in counts:

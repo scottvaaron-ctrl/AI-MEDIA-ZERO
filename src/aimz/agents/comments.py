@@ -39,10 +39,18 @@ class CommentAgent(Agent):
     def ingest(self, publication: dict[str, Any], comments: list[FetchedComment]) -> list[str]:
         new_ids: list[str] = []
         for c in comments:
-            if self.svc.db.one(
-                "SELECT 1 FROM comments WHERE publication_id=? AND platform_comment_id=?",
+            existing = self.svc.db.one(
+                "SELECT id FROM comments WHERE publication_id=? AND platform_comment_id=?",
                 [publication["id"], c.platform_comment_id],
-            ):
+            )
+            if existing:
+                # A refetch refreshes the stored copy; one not refreshed for 30 days is deleted
+                # (aimz/youtube_data.py, YouTube Developer Policies III.E.4).
+                self.svc.db.update(
+                    "comments",
+                    existing["id"],
+                    {"author": c.author[:100], "text": c.text[:2000], "refreshed_at": now_iso()},
+                )
                 continue
             cid = new_id("cmt")
             self.svc.db.insert(
@@ -55,6 +63,7 @@ class CommentAgent(Agent):
                     "text": c.text[:2000],
                     "posted_at": c.posted_at,
                     "created_at": now_iso(),
+                    "refreshed_at": now_iso(),
                 },
             )
             new_ids.append(cid)

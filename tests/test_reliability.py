@@ -382,6 +382,9 @@ def _retry_now(svc: Any, orch: Any) -> Any:
 
 
 def test_failed_upload_is_retried_after_the_platform_confirms_it_is_absent(svc) -> None:  # noqa: ANN001
+    from tests.conftest import relax_posting_limits
+
+    relax_posting_limits(svc)
     pub = ScriptedPublisher([PublishError("YouTube upload failed: timed out")])
     orch, vid = _publish(svc, pub)
     row = svc.db.one("SELECT * FROM publications")
@@ -423,6 +426,9 @@ def test_unverifiable_but_provably_unsent_failure_is_retried(svc) -> None:  # no
 
 
 def test_attempts_are_capped_then_closed_out(svc) -> None:  # noqa: ANN001
+    from tests.conftest import relax_posting_limits
+
+    relax_posting_limits(svc)
     pub = ScriptedPublisher([PublishError("e1"), PublishError("e2"), PublishError("e3")])
     orch, _ = _publish(svc, pub)
     _retry_now(svc, orch)

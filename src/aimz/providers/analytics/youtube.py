@@ -4,6 +4,9 @@
 * YouTube Analytics API v2 ``reports.query`` -> averageViewDuration, averageViewPercentage, shares,
   subscribersGained, estimatedMinutesWatched (per video, lifetime).
 * ``commentThreads.list`` -> top-level comments (1 quota unit).
+* Revenue (``estimatedRevenue``, ``estimatedAdRevenue``, ``cpm``, ``playbackBasedCpm``), only when the
+  token has the monetary scope. A channel outside the Partner Program gets an error or no rows; that is
+  recorded as "no revenue data", never allowed to drop the other metrics.
 
 Not available through any API (must be entered manually from YouTube Studio): thumbnail
 impressions, impressions CTR, and a literal "3-second retention" (the Analytics API exposes an
@@ -21,9 +24,17 @@ from typing import Any
 from aimz.core.errors import ProviderUnavailable
 from aimz.domain.models import FetchedComment, MetricsSnapshot
 from aimz.providers.base import AnalyticsProvider, HealthStatus, ProviderContext
-from aimz.providers.publishers.youtube import ALL_SCOPES, build_youtube, load_credentials
+from aimz.providers.publishers.youtube import (
+    ALL_SCOPES,
+    SCOPE_MONETARY,
+    build_youtube,
+    has_scope,
+    load_credentials,
+)
 
 log = logging.getLogger("aimz.analytics.youtube")
+
+REVENUE_METRICS = "estimatedRevenue,estimatedAdRevenue,cpm,playbackBasedCpm"
 
 
 class YouTubeAnalyticsProvider(AnalyticsProvider):
@@ -98,11 +109,53 @@ class YouTubeAnalyticsProvider(AnalyticsProvider):
                     snap.shares = int(row.get("shares", 0) or 0)
                     snap.subscribers_gained = int(row.get("subscribersGained", 0) or 0)
                     snap.raw["analytics"] = row
+                if has_scope(creds, SCOPE_MONETARY):
+                    self._fetch_revenue(yta, vid, start, snap)
             except Exception as exc:  # analytics scope may not be granted yet
                 log.warning("YouTube Analytics query failed for %s: %s", vid, exc)
                 snap.raw["analytics_error"] = str(exc)[:300]
             rec.extra["quota_units"] = 2
         return snap
+
+    @staticmethod
+    def _fetch_revenue(yta: Any, vid: str, start: str, snap: MetricsSnapshot) -> None:
+        """Lifetime revenue for one video. Not monetized (403 or no rows) leaves ``revenue_usd`` as None."""
+        try:
+            rep = (
+                yta.reports()
+                .query(
+                    ids="channel==MINE",
+                    startDate=start,
+                    endDate=date.today().isoformat(),
+                    metrics=REVENUE_METRICS,
+                    filters=f"video=={vid}",
+                )
+                .execute()
+            )
+        except Exception as exc:  # 403 until the channel is in the Partner Program
+            log.info("YouTube revenue unavailable for %s: %s", vid, exc)
+            snap.raw["revenue_error"] = str(exc)[:300]
+            return
+        rows = rep.get("rows") or []
+        if not rows:
+            snap.raw["revenue"] = None
+            return
+        headers = [h["name"] for h in rep.get("columnHeaders", [])]
+        row = dict(zip(headers, rows[0], strict=False))
+        snap.raw["revenue"] = row
+        if row.get("estimatedRevenue") is not None:
+            snap.revenue_usd = float(row["estimatedRevenue"])
+
+    def channel_statistics(self, ctx: ProviderContext) -> dict[str, Any] | None:
+        """Subscribers, total views and video count of the authorised channel (1 quota unit)."""
+        if not self.enabled:
+            return None
+        creds = self._creds()
+        with self.authorized(ctx, "youtube_channel_stats") as rec:
+            resp = build_youtube(creds).channels().list(part="statistics", mine=True).execute()
+            rec.extra["quota_units"] = 1
+        items = resp.get("items") or []
+        return dict(items[0].get("statistics", {})) if items else None
 
     def fetch_comments(self, ctx: ProviderContext, publication: dict[str, Any]) -> list[FetchedComment]:
         if not self.enabled or not publication.get("platform_video_id"):

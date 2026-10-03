@@ -26,7 +26,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from aimz.core.errors import CannotVerify, OwnerApprovalRequired, ProviderUnavailable, PublishError
+from aimz.core.errors import (
+    CannotVerify,
+    OwnerApprovalRequired,
+    PermanentPublishError,
+    ProviderUnavailable,
+    PublishError,
+)
 from aimz.domain.models import PublishResult
 from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 from aimz.providers.publishers.packages import write_common_package
@@ -39,10 +45,19 @@ SCOPES_READ = [
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
 ALL_SCOPES = SCOPES_UPLOAD + SCOPES_READ
+# Revenue (estimatedRevenue, cpm, ...) needs its own scope. It is requested at `aimz youtube auth` but is
+# optional: a token without it still uploads and reads every other metric; revenue is then just not fetched.
+SCOPE_MONETARY = "https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
+AUTH_SCOPES = ALL_SCOPES + [SCOPE_MONETARY]
 
 
-def load_credentials(token_file: Path, scopes: list[str]) -> Any:
-    """Load stored OAuth credentials; refresh if expired. Returns None if absent/invalid."""
+def load_credentials(token_file: Path, scopes: list[str] | None = None) -> Any:
+    """Load stored OAuth credentials; refresh if expired. Returns None if absent/invalid.
+
+    The token is loaded with the scopes it was granted, not ``scopes``: a refresh that asks for a scope the
+    owner never granted fails with ``invalid_scope``, so adding a scope to the code must not break the
+    token already on disk. ``scopes`` is kept for callers; use :func:`has_scope` to test for one.
+    """
     try:
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
@@ -52,7 +67,7 @@ def load_credentials(token_file: Path, scopes: list[str]) -> Any:
         ) from exc
     if not token_file.exists():
         return None
-    creds = Credentials.from_authorized_user_file(str(token_file), scopes)
+    creds = Credentials.from_authorized_user_file(str(token_file))
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
         token_file.write_text(creds.to_json(), encoding="utf-8")
@@ -69,9 +84,23 @@ def run_oauth_flow(client_secret_file: Path, token_file: Path, scopes: list[str]
         raise ProviderUnavailable(f"client secret file not found: {client_secret_file}")
     flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_file), scopes)
     creds = flow.run_local_server(port=0, prompt="consent")
+    granted = list(getattr(creds, "granted_scopes", None) or [])
+    if granted and set(granted) != set(creds.scopes or []):
+        # Google lets the owner untick optional permissions. Store only what was granted, so a later
+        # refresh does not ask for a scope the owner declined.
+        from google.oauth2.credentials import Credentials
+
+        info = json.loads(creds.to_json())
+        info["scopes"] = granted
+        creds = Credentials.from_authorized_user_info(info)
     token_file.parent.mkdir(parents=True, exist_ok=True)
     token_file.write_text(creds.to_json(), encoding="utf-8")
     return creds
+
+
+def has_scope(creds: Any, scope: str) -> bool:
+    """True when the stored token was granted ``scope``."""
+    return scope in set(getattr(creds, "granted_scopes", None) or getattr(creds, "scopes", None) or [])
 
 
 def sent_title(publication: dict[str, Any]) -> str:
@@ -116,7 +145,9 @@ class YouTubePublisher(Publisher):
         category_id: str = "27",
         made_for_kids: bool = False,
         contains_synthetic_media: bool = True,
+        consented_channel_id: str = "",
     ):
+        self.consented_channel_id = consented_channel_id
         self.mode = mode
         self.default_privacy = default_privacy
         self.enabled = enabled
@@ -204,6 +235,15 @@ class YouTubePublisher(Publisher):
 
         with self.authorized(ctx, "youtube_upload") as rec:
             yt = build_youtube(creds)
+            if self.consented_channel_id:
+                # Consent was given for one channel (`aimz instance consent`); never upload to another.
+                mine = yt.channels().list(part="id", mine=True).execute().get("items") or []
+                rec.extra["quota_units_check"] = 1
+                if self.consented_channel_id not in {c.get("id") for c in mine}:
+                    raise PermanentPublishError(
+                        "the YouTube login no longer points at the channel the owner consented to "
+                        f"({self.consented_channel_id}); run `aimz instance consent` again"
+                    )
             media = MediaFileUpload(
                 video["file_path"], mimetype="video/mp4", chunksize=8 * 1024 * 1024, resumable=True
             )

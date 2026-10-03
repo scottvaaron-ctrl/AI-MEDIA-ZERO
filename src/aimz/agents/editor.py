@@ -15,6 +15,7 @@ from typing import Any
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import SelectionDecision
+from aimz.experiments import niches
 from aimz.experiments.allocation import plan_allocation
 from aimz.experiments.engine import ExperimentEngine
 from aimz.util import iso_ago, now_iso
@@ -129,8 +130,10 @@ class EditorInChief(Agent):
                 arm, value = self.experiments.assign_arm(exp, self.rng)
                 updates["experiment_id"] = exp["id"]
                 updates["experiment_arm"] = arm
-                if exp["variable"] in {"hook_type", "target_platform", "format"}:
-                    updates[exp["variable"]] = value
+                if exp["variable"] == "hook_type":
+                    # The idea's hook line was written for its old type; the script agent writes the
+                    # opening from this type instead (ScriptAgent.hook_type_under_test).
+                    updates["hook_type"] = value
                 elif exp["variable"] == "runtime":
                     with contextlib.suppress(ValueError):
                         updates["suggested_runtime_s"] = int(value)
@@ -147,11 +150,13 @@ class EditorInChief(Agent):
         ):
             out[r["content_family"]] = out.get(r["content_family"], 0) + int(r["n"])
         scored = {r.get("video_id") for r in perf_rows if r.get("score") is not None}
+        amap = niches.aliases(self.svc.db)
         for r in self.svc.db.query(
             "SELECT v.id, i.content_family FROM videos v JOIN ideas i ON i.id = v.idea_id WHERE v.status='published'"
         ):
             if r["id"] not in scored:
-                out[r["content_family"]] = out.get(r["content_family"], 0) + 1
+                fam = str(niches.canonical(r["content_family"], amap))
+                out[fam] = out.get(fam, 0) + 1
         return out
 
     def _choose(

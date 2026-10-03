@@ -6,6 +6,10 @@
    unverifiable claims, a softened rewrite.
 3. Application: supported claims stay; weak claims are softened; contradicted/unverifiable
    specifics become revision requirements, and on the final round the offending sentence is removed.
+4. Title and hook (owner decision 2026-10-01, "sources required for claims"; YouTube's misleading-
+   metadata rules): every number, year or amount in them must be in the sources *and* said in the
+   narration, and the model checks them as claims (who did it, what happened). Any failure is a
+   revision, so the script cannot be approved with an unsupported title.
 Nothing is ever *added* to fill a gap.
 """
 
@@ -22,6 +26,10 @@ from aimz.util import dumps, now_iso
 _NUM_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d{3,})(?![\w.])")
 _YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+# Amounts the >=100 rule misses: "$3.2 billion", "40%", "2.5 million".
+_AMOUNT_RE = re.compile(
+    r"\$?\s?(\d+(?:\.\d+)?)\s*(?:billion|million|trillion|thousand|bn|percent|%)", re.IGNORECASE
+)
 
 
 def _source_text(sources: list[SourceItemView]) -> str:
@@ -37,6 +45,26 @@ def unsupported_specifics(draft: ScriptDraft, sources: list[SourceItemView]) -> 
     for tok in set(_YEAR_RE.findall(narration)) | {t.replace(",", "") for t in _NUM_RE.findall(narration)}:
         if tok not in corpus:
             flagged.append(tok)
+    return sorted(flagged)
+
+
+def _specifics(text: str) -> set[str]:
+    return (
+        set(_YEAR_RE.findall(text))
+        | {t.replace(",", "") for t in _NUM_RE.findall(text)}
+        | set(_AMOUNT_RE.findall(text))
+    )
+
+
+def unsupported_title_specifics(draft: ScriptDraft, sources: list[SourceItemView]) -> list[str]:
+    """Numbers, years and amounts in the title or hook that the sources or the narration do not contain."""
+    corpus = _source_text(sources).replace(",", "")
+    narration = " ".join(b.narration for b in draft.beats).lower().replace(",", "")
+    flagged = [
+        tok
+        for tok in _specifics(f"{draft.title} {draft.hook_line}")
+        if tok.lower() not in corpus or tok.lower() not in narration
+    ]
     return sorted(flagged)
 
 
@@ -59,14 +87,17 @@ class FactCheckAgent(Agent):
     ) -> tuple[FactCheckResult, list[str]]:
         """Return the model's verdicts plus a list of required revisions (may be empty)."""
         flagged = unsupported_specifics(draft, sources)
-        claims_block = (
-            "\n".join(
-                f"[{i}] (beat {c.beat_index}, {c.claim_type}) {c.text}" for i, c in enumerate(draft.claims)
-            )
-            or "(no claims listed)"
+        title_flagged = unsupported_title_specifics(draft, sources)
+        n = len(draft.claims)
+        claims_block = "\n".join(
+            [f"[{i}] (beat {c.beat_index}, {c.claim_type}) {c.text}" for i, c in enumerate(draft.claims)]
+            + [f"[{n}] (the video's TITLE) {draft.title}", f"[{n + 1}] (the spoken HOOK) {draft.hook_line}"]
         )
         user = (
-            "Verify each claim strictly against the sources. Mark 'supported' only when the source text clearly supports it, "
+            "Verify each claim strictly against the sources. The title and hook are claims too: check who did what, "
+            "numbers, dates and what actually happened (e.g. a study NASA funded is not 'NASA finds'; a building's cost "
+            "is not the cost of a fire in it), and mark them 'contradicted' when they misstate the sources. "
+            "Mark 'supported' only when the source text clearly supports it, "
             "'weak' when only loosely implied or by a single low-credibility source, 'unverifiable' when the sources do not contain it, "
             "'contradicted' when the sources say otherwise. For weak/unverifiable claims, give a softened rewrite (e.g. 'reportedly', 'around', or drop the specific). "
             "Never add new facts. Overall: 'pass' if all supported/weak-with-rewrite, 'revise' if some need fixing, 'reject' if the core premise is contradicted or unverifiable.\n\n"
@@ -89,15 +120,34 @@ class FactCheckAgent(Agent):
                 # A dead model says nothing about the claims. Softening every claim as "weak" turned an
                 # outage into a content revision; it is a technical failure, retried later.
                 raise TechnicalFailure(f"fact-check model call failed: {type(exc).__name__}: {exc}") from exc
-            revisions = self._apply(script_id, draft, result, flagged)
+            revisions = self._apply(script_id, draft, result, flagged, title_flagged)
             span.output_refs["overall"] = result.overall
             span.output_refs["flagged_specifics"] = flagged
+            span.output_refs["title_flagged"] = title_flagged
         return result, revisions
 
     def _apply(
-        self, script_id: str, draft: ScriptDraft, result: FactCheckResult, flagged: list[str]
+        self,
+        script_id: str,
+        draft: ScriptDraft,
+        result: FactCheckResult,
+        flagged: list[str],
+        title_flagged: list[str] | None = None,
     ) -> list[str]:
         revisions: list[str] = []
+        n = len(draft.claims)
+        for v in result.verdicts:
+            if v.claim_index in (n, n + 1) and v.status != "supported":
+                what, text = ("TITLE", draft.title) if v.claim_index == n else ("HOOK", draft.hook_line)
+                revisions.append(
+                    f"{what} is {v.status} by the sources; rewrite it so every claim in it is stated in the "
+                    f"sources and in the narration: '{text[:100]}' ({v.note[:100]})"
+                )
+        if title_flagged:
+            revisions.append(
+                "Title/hook specifics that are not both in the sources and said in the narration "
+                "(remove them or say and source them): " + ", ".join(title_flagged)
+            )
         claim_rows = [
             dict(r)
             for r in self.svc.db.query(
@@ -140,6 +190,7 @@ class FactCheckAgent(Agent):
                         "overall": result.overall,
                         "notes": result.notes,
                         "flagged": flagged,
+                        "title_flagged": title_flagged or [],
                         "verdicts": [v.model_dump() for v in result.verdicts],
                     }
                 ),
@@ -157,4 +208,9 @@ class FactCheckAgent(Agent):
     def enforce_final(self, draft: ScriptDraft, sources: list[SourceItemView]) -> int:
         """Last-resort cleanup after the revision budget is exhausted: drop sentences with unsupported specifics."""
         flagged = unsupported_specifics(draft, sources)
-        return remove_sentences_containing(draft, flagged) if flagged else 0
+        removed = remove_sentences_containing(draft, flagged) if flagged else 0
+        if removed and any(t in draft.hook_line.replace(",", "") for t in flagged) and draft.beats:
+            # The hook is the first thing said; keep it in step with the narration that is left.
+            first = _SENT_SPLIT.split(draft.beats[0].narration.strip())[0]
+            draft.hook_line = first if len(first) >= 5 else draft.hook_line
+        return removed

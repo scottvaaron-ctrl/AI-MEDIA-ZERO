@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 TASK_PREFIX = "AI Media Zero"
+MAIN = "main"  # the original channel, at the repository root
 _DOMAIN_SEP = chr(92)  # backslash, kept out of f-strings
 
 # Windows Smart App Control refuses to start the unsigned console-script shim
@@ -32,11 +33,22 @@ Set-Location $root
 # times had passed; the second died writing to the log the first held open, with no line to show for it.
 # The mutex is taken before the log is touched; a second copy notes itself in a separate file and exits.
 # Windows releases the mutex if this process dies, so a crash never blocks the next cycle.
-$mutex = New-Object System.Threading.Mutex($false, 'Local\\AIMediaZeroCycle')
+$mutex = New-Object System.Threading.Mutex($false, '{mutex}')
 $owned = $false
 try {{ $owned = $mutex.WaitOne(0) }} catch [System.Threading.AbandonedMutexException] {{ $owned = $true }}
 if (-not $owned) {{
     try {{ "$(Get-Date -Format o) skipped: another cycle is already running" | Out-File -FilePath $skipLog -Append -Encoding utf8 }} catch {{ }}
+    exit 0
+}}
+
+# Channels share one GPU and one Ollama, so their cycles run one at a time. Unlike a second copy of the
+# same channel (skipped above), another channel's cycle is waited for, up to 2 hours.
+$gpu = New-Object System.Threading.Mutex($false, 'Local\\AIMediaZeroGPU')
+$gpuOwned = $false
+try {{ $gpuOwned = $gpu.WaitOne([TimeSpan]::FromHours(2)) }} catch [System.Threading.AbandonedMutexException] {{ $gpuOwned = $true }}
+if (-not $gpuOwned) {{
+    try {{ "$(Get-Date -Format o) skipped: another channel's cycle held the GPU for 2 hours" | Out-File -FilePath $skipLog -Append -Encoding utf8 }} catch {{ }}
+    $mutex.ReleaseMutex()
     exit 0
 }}
 
@@ -84,7 +96,7 @@ if (-not (Test-Ollama)) {{
 # Clear the exit code first, so a process that never started is distinguishable
 # from one that started and returned 0.
 $global:LASTEXITCODE = $null
-& cmd.exe /c "`"$py`" -m aimz run >> `"$log`" 2>&1"
+& cmd.exe /c "`"$py`" -m aimz {instance_args}run >> `"$log`" 2>&1"
 $code = $LASTEXITCODE
 if ($null -eq $code) {{
     "FATAL: '$py' did not start; blocked by policy or missing" | Out-File -FilePath $log -Append -Encoding utf8
@@ -101,7 +113,7 @@ if ($code -ne 0) {{
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
         $text = $xml.GetElementsByTagName('text')
-        $text.Item(0).AppendChild($xml.CreateTextNode('AI Media Zero')) | Out-Null
+        $text.Item(0).AppendChild($xml.CreateTextNode('{title}')) | Out-Null
         $text.Item(1).AppendChild($xml.CreateTextNode($msg)) | Out-Null
         $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe'
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
@@ -109,22 +121,31 @@ if ($code -ne 0) {{
         "notification failed: $_" | Out-File -FilePath $log -Append -Encoding utf8
     }}
 }}
+$gpu.ReleaseMutex()
 $mutex.ReleaseMutex()
 exit $code
 """
 
 
-def runner_script(project_root: Path) -> Path:
-    """Write scripts/run-cycle.ps1 that runs one cycle, logging to data/logs/scheduled.log."""
-    scripts = project_root / "scripts"
-    scripts.mkdir(exist_ok=True)
-    path = scripts / "run-cycle.ps1"
+def runner_script(project_root: Path, instance: str = MAIN, instance_root: Path | None = None) -> Path:
+    """Write the runner for one instance: ``scripts/run-cycle.ps1`` for main, ``<instance>/run-cycle.ps1``
+    otherwise. It runs from the repository (code, venv) and logs to the instance's ``data/logs``."""
+    home = instance_root or project_root
+    if instance == MAIN:
+        folder = project_root / "scripts"
+        folder.mkdir(exist_ok=True)
+    else:
+        folder = home
+    path = folder / "run-cycle.ps1"
     path.write_text(
         _RUNNER.format(
             root=project_root,
             python=venv_python(project_root),
-            log=project_root / "data" / "logs" / "scheduled.log",
-            skip_log=project_root / "data" / "logs" / "scheduled-skipped.log",
+            log=home / "data" / "logs" / "scheduled.log",
+            skip_log=home / "data" / "logs" / "scheduled-skipped.log",
+            mutex="Local\\AIMediaZeroCycle" if instance == MAIN else f"Local\\AIMediaZeroCycle-{instance}",
+            instance_args="" if instance == MAIN else f"--instance {instance} ",
+            title="AI Media Zero" if instance == MAIN else f"AI Media Zero ({instance})",
         ),
         encoding="utf-8",
     )
@@ -138,9 +159,17 @@ def venv_python(project_root: Path) -> Path:
     return candidate if candidate.exists() else Path(sys.executable)
 
 
-def task_name(hhmm: str | None = None) -> str:
-    """The single task's name. ``hhmm`` names the old one-task-per-time layout, kept for removal."""
+def task_name(hhmm: str | None = None, instance: str = MAIN) -> str:
+    """The task's name: "AI Media Zero" for the main channel, "AI Media Zero - <name>" for another instance.
+    ``hhmm`` names the main channel's old one-task-per-time layout, kept for removal."""
+    if instance != MAIN:
+        return f"{TASK_PREFIX} - {instance}"
     return f"{TASK_PREFIX} {hhmm.replace(':', '')}" if hhmm else TASK_PREFIX
+
+
+def instance_of(task: str) -> str:
+    """Which instance a task belongs to (the old per-time tasks belong to main)."""
+    return task[len(TASK_PREFIX) + 3 :] if task.startswith(f"{TASK_PREFIX} - ") else MAIN
 
 
 def _task_xml(times: list[str], script: Path, project_root: Path) -> str:
@@ -212,8 +241,11 @@ def _task_xml(times: list[str], script: Path, project_root: Path) -> str:
 """
 
 
-def install(project_root: Path, times: list[str]) -> tuple[str, list[str]]:
-    """Register the single task, then delete every other AI Media Zero task (the old per-time ones).
+def install(
+    project_root: Path, times: list[str], instance: str = MAIN, instance_root: Path | None = None
+) -> tuple[str, list[str]]:
+    """Register this instance's task, then delete this instance's other tasks (main's old per-time ones).
+    Other channels' tasks are never touched.
 
     The new task is created first and confirmed to exist before anything is removed, so a failure never
     leaves the channel with no schedule. Returns (task name, removed task names).
@@ -222,8 +254,8 @@ def install(project_root: Path, times: list[str]) -> tuple[str, list[str]]:
         raise RuntimeError("Task Scheduler is Windows-only; use cron: " + cron_line(project_root, times))
     if not times:
         raise RuntimeError("no times given")
-    script = runner_script(project_root)
-    name = task_name()
+    script = runner_script(project_root, instance, instance_root)
+    name = task_name(instance=instance)
     xml = _task_xml(times, script, project_root)
     # schtasks only reads task XML as UTF-16.
     with tempfile.NamedTemporaryFile(
@@ -243,19 +275,22 @@ def install(project_root: Path, times: list[str]) -> tuple[str, list[str]]:
         raise RuntimeError(f"schtasks failed for {name}: {proc.stderr or proc.stdout}")
     if name not in list_tasks():
         raise RuntimeError(f"{name} was not found after creating it; old tasks left in place")
-    removed = remove([t for t in list_tasks() if t != name])
-    leftover = [t for t in list_tasks() if t != name]
+    mine = [t for t in list_tasks() if t != name and instance_of(t) == instance]
+    removed = remove(mine)
+    leftover = [t for t in list_tasks() if t != name and instance_of(t) == instance]
     if leftover:
         raise RuntimeError(f"{name} installed, but these old tasks could not be removed: {leftover}")
     return name, removed
 
 
-def remove(names: list[str] | None = None) -> list[str]:
-    """Delete the named tasks, or every AI Media Zero task when no names are given."""
+def remove(names: list[str] | None = None, instance: str | None = None) -> list[str]:
+    """Delete the named tasks, or every task of ``instance`` (every AI Media Zero task when both are None)."""
     if os.name != "nt":
         return []
     removed: list[str] = []
-    for name in list_tasks() if names is None else names:
+    if names is None:
+        names = [t for t in list_tasks() if instance is None or instance_of(t) == instance]
+    for name in names:
         proc = subprocess.run(["schtasks", "/Delete", "/F", "/TN", name], capture_output=True, text=True)
         if proc.returncode == 0:
             removed.append(name)

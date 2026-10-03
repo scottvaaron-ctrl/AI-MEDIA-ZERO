@@ -22,6 +22,9 @@ be lost to a technical failure, and a timed-out upload may already be live, so a
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -37,9 +40,42 @@ from aimz.core.errors import (
     ProviderUnavailable,
 )
 from aimz.core.runs import RunContext
+from aimz.experiments.settings import SettingsEngine
+from aimz.pipeline.posting import PostingGate, PostingLimits, PostingSession
 from aimz.util import dumps, iso_ahead, loads, new_id, now_iso
 
 PUBLISHABLE_VIDEO = {"rendered", "approved", "published", "measured"}
+
+
+_INTERNAL_REF = re.compile(r"\[?\b(?:src|idea|scr|vid|pub)_[0-9A-Za-z_]+\]?")
+
+
+def public_summary(script: dict[str, Any]) -> str:
+    """The description's opening line without internal ids (e.g. "[src_2026...]"), never just the title.
+
+    YouTube's misleading-metadata rules and plain readability (audit 2026-10-01: 4 of 22 descriptions
+    opened with "Sources: [src_...]", 3 only repeated the title)."""
+    title = str(script.get("title") or "").strip()
+    text = _INTERNAL_REF.sub("", str(script.get("description") or ""))
+    text = re.sub(r"(?im)^\s*sources?\s*:\s*[,;\s]*$", "", text)  # a "Sources:" line left empty
+    text = re.sub(r"[ \t]+([.,;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", text)).strip(" \n,;:")
+    if not text or text.rstrip(".").lower() == title.rstrip(".").lower():
+        hook = str(script.get("hook_line") or "").strip()
+        text = f"{title}. {hook}" if hook and hook.lower() != title.lower() else title
+    return text
+
+
+def public_tags(tags: list[str], idea: dict[str, Any]) -> list[str]:
+    """Tags without the pipeline's own labels (niche, angle, hook type such as 'corporate_failures')."""
+    internal = {str(idea.get(k) or "").strip().lower() for k in ("content_family", "angle", "hook_type")}
+    out: list[str] = []
+    for t in tags:
+        tag = _INTERNAL_REF.sub("", str(t)).strip()
+        low = tag.lower()
+        if not tag or "_" in tag or low in internal or low in {x.lower() for x in out}:
+            continue
+        out.append(tag)
+    return out
 
 
 def classify_failure(exc: BaseException) -> str:
@@ -58,6 +94,51 @@ def classify_failure(exc: BaseException) -> str:
 class PublishStage(Agent):
     name = "publisher"
 
+    def __init__(self, svc: Any, strategy: Any):
+        super().__init__(svc, strategy)
+        self.session: PostingSession | None = None
+
+    # -- owner posting limits ---------------------------------------------------------------
+    def gate(self) -> PostingGate:
+        return PostingGate(self.svc.db, PostingLimits.from_config(self.svc.config))
+
+    @contextmanager
+    def posting(self, run: RunContext) -> Iterator[PostingSession]:
+        """This run's permission to post under the owner's limits. Nested calls share one session."""
+        if self.session is not None:
+            yield self.session
+            return
+        self.session = self.gate().open(run.id)
+        try:
+            yield self.session
+        finally:
+            self.session = None
+
+    def api_platforms(self) -> list[str]:
+        return [p for p, pub in self.svc.publishers.items() if pub.performs_api_writes]
+
+    def postable_videos(self, days: int = 14) -> list[dict[str, Any]]:
+        """Videos with a platform still to post, oldest first: rendered ones, and published ones that a
+        platform's limit held back, or whose publication an owner re-send left ``pending``."""
+        db = self.svc.db
+        out = [
+            dict(r)
+            for r in db.query(
+                "SELECT * FROM videos WHERE status IN ('rendered','approved') ORDER BY created_at"
+            )
+        ]
+        since = (datetime.now() - timedelta(days=days)).astimezone().isoformat(timespec="seconds")
+        for v in db.query(
+            "SELECT * FROM videos WHERE status='published' AND created_at >= ? ORDER BY created_at", [since]
+        ):
+            rows = {
+                r["platform"]: r["status"]
+                for r in db.query("SELECT platform, status FROM publications WHERE video_id=?", [v["id"]])
+            }
+            if any(rows.get(p) in {None, "pending"} for p in self.svc.publishers):
+                out.append(dict(v))
+        return sorted(out, key=lambda v: str(v["created_at"]))
+
     def build_metadata(
         self, video: dict[str, Any], script: dict[str, Any], idea: dict[str, Any], owner_approved: bool
     ) -> dict[str, Any]:
@@ -68,12 +149,12 @@ class PublishStage(Agent):
         src_lines = "\n".join(f"- {s.get('title', '')}: {s.get('url', '')}" for s in sources)
         attr_lines = "\n".join(f"- {a}" for a in attributions)
         description = (
-            f"{script.get('description') or script['title']}\n\n"
+            f"{public_summary(script)}\n\n"
             f"{disclosure}\n\n"
             f"Sources:\n{src_lines or '- (see package sources.json)'}\n"
             + (f"\nImage credits:\n{attr_lines}\n" if attr_lines else "")
         )
-        tags = list(loads(script.get("tags_json"), []) or [])
+        tags = public_tags(loads(script.get("tags_json"), []) or [], idea)
         tags += [t for t in self.svc.config.get("publishing.youtube.default_tags", []) or [] if t not in tags]
         # Posting time heuristic: next 17:00 local. Strategy may later learn better windows.
         post_time = (
@@ -165,6 +246,28 @@ class PublishStage(Agent):
         metadata = self.build_metadata(video, script, idea, approved)
         metadata.update(extra_metadata or {})
         results: list[dict[str, Any]] = []
+        with self.posting(run) as session:
+            results = self._publish_platforms(
+                run, session, video_id, video, script, metadata, approved, platforms
+            )
+        if any(r["status"] in {"uploaded", "published"} for r in results):
+            self._mark_video_published(video_id)
+        run.note(f"publish:{video_id}", results)
+        return results
+
+    def _publish_platforms(
+        self,
+        run: RunContext,
+        session: PostingSession,
+        video_id: str,
+        video: dict[str, Any],
+        script: dict[str, Any],
+        metadata: dict[str, Any],
+        approved: bool,
+        platforms: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        db = self.svc.db
+        results: list[dict[str, Any]] = []
         for platform, pub in self.svc.publishers.items():
             if platforms and platform not in platforms:
                 continue
@@ -182,6 +285,13 @@ class PublishStage(Agent):
                 else:
                     why = "closed out; the owner can re-send it (aimz publish retry)"
                 results.append({"platform": platform, "status": existing["status"], "skipped": why})
+                continue
+            if pub.performs_api_writes and not session.can_post(platform):
+                # The owner's posting limits: the video waits for the next run that may post.
+                why = (
+                    session.reason if not session.allowed else "this run's posts on the platform are used up"
+                )
+                results.append({"platform": platform, "status": "deferred", "skipped": why})
                 continue
             pub_id = existing["id"] if existing else new_id("pub")
             package_dir = self.svc.env.data_dir / "packages" / platform / package_name(video)
@@ -227,9 +337,10 @@ class PublishStage(Agent):
                     continue
                 except Exception as exc:
                     self.svc.tracker.record_error(run.id, self.name, f"publish:{platform}", exc)
-                    status = self.record_failure(
-                        run, pub_id, f"{type(exc).__name__}: {exc}", classify_failure(exc)
-                    )
+                    kind = classify_failure(exc)
+                    if pub.performs_api_writes and kind != "transient":
+                        session.record(platform)  # it may have reached the platform: it counts
+                    status = self.record_failure(run, pub_id, f"{type(exc).__name__}: {exc}", kind)
                     results.append({"platform": platform, "status": status, "error": str(exc)})
                     span.output_refs["status"] = status
                     continue
@@ -245,6 +356,9 @@ class PublishStage(Agent):
                 }
                 if res.status in {"uploaded", "published"}:
                     update["posted_at"] = now_iso()
+                    self._record_post_time(video_id)
+                if pub.performs_api_writes and res.status in {"uploading", "uploaded", "published"}:
+                    session.record(platform)
                 if res.publish_id:
                     update["metadata_json"] = dumps(
                         {**loads(str(row.get("metadata_json") or ""), {}), "publish_id": res.publish_id}
@@ -260,10 +374,11 @@ class PublishStage(Agent):
                         "message": res.message,
                     }
                 )
-        if any(r["status"] in {"uploaded", "published"} for r in results):
-            self._mark_video_published(video_id)
-        run.note(f"publish:{video_id}", results)
         return results
+
+    def _record_post_time(self, video_id: str) -> None:
+        """When the video first went out (local hour), kept with its settings so timing can be learned."""
+        SettingsEngine(self.svc.db).record(video_id, "post_hour", datetime.now().hour, "schedule")
 
     def _mark_video_published(self, video_id: str) -> None:
         db = self.svc.db
@@ -352,6 +467,12 @@ class PublishStage(Agent):
             publisher = self.svc.publishers.get(pub["platform"])
             if publisher is None:
                 continue  # platform switched off: leave the row for when it is back
+            if (
+                self.session is not None
+                and publisher.performs_api_writes
+                and not self.session.can_post(pub["platform"])
+            ):
+                continue  # the owner's posting limits: this retry waits for a run that may post
             if self.svc.killswitch.status().engaged:
                 run.note("retry_blocked", "kill switch engaged")
                 break  # retries wait for the owner to resume; no attempt is used up

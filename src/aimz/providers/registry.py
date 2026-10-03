@@ -20,6 +20,7 @@ from aimz.providers.analytics.store import SQLiteAnalyticsProvider
 from aimz.providers.analytics.tiktok import TikTokAnalyticsProvider
 from aimz.providers.analytics.youtube import YouTubeAnalyticsProvider
 from aimz.providers.assets.owner_library import OwnerLibraryAssetProvider
+from aimz.providers.assets.stock import PexelsAssetProvider, PixabayAssetProvider
 from aimz.providers.assets.wikimedia import WikimediaAssetProvider
 from aimz.providers.base import (
     AnalyticsProvider,
@@ -143,6 +144,13 @@ def build_services(
     assets.append(OwnerLibraryAssetProvider(owner_dir))
     if config.get("assets.wikimedia.enabled", True):
         assets.append(WikimediaAssetProvider(env.user_agent, config.get("assets.wikimedia.allowed_licenses")))
+    # Pexels / Pixabay licences are outside the constitution's original PD/CC list: only after the owner has
+    # amended it and switched this on in config.yaml, and only with the owner's keys in .env.
+    if config.get("assets.stock.enabled", False):
+        if env.pexels_api_key:
+            assets.append(PexelsAssetProvider(env.pexels_api_key, env.user_agent))
+        if env.pixabay_api_key:
+            assets.append(PixabayAssetProvider(env.pixabay_api_key, env.user_agent))
 
     # ---- research --------------------------------------------------------------------
     rss = RSSResearchProvider(env.user_agent)
@@ -159,6 +167,7 @@ def build_services(
             str(config.get("publishing.youtube.category_id", "27")),
             bool(config.get("publishing.youtube.made_for_kids", False)),
             bool(config.get("publishing.youtube.contains_synthetic_media", True)),
+            consented_channel_id=env.youtube_consented_channel_id,
         ),
         "tiktok": TikTokPackagePublisher(bool(config.get("publishing.tiktok.recommend_ai_label", True))),
     }
@@ -191,7 +200,9 @@ def build_services(
         )
 
     # ---- analytics -------------------------------------------------------------------
-    store = SQLiteAnalyticsProvider(db)
+    from aimz.providers.analytics.store import score_weights
+
+    store = SQLiteAnalyticsProvider(db, score_weights(config))
     remote: dict[str, AnalyticsProvider] = {}
     if env.youtube_analytics_enabled:
         remote["youtube"] = YouTubeAnalyticsProvider(True, env.youtube_token_file)

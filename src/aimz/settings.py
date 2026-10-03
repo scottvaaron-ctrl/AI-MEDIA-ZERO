@@ -84,6 +84,8 @@ class EnvSettings:
     youtube_token_file: Path
     youtube_analytics_enabled: bool
     autopublish_consent: bool
+    # Set by `aimz instance consent`: uploads stop if the login ever points at another channel.
+    youtube_consented_channel_id: str
     tiktok_mode: str
     tiktok_client_key: str
     tiktok_client_secret: str
@@ -103,6 +105,13 @@ class EnvSettings:
     dashboard_host: str
     dashboard_port: int
     user_agent: str
+    # Several channels (plan stage 4): which instance this is, and the constitution they all share.
+    instance: str = "main"
+    constitution_file: Path = Path("config/constitution.md")
+    # Stock media (plan stage 5): free keys the owner puts in .env; used only when config.yaml
+    # assets.stock.enabled is true (after the owner's constitution edit).
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
 
     @property
     def env_file(self) -> Path:
@@ -134,7 +143,7 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         ollama_timeout_s=_env_int("OLLAMA_TIMEOUT_S", 600),
         ollama_num_ctx=_env_int("OLLAMA_NUM_CTX", 8192),
         tts_provider=_env("TTS_PROVIDER", "piper").lower(),
-        piper_voice=_env("PIPER_VOICE", "en_US-lessac-medium"),
+        piper_voice=_env("PIPER_VOICE", ""),  # no default voice (owner, 2026-10-01): chosen per video
         piper_voices_dir=_resolve(root, _env("PIPER_VOICES_DIR"), "data/voices"),
         piper_auto_download=_env_bool("PIPER_AUTO_DOWNLOAD", True),
         piper_length_scale=_env_float("PIPER_LENGTH_SCALE", 1.0),
@@ -150,6 +159,7 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         youtube_token_file=_resolve(root, _env("YOUTUBE_TOKEN_FILE"), "secrets/youtube_token.json"),
         youtube_analytics_enabled=_env_bool("YOUTUBE_ANALYTICS_ENABLED", False),
         autopublish_consent=_env_bool("AUTOPUBLISH_CONSENT", False),
+        youtube_consented_channel_id=_env("YOUTUBE_CONSENTED_CHANNEL_ID", ""),
         tiktok_mode=_env("TIKTOK_MODE", "package").lower(),
         tiktok_client_key=_env("TIKTOK_CLIENT_KEY", ""),
         tiktok_client_secret=_env("TIKTOK_CLIENT_SECRET", ""),
@@ -165,9 +175,17 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         bluesky_lang=_env("BLUESKY_LANG", "en"),
         bluesky_sources_reply=_env_bool("BLUESKY_SOURCES_REPLY", True),
         bluesky_analytics_enabled=_env_bool("BLUESKY_ANALYTICS_ENABLED", False),
+        pexels_api_key=_env("PEXELS_API_KEY", ""),
+        pixabay_api_key=_env("PIXABAY_API_KEY", ""),
         dashboard_host=_env("DASHBOARD_HOST", "127.0.0.1"),
         dashboard_port=_env_int("DASHBOARD_PORT", 8420),
         user_agent=_env("AIMZ_USER_AGENT", "AIMediaZero/0.1 (local research bot; contact owner)"),
+        instance=_env("AIMZ_INSTANCE", "main") or "main",
+        constitution_file=_resolve(
+            root,
+            _env("AIMZ_CONSTITUTION_FILE"),
+            str(_resolve(root, _env("AIMZ_CONFIG_DIR"), "config") / "constitution.md"),
+        ),
     )
 
 
@@ -217,12 +235,26 @@ class AppConfig:
         return [str(p).lower() for p in (self.get("safety.banned_patterns", []) or [])]
 
 
+def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_app_config(config_dir: Path) -> AppConfig:
+    """``config_dir/config.yaml``. A channel instance's file holds only its differences from the main
+    channel's (``AIMZ_BASE_CONFIG``), so an owner change to the main config reaches every channel."""
+    raw: dict[str, Any] = {}
+    base = _env("AIMZ_BASE_CONFIG", "")
+    if base and Path(base).exists():
+        with open(base, encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
     path = config_dir / "config.yaml"
-    if not path.exists():
-        return AppConfig(raw={})
-    with open(path, encoding="utf-8") as fh:
-        return AppConfig(raw=yaml.safe_load(fh) or {})
+    if path.exists():
+        with open(path, encoding="utf-8") as fh:
+            raw = _merge(raw, yaml.safe_load(fh) or {})
+    return AppConfig(raw=raw)
 
 
 def load_feeds(config_dir: Path) -> list[dict[str, Any]]:

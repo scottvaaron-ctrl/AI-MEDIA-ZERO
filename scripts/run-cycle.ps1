@@ -20,6 +20,17 @@ if (-not $owned) {
     exit 0
 }
 
+# Channels share one GPU and one Ollama, so their cycles run one at a time. Unlike a second copy of the
+# same channel (skipped above), another channel's cycle is waited for, up to 2 hours.
+$gpu = New-Object System.Threading.Mutex($false, 'Local\AIMediaZeroGPU')
+$gpuOwned = $false
+try { $gpuOwned = $gpu.WaitOne([TimeSpan]::FromHours(2)) } catch [System.Threading.AbandonedMutexException] { $gpuOwned = $true }
+if (-not $gpuOwned) {
+    try { "$(Get-Date -Format o) skipped: another channel's cycle held the GPU for 2 hours" | Out-File -FilePath $skipLog -Append -Encoding utf8 } catch { }
+    $mutex.ReleaseMutex()
+    exit 0
+}
+
 "=== cycle start $(Get-Date -Format o) ===" | Out-File -FilePath $log -Append -Encoding utf8
 
 if (-not (Test-Path -LiteralPath $py)) {
@@ -89,5 +100,6 @@ if ($code -ne 0) {
         "notification failed: $_" | Out-File -FilePath $log -Append -Encoding utf8
     }
 }
+$gpu.ReleaseMutex()
 $mutex.ReleaseMutex()
 exit $code

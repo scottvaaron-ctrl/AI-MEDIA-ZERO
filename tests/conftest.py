@@ -28,6 +28,8 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "YOUTUBE_MODE": "draft",
         "YOUTUBE_ENABLED": "false",
         "AIMZ_LOG_LEVEL": "WARNING",
+        "AIMZ_INSTANCE": "main",
+        "AIMZ_INSTANCES_DIR": str(tmp_path / "instances"),  # never the real instances/ folder
     }
     for k, v in env_vars.items():
         monkeypatch.setenv(k, v)
@@ -51,3 +53,16 @@ def ffmpeg_available() -> bool:
     from aimz.providers.video.ffmpeg_renderer import resolve_ffmpeg
 
     return resolve_ffmpeg(os.environ.get("FFMPEG_BIN", "")) is not None
+
+
+def relax_posting_limits(svc) -> None:  # noqa: ANN001
+    """For tests about something else (retries, idempotency) that post several times in a row.
+
+    The owner's posting limits themselves are tested in tests/test_posting_limits.py.
+    """
+    svc.config.raw.setdefault("publishing", {})["limits"] = {
+        "posts_per_run_per_platform": 1000,
+        "min_hours_between_runs": 0,
+        "max_runs_per_day": 1000,
+        "backlog_days": 1000,
+    }

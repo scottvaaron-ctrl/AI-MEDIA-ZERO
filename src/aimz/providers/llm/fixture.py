@@ -204,16 +204,21 @@ class FixtureLLMProvider(LLMProvider):
         }
 
     def _gen_FactCheckResult(self, user: str) -> dict[str, Any]:  # noqa: N802
-        n = len(re.findall(r"^\s*\[(\d+)\]", user, re.MULTILINE)) or 2
-        verdicts = [
-            {
-                "claim_index": i,
-                "status": "supported" if i % 3 != 2 else "weak",
-                "note": "Fixture verdict.",
-                "suggested_rewrite": "" if i % 3 != 2 else "reportedly",
-            }
-            for i in range(n)
-        ]
+        lines = re.findall(r"^\s*\[(\d+)\]\s*\(([^)]*)\)", user, re.MULTILINE)
+        n = len(lines) or 2
+        kinds = {int(i): kind for i, kind in lines}
+        verdicts = []
+        for i in range(n):
+            # The title and hook are listed as claims too; the fixture's title only restates the lead.
+            weak = i % 3 == 2 and "TITLE" not in kinds.get(i, "") and "HOOK" not in kinds.get(i, "")
+            verdicts.append(
+                {
+                    "claim_index": i,
+                    "status": "weak" if weak else "supported",
+                    "note": "Fixture verdict.",
+                    "suggested_rewrite": "reportedly" if weak else "",
+                }
+            )
         return {
             "verdicts": verdicts,
             "overall": "pass",

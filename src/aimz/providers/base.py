@@ -207,12 +207,26 @@ class TTSResult:
     sample_rate: int
 
 
+@dataclass
+class SpeechOptions:
+    """Per-call overrides of a TTS provider's configured delivery. None keeps the provider's own value."""
+
+    length_scale: float | None = None
+    sentence_pause_s: float | None = None
+    voice: str | None = None
+
+
 class TTSProvider(Provider):
     kind = "tts"
 
     @abstractmethod
     def synthesize(
-        self, ctx: ProviderContext, text: str, out_path: Path, purpose: str = "narration"
+        self,
+        ctx: ProviderContext,
+        text: str,
+        out_path: Path,
+        purpose: str = "narration",
+        options: SpeechOptions | None = None,
     ) -> TTSResult: ...
 
 

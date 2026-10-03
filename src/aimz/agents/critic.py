@@ -15,7 +15,11 @@ ELEVATED_KEYWORDS = {
     "medical claims": ["cure", "treatment", "diagnos", "vaccine", "dosage", "symptom", "disease", "cancer"],
     "legal claims": ["lawsuit", "illegal", "convicted", "guilty", "indicted", "fraud", "crime"],
     "financial advice": [
-        "invest",
+        # Not bare "invest": it matched "investigation" and sent air-crash stories to the owner (2 Oct).
+        "invest in",
+        "invest your",
+        "investing in",
+        "investment advice",
         "buy the stock",
         "should buy",
         "guaranteed return",
@@ -63,6 +67,50 @@ REASK = (
 
 def _norm(s: str) -> str:
     return " ".join(re.sub(r"[^\w\s$%.]", " ", s.lower()).split())
+
+
+# Negative claims about how a person behaves or what they did wrong. A sentence holding one of these and
+# a capitalised full name is routed to the owner (constitution section 6: allegations involving real,
+# living people). Added 2026-10-01 after "Founder Wang Xingxing's extreme micromanagement ..." auto-published.
+ALLEGATION_TERMS = (
+    "micromanag",
+    "mismanag",
+    "accus",
+    "alleg",
+    "scandal",
+    "misconduct",
+    "harass",
+    "abus",
+    "toxic",
+    "negligen",
+    "incompeten",
+    "lied",
+    "lying",
+    "cover-up",
+    "covered up",
+    "blamed",
+    "exploit",
+    "cheat",
+    "plagiar",
+    "bully",
+    "corrupt",
+    "embezzl",
+    "dishonest",
+    "reckless",
+)
+_NAME_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+")
+_SENTENCES = re.compile(r"(?<=[.!?])\s+")
+
+
+def allegation_sentences(text: str) -> list[str]:
+    """Sentences pairing a full name with a negative claim about conduct (living or not: the owner decides)."""
+    text = text.replace("’", "'")
+    out = []
+    for sentence in _SENTENCES.split(text):
+        low = sentence.lower()
+        if _NAME_RE.search(sentence) and any(re.search(r"\b" + re.escape(t), low) for t in ALLEGATION_TERMS):
+            out.append(sentence.strip())
+    return out
 
 
 class CriticAgent(Agent):
@@ -216,6 +264,10 @@ class CriticAgent(Agent):
         for topic, kws in ELEVATED_KEYWORDS.items():
             if any(re.search(r"\b" + re.escape(k), low) for k in kws):
                 reasons.add(topic)
+        alleged = allegation_sentences(" ".join([draft.title + ".", draft.hook_line, narration]))
+        if alleged:
+            reasons.add("allegations involving real, living people")
+            result.elevated_review_evidence = [*result.elevated_review_evidence, *alleged[:3]]
         result.elevated_review_required = False
         if reasons:
             result.elevated_review_required = True

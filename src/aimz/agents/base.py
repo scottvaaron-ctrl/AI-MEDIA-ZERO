@@ -68,14 +68,13 @@ class Agent:
     # -- prompts ----------------------------------------------------------------------
     def constitution(self) -> str:
         if self._constitution is None:
-            self._constitution = (
-                read_text(self.svc.env.config_dir / "constitution.md") or "(no constitution file)"
-            )
+            self._constitution = read_text(self.svc.env.constitution_file) or "(no constitution file)"
         return self._constitution
 
     def system_prompt(self, role: str, include_constitution: bool = True) -> str:
         parts = [
-            f"You are the {role} of 'AI Media Zero', an autonomous, zero-budget media channel run as an experiment.",
+            f"You are the {role} of '{self.svc.config.get('project.name', 'AI Media Zero')}', an autonomous, "
+            "zero-budget media channel run as an experiment.",
             STYLE_RULES,
         ]
         if include_constitution:

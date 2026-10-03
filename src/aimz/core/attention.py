@@ -67,4 +67,14 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
             [iso_ago(hours=4)],
         )
     ]
+    failing = db.get_state("youtube_auth_failing_since")
+    if failing:
+        out["youtube_login_failing"] = [
+            {
+                "since": failing,
+                "why": "YouTube refuses the stored login. Per YouTube policy, this channel's YouTube data "
+                "(metrics, comments) is deleted automatically 7 days after this date unless it works again",
+                "fix": "python -m aimz youtube auth",
+            }
+        ]
     return {k: v for k, v in out.items() if v}
