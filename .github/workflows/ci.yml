@@ -33,4 +33,12 @@ jobs:
         env:
           LLM_PROVIDER: fixture
           TTS_PROVIDER: silent
-        run: pytest -q --cov=aimz --cov-report=term-missing
+        shell: bash
+        # On failure, publish the tail of the output as an annotation: annotations show on the
+        # run page without signing in, the full log does not.
+        run: |
+          set -o pipefail
+          pytest -q --cov=aimz --cov-report=term-missing 2>&1 | tee pytest-output.txt && exit 0
+          code=$?
+          python -c "import sys; t=open('pytest-output.txt',encoding='utf-8',errors='replace').read().splitlines()[-40:]; print('::error title=pytest failed::' + '%0A'.join(l.replace('%','%25').replace('\r','') for l in t))"
+          exit $code
