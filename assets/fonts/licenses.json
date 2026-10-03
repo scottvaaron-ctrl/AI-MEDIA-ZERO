@@ -1,0 +1,30 @@
+[
+  {
+    "family": "Poppins",
+    "file": "Poppins-Bold.ttf",
+    "license": "OFL-1.1",
+    "license_file": "OFL-poppins.txt",
+    "source": "https://github.com/google/fonts/tree/main/ofl/poppins"
+  },
+  {
+    "family": "Anton",
+    "file": "Anton-Regular.ttf",
+    "license": "OFL-1.1",
+    "license_file": "OFL-anton.txt",
+    "source": "https://github.com/google/fonts/tree/main/ofl/anton"
+  },
+  {
+    "family": "Bebas Neue",
+    "file": "BebasNeue-Regular.ttf",
+    "license": "OFL-1.1",
+    "license_file": "OFL-bebasneue.txt",
+    "source": "https://github.com/google/fonts/tree/main/ofl/bebasneue"
+  },
+  {
+    "family": "Archivo Black",
+    "file": "ArchivoBlack-Regular.ttf",
+    "license": "OFL-1.1",
+    "license_file": "OFL-archivoblack.txt",
+    "source": "https://github.com/google/fonts/tree/main/ofl/archivoblack"
+  }
+]
