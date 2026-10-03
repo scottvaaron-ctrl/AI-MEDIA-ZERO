@@ -617,7 +617,7 @@ class BlueskyPublisher(Publisher):
                     )
                 if state == "JOB_STATE_COMPLETED" and job.get("blob"):
                     break
-                if time.time() > deadline:
+                if time.time() >= deadline:
                     return PublishResult(
                         status="uploading",
                         package_dir=str(package_dir),

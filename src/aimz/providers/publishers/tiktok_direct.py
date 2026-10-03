@@ -407,7 +407,7 @@ class TikTokDirectPostPublisher(Publisher):
                     )
                 if status == "FAILED":
                     raise PublishError(f"TikTok post failed: {st.get('fail_reason')}")
-                if time.time() > deadline:
+                if time.time() >= deadline:
                     return PublishResult(
                         status="uploading",
                         package_dir=str(package_dir),
