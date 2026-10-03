@@ -126,11 +126,14 @@ def create_app(svc: Services | None = None) -> FastAPI:
         return render(request, "ideas.html", ideas=rows)
 
     @app.get("/scripts", response_class=HTMLResponse)
-    def scripts(request: Request) -> HTMLResponse:
+    def scripts(request: Request, status: str = "") -> HTMLResponse:
+        where, params = ("WHERE s.status=?", [status]) if status else ("", [])
         rows = q(
-            "SELECT s.*, i.content_family, i.hook_type FROM scripts s JOIN ideas i ON i.id=s.idea_id ORDER BY s.created_at DESC LIMIT 200"
+            "SELECT s.*, i.content_family, i.hook_type FROM scripts s JOIN ideas i ON i.id=s.idea_id "
+            f"{where} ORDER BY s.created_at DESC LIMIT 200",
+            params,
         )
-        return render(request, "scripts.html", scripts=rows)
+        return render(request, "scripts.html", scripts=rows, status=status)
 
     @app.get("/scripts/{script_id}", response_class=HTMLResponse)
     def script_detail(request: Request, script_id: str) -> HTMLResponse:

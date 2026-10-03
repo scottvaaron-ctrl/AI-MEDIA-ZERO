@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card">
-  <h3>Scripts &amp; QA</h3>
+  <h3>Scripts &amp; QA{% if status %} · {{ status }}{% endif %}</h3>
+  <p>Show: <a href="/scripts">all</a> · <a href="/scripts?status=needs_owner_review">waiting for your review</a>
+     · <a href="/scripts?status=approved">approved</a> · <a href="/scripts?status=qa_failed">failed checks</a></p>
   <table>
     <tr><th>status</th><th>v</th><th>title</th><th>family / hook</th><th>words</th><th>QA score</th><th>fact-check</th><th>created</th></tr>
     {% for s in scripts %}{% set qa = s.qa_json|loads %}{% set fc = s.factcheck_json|loads %}
