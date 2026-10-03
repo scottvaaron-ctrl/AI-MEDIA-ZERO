@@ -71,5 +71,8 @@ files = ["src/aimz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tests import helpers from each other (`from tests.x import ...`); plain `pytest`, as CI runs
+# it, does not put the project root on sys.path the way `python -m pytest` does.
+pythonpath = ["."]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
