@@ -11,7 +11,13 @@ Commands run from `C:\Users\scott\Documents\Agentic_Youtube` in PowerShell. `py`
 
 ## A. Your steps, in order
 
-### A0. Answer Google's YouTube API compliance review (final notice 1 Oct, due ≈ 12 Oct)
+### A0. Answer Google's YouTube API compliance review: **SENT 2 Oct**
+Reply sent in the Gmail thread on 2 Oct (channel link, step-by-step upload process, end result).
+**Now wait for Google's answer.** The reply promised: no new channel is connected until the review is
+complete, and Google gets each new channel's link before any upload to it. If Google asks for a screen
+recording, see the optional step below.
+
+_Original task, kept for reference:_
 Gmail thread "YouTube API Services: Thank you for your submission" (from youtube-disputes@google.com).
 They want (1) a detailed script **or** screencast of the whole upload process and the end result, and
 (2) the links of every channel the API client uploads to.
@@ -38,7 +44,8 @@ They want (1) a detailed script **or** screencast of the whole upload process an
 - Deadline: before about **7 Oct**, when the current login expires.
 
 ### A2. Add the 3 new YouTube channels (about 5 minutes each)
-> **Wait for A0 (owner decision 1 Oct): no new channels until the reply to YouTube is sent.** Then send
+> **Wait until Google completes the review** (promised in the 2 Oct reply). Then email Google the new
+> channels' links before their first upload. (Owner decision 1 Oct was "until YouTube is contacted"; the reply made it stricter.) Then send
 > Google the new channels' links before their first upload. The code is ready: stage C items C4 (consent
 > per channel), C6 (voice) and C11 (channel identity) are in. A new instance starts with automatic uploads **off** and no voice of its own; each
 > channel's AI picks a genre, voice and look different from the other channels on its first runs.

@@ -247,8 +247,8 @@ channels on 1 Oct (4 in total).
 - **Privacy page published** 1 Oct, with public contact backhousegroupnj@gmail.com.
 - **Owner decision 1 Oct:** no new channels until YouTube has been contacted.
 - **Still open (owner):**
-  - Send the Google reply (a Gmail draft is ready) by about 12 Oct. It lists Backhouse Explainers and says up to three more channels may follow.
-  - After that, create the new channels and send Google their links before any upload to them.
+  - **Reply sent to Google on 2 Oct** (channel link, step-by-step upload process, end result). Now waiting for Google's answer.
+  - The reply promised that no new channel is connected until the review is complete, and that Google gets each new channel's link before any upload to it. So the new channels wait for Google.
   - The asset-relevance check (no unrelated images) is not built yet.
 
 ### Open loop for 1 Oct (owner)
