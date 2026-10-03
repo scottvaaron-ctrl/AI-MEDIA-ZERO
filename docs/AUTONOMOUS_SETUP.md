@@ -169,6 +169,9 @@ or you approve the video.
 aimz schedule install --times 09:00,18:00
 ```
 
+The times must fit the owner's posting limits in `config.yaml` `publishing.limits` (at most 4 runs a
+day, at least 2.5 h apart); `schedule install` refuses a schedule that does not.
+
 This registers **one** Windows Task Scheduler job, "AI Media Zero", with a daily trigger for each
 time; it runs `aimz run` and logs to `data\logs\scheduled.log`. Installing also deletes any other
 "AI Media Zero ..." task, including the old one-task-per-time layout ("AI Media Zero 0900" /
@@ -190,6 +193,51 @@ so the guard lives in `src/aimz/scheduler.py`, not only in the script.
 
 ---
 
+## Part F — More channels (one instance per channel, since 2026-09-30)
+
+Each extra YouTube channel is its own instance in `instances/<name>/` (git-ignored: it holds that
+channel's `.env`, login token, database and videos). The code, your constitution, the voices and the
+Google Cloud app are shared. Posting limits apply per channel. Channels take turns on the GPU.
+
+For each new channel (about 5 minutes each):
+
+1. Create the channel on YouTube. A brand channel under your Google account is fine.
+2. Create its instance. The name is a short id; the channel name is what the AI calls itself:
+   ```powershell
+   .\.venv\Scripts\python.exe -m aimz instance create space --channel-name "Your Channel Name"
+   ```
+3. Log in for that channel. When Google asks which account or channel, pick **the new channel**. Tick
+   every permission box.
+   ```powershell
+   .\.venv\Scripts\python.exe -m aimz --instance space youtube auth
+   ```
+4. Check the login points at the right channel:
+   ```powershell
+   .\.venv\Scripts\python.exe -m aimz --instance space youtube whoami
+   ```
+5. Allow automatic uploads to this channel. YouTube requires your consent per channel, so a new channel
+   starts with it off; the command shows the channel and asks you to confirm:
+   ```powershell
+   .\.venv\Scripts\python.exe -m aimz instance consent space
+   ```
+6. Schedule it. `instance create` prints suggested times, 15 minutes after the previous channel's:
+   ```powershell
+   .\.venv\Scripts\python.exe -m aimz --instance space schedule install --times 09:15,18:15
+   ```
+
+On its first runs each channel's AI chooses a genre, voice and look that differ from the other
+channels' (owner guidance: `channels.starting_genres` in `config/config.yaml`). To disconnect a channel
+and delete its YouTube data: `python -m aimz --instance space youtube revoke`.
+
+Every channel reads the main `config/config.yaml` (posting limits, score weights, the stock-media switch):
+edit it once and all channels follow. `instances/<name>/config/config.yaml` holds only that channel's
+differences (its name), and `instances/<name>/config/feeds.yaml` its own research sources.
+
+`python -m aimz instance list` shows every channel and whether it has a login;
+`python -m aimz status --all` shows every channel's last run and posting state. Any command takes
+`--instance <name>`; without it, the command acts on the main channel. TikTok and Bluesky are off
+for new channels. To add a Bluesky account for one, put its `BLUESKY_*` lines in that instance's `.env`.
+
 ## Part E — Verify
 
 ```powershell
@@ -207,6 +255,9 @@ moving families out of `hypothesis`.
 ## What still needs you (rarely)
 
 - Re-running `aimz youtube auth` / `aimz tiktok auth` if a token is revoked (about yearly).
+  Exception: while the Google Cloud OAuth consent screen is in **Testing**, Google expires the
+  YouTube token every 7 days (seen 18 Sep and 30 Sep 2026). Set it to **In production**, then
+  re-run `aimz youtube auth` once; a token issued under Testing keeps its 7-day limit.
   Bluesky is the exception: it signs itself back in from the app password, so it only needs you
   if you revoke that password.
 - Responding to a platform audit question.

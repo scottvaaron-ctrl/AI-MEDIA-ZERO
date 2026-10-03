@@ -1,6 +1,7 @@
 # Platform compliance notes
 
-Verified against official documentation on 2026-09-07; the Bluesky section on 2026-09-08.
+Verified against official documentation on 2026-09-07; the Bluesky section on 2026-09-08; YouTube
+policies (developer, monetization, spam, disclosure) re-checked 2026-10-01 (`docs/PLAN_FULL_CONTROL.md` stage C).
 Re-verify before changing publishing modes.
 
 ## YouTube Data API v3
@@ -9,13 +10,17 @@ Re-verify before changing publishing modes.
 |---|---|---|
 | `videos.insert` needs `youtube.upload` (or broader) scope | developers.google.com/youtube/v3/docs/videos/insert | `YouTubePublisher` requests `youtube.upload` + read-only scopes via the installed-app OAuth flow, run by the owner (`aimz youtube auth`) |
 | Uploads from unverified API projects created after 28 Jul 2020 are restricted to **private** until the project passes a compliance audit | same page | Default `YOUTUBE_MODE=draft` (no API writes); `private` is the only automated upload mode recommended in V0; `public` is owner-opt-in and documented as ineffective until audited |
-| Quota (June 2026): 100 `videos.insert` calls/day (1 unit each) plus 10,000 units/day for other endpoints | developers.google.com/youtube/v3/getting-started | `aimz` never uploads more than `max_productions_per_cycle` per cycle; usage is recorded in `provider_usage.extra` |
+| Quota (June 2026): 100 `videos.insert` calls/day (1 unit each) plus 10,000 units/day for other endpoints, per Google Cloud project | developers.google.com/youtube/v3/getting-started | All channels share one project and one OAuth client (Developer Policies III.D.1.c: one project per API client; never create a project per channel for quota). Owner posting limits (`publishing.limits`, 2026-10-01): at most 2 posts per run and 2 posting runs a day per channel, so at most 16 uploads/day across 4 channels |
 | `status.containsSyntheticMedia` is the official altered/synthetic disclosure | videos resource docs (added Oct 2024) | Set `true` by default (`publishing.youtube.contains_synthetic_media`); disclosure text also goes in the description |
 | `status.selfDeclaredMadeForKids` (COPPA) | videos resource docs | Set from config, default `false` |
 | `status.publishAt` requires `privacyStatus=private` | videos resource docs | `scheduled` mode always uploads private with `publishAt` |
 | Developer Policy III.E.3.d: users must expressly consent before write actions; III.C.3: users have final control over published data; III.I.2: no automated uploads without prior specific consent | developers.google.com/youtube/terms/developer-policies | `publishing.require_owner_approval=true`; `PublishStage` raises `OwnerApprovalRequired` unless the video was approved in the dashboard/CLI; the kill switch blocks all writes, retries included; a failed upload is retried only under the same consent, only after `YouTubePublisher.find_existing` (channels.list + playlistItems.list on the uploads playlist, 2 read units, verified live 2026-09-28) confirms the earlier attempt did not post, and at most `publishing.max_attempts` times |
 | Analytics: `averageViewDuration`, `averageViewPercentage`, `shares`, `subscribersGained`, `estimatedMinutesWatched` available; thumbnail impressions / CTR and a literal "3-second retention" are **not** exposed by the API | developers.google.com/youtube/analytics/metrics | `YouTubeAnalyticsProvider` pulls what exists; owner enters impressions/CTR/3s retention manually from YouTube Studio |
 | `commentThreads.list` (1 unit) for reading comments | commentThreads docs | Read-only; the comment agent never replies |
+| Developer Policies III.E.4 (checked 2026-10-01): non-statistics API data no longer than 30 days unless refreshed; statistics may be kept while authorized, re-checking authorization every 30 days | developers.google.com/youtube/terms/developer-policies | `aimz/youtube_data.py`, run every cycle: comments are refreshed on each fetch (`comments.refreshed_at`) and deleted after 30 days without a refresh, with their text removed from leads; `youtube_response.json` is cut to the id after 30 days; authorization is checked every cycle |
+| Developer Policies III.D: delete authorized data within 7 days of revocation; API ToS 24.3 on termination | same | `aimz youtube revoke` revokes the token and purges at once (metrics, comments, responses, video ids/links, channel stats, token). Automatic purge when authorization has failed for 7 days or not succeeded for 30; `aimz status` lists the failure meanwhile |
+| Developer Policies III.I: prior, specific consent before automated uploads; III.E.3: clearly identify the channel | same | Consent is per channel: `aimz instance consent <name>` shows the channel and records its id; a new instance starts with `AUTOPUBLISH_CONSENT=false`; uploads refuse if the login points at another channel |
+| Developer Policies III.A: privacy policy contents | same | `PRIVACY.md` / `docs/privacy/` (updated 2026-10-01): all four scopes and their uses, commenter data, retention, deletion on revocation, several channels, contact email |
 
 ## TikTok Content Posting API
 
@@ -57,8 +62,33 @@ approval, plus the kill switch).
   per asset, baked onto the scene card, listed in the video description and in `attributions.txt`.
 - A descriptive `User-Agent` (`AIMZ_USER_AGENT`) is sent to Wikimedia, per its API etiquette.
 - Owner-library images are the owner's responsibility (`assets/owner/credits.txt` for attribution).
-- No background music is used (no licensed source at $0 was integrated); this avoids TikTok's
-  commercial-music restrictions.
+- **Music and sound effects (2026-09-30).** Off unless the AI opens the `music` / `sfx` settings. The
+  library in `assets/music` and `assets/sfx` is generated by `scripts/make_audio_library.py` from sine
+  waves and noise: original to this project and listed as CC0 in each `licenses.json`. Nothing is
+  third-party, so there is no Content ID or licence risk, and TikTok's commercial-music restriction
+  (which concerns copyrighted recordings) does not apply. The owner may add tracks. Only licences in
+  `FREE_AUDIO_LICENSES` are offered, and a CC0 track from a public site can still be Content-ID claimed
+  when someone else registered it, so prefer original or verified sources.
+- **Stock photos and video (Pexels, Pixabay; built 2026-09-30, off).** Their licences allow free
+  commercial use but are not in the constitution's original list, so the providers are registered only
+  when the owner has amended the constitution, set `assets.stock.enabled: true` in `config.yaml` and put
+  `PEXELS_API_KEY` / `PIXABAY_API_KEY` in `.env`. Each asset records licence, page URL and author, and
+  the credit ("Photo by X on Pexels", "Image by X from Pixabay") goes into the video description. Pixabay
+  terms: cache searches 24 h (done), no hotlinking (files are downloaded). Pexels: 200 requests per hour.
+  **Not yet verified against the live APIs.**
+- **Narration voices (checked 2026-10-01).** Piper's code and voice repository are MIT, but each voice
+  is trained on a dataset with its own licence. **There is no default voice** (owner decision
+  2026-10-01): every video's `voice` setting picks from `COMMERCIAL_SAFE_VOICES`
+  (`providers/tts/piper.py`), and `PiperTTSProvider` refuses any other voice, so a stale `PIPER_VOICE`
+  in an `.env` is ignored. Allowed: `kristin`, `norman`, `ljspeech`, `cori` (public-domain data,
+  trained from scratch) and `john` (public-domain data, fine-tuned from kristin), per each voice's
+  `MODEL_CARD`. Excluded: `lessac` (Blizzard 2013 licence, "Research Purposes" only, excludes "any
+  commercial purpose"; used by every video up to 1 Oct 2026), `joe` (CC0 data but fine-tuned from
+  lessac), `bryce` (fine-tuned from an unreleased voice), `ryan`, `hfc_female`, `hfc_male`
+  (CC BY-NC-SA).
+- **Caption fonts.** Only fonts listed in `assets/fonts/licenses.json` with a free licence (OFL,
+  Apache, UFL, CC0) are offered; each font ships with its licence text. The renderer's own default
+  font (`FONT_FILE`, Arial on Windows) is used from the system and not redistributed.
 
 ## Editorial safety
 

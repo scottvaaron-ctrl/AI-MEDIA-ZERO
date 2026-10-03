@@ -29,6 +29,21 @@ analytics:
   # The score itself is taken at 72 h; the rest of the window catches late views and subscribers.
   measurement_window_days: 14
 
+scoring:
+  # What counts as success: the weights of the composite score every experiment and niche is judged by.
+  # OWNER DECISION: agents do not change these. retention, shares, subs, completion and reach are the
+  # original score. Plan stage 6 added watch_time (watch minutes per view, the Partner Program's watch-hour
+  # proxy) and revenue (revenue per 1,000 views, once monetised). They start at 0, so they are shown
+  # (`aimz money`, `aimz analytics`) but change nothing until the owner raises them.
+  weights:
+    retention: 0.35
+    shares: 0.25
+    subs: 0.20
+    completion: 0.20
+    reach: 0.20
+    watch_time: 0.0
+    revenue: 0.0
+
 allocation:
   # Cold start: mostly exploration. Moves toward exploitation as evidence accumulates.
   cold_start_explore_ratio: 0.70
@@ -44,6 +59,22 @@ experiments:
   max_concurrent: 2
   # Confidence required to conclude an experiment.
   min_confidence: 0.85
+
+# Owner guidance, 2026-10-01: each channel is distinct in genre, voice and look, and the AI may experiment
+# with all three (aimz/identity.py). These are starting options to get it going, not instructions: a
+# channel's strategist may take one, adapt it, or name its own. Every option here can be made with media
+# the pipeline may legally use (public domain, Creative Commons, NASA/US-government works, free stock once
+# enabled, generated charts and cards). Owner-edited; agents do not change this list.
+channels:
+  starting_genres:
+    - "space and astronomy explainers (NASA imagery is public domain)"
+    - "silent-film era stories: plots and behind-the-scenes of public-domain films made before 1930"
+    - "history mysteries and unsolved cases from archival records"
+    - "how everyday inventions were made, and who made them"
+    - "strange-but-true nature and animal science"
+    - "maps and geography oddities (borders, enclaves, lost places)"
+    - "business rises and collapses told through the numbers"
+    - "science myths checked against the evidence"
 
 content:
   short_form:
@@ -72,6 +103,18 @@ publishing:
   # upload is closed out ("abandoned") with an alert; `aimz publish retry <id>` re-sends it.
   max_attempts: 3
   retry_after_hours: 1
+  # Owner posting limits (owner decisions 2026-09-30, and 2026-10-01 after the YouTube policy audit:
+  # 2 posts per run, 2 runs a day). Agents must not edit these. Enforced in code
+  # (aimz/pipeline/posting.py) for every post, retries and owner re-sends included:
+  #   at most 2 posts per platform in one run; a run posts only 2.5 h after the previous posting run;
+  #   at most 2 posting runs per local calendar day (so at most 4 posts per platform per day).
+  # Videos that may not post yet wait, oldest first. Production pauses when more than
+  # backlog_days of posts are waiting.
+  limits:
+    posts_per_run_per_platform: 2
+    min_hours_between_runs: 2.5
+    max_runs_per_day: 2
+    backlog_days: 2
   ai_disclosure_text: "This video uses AI-generated narration and AI-assisted scripting. Sources are listed in the description."
   youtube:
     category_id: "27"   # Education
@@ -113,6 +156,11 @@ assets:
     enabled: true
     allowed_licenses: ["pd", "cc0", "cc-by", "cc-by-sa", "public domain"]
     max_results: 6
+  # Pexels and Pixabay photos and video clips (plan stage 5). OWNER SWITCH: set enabled: true only after
+  # amending the constitution's media rule (docs/PLAN_FULL_CONTROL.md section 8) and putting
+  # PEXELS_API_KEY / PIXABAY_API_KEY in .env. Until then these providers are never registered.
+  stock:
+    enabled: false
   owner_library_dir: ./assets/owner
   cache_dir: ./data/assets
 

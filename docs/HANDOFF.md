@@ -1,5 +1,10 @@
 # Handoff: adding more platforms to AI Media Zero
 
+> **Current work (2026-09-30): `docs/PLAN_FULL_CONTROL.md`.** The owner approved a staged plan:
+> measurement fixes, per-video testing of many variables, AI-controlled production dials, a posting
+> queue with owner limits, and 3–4 channels as separate instances. It supersedes the ranking below
+> where they conflict; sections 2–7 stay valid as reference. Start at the first stage not marked Done.
+
 _Written 2026-09-08 for the next agent; updated the same day once Bluesky and TikTok were both
 live. Read this,
 `docs/ARCHITECTURE.md`, `docs/COMPLIANCE.md` and `docs/AUTONOMOUS_SETUP.md` before touching code._
@@ -8,12 +13,12 @@ live. Read this,
 
 | Item | State |
 |---|---|
-| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done and running twice daily; 154 tests green, ruff + mypy clean |
+| Core pipeline (research → ideas → EIC → script → fact-check → critic → render → publish → metrics → learn) | Done and running four times daily; 251 tests green, ruff + mypy clean. Plan stages 0 (measurement fixes, optional revenue scope), 1 (per-video settings, migration 0004), 2 (15 production dials, `scripts/render_matrix.py`), 3 (owner posting limits, migration 0005), 4 (one instance per channel, `--instance`), 5 (music, templates, stock media off) and 6 (money score parts, `aimz money`) landed 2026-09-30; owner steps in `docs/OWNER_TODO.md` |
 | YouTube upload + analytics + comments | **Done and live** on the owner's machine: OAuth token stored, `YOUTUBE_ENABLED=true`, `YOUTUBE_MODE=public`, `YOUTUBE_ANALYTICS_ENABLED=true`, `AUTOPUBLISH_CONSENT=true` |
-| YouTube API compliance audit | **Submitted by the owner (or in progress)**. Until Google approves, uploads land as private. Evidence files are in `data/audit/` (not in git). Nothing in code changes when it's approved |
+| YouTube API compliance audit | **Open.** Uploads land public, but the compliance review / quota-increase request submitted 8 Sep is not complete: Google's third and final notice (1 Oct) wants an upload-process script or screencast plus channel links within 7 business days (≈ 12 Oct). Answer drafted in `data/audit/upload-process-script.md`. Evidence files are in `data/audit/` (not in git) |
 | TikTok Direct Post + Display API analytics | **Live in sandbox** as of 2026-09-08: app registered, `TIKTOK_MODE=direct`, connected as `backhouse67`, one video posted `SELF_ONLY`. Posts are invisible to everyone but the owner and expose no metrics until TikTok audits the app, so TikTok adds no learning signal yet. The demo video for that audit still has to be filmed |
 | Bluesky (AT Protocol) post + analytics | **Done and live** as `@backhouse06.bsky.social`: video, alt text, WebVTT captions, hashtag facets and a threaded sources reply, all read back through the API. No audit exists on this platform, so it is public from the first post and is the only one currently producing usable engagement data alongside YouTube |
-| Scheduler | Installed. Since 2026-09-28 it is **one** task, "AI Media Zero", with a trigger per time (09:00, 18:00); `aimz schedule install` creates it and deletes the old per-time tasks ("AI Media Zero 0900"/"1800"). The runner takes a mutex and `aimz run` a file lock, so two cycles never overlap |
+| Scheduler | Installed. Since 2026-09-28 it is **one** task, "AI Media Zero", with a trigger per time (09:00 and 18:00 since 2026-10-01; `schedule install` refuses times that break the owner's posting limits); `aimz schedule install` creates it and deletes the old per-time tasks ("AI Media Zero 0900"/"1800"). The runner takes a mutex and `aimz run` a file lock, so two cycles never overlap |
 | Repo | Public at https://github.com/scottvaaron-ctrl/AI-MEDIA-ZERO (main). Work on this machine at `C:\Users\scott\Documents\Agentic_Youtube`, venv `.venv`, Python 3.14 |
 | Local models | Ollama with `qwen3:8b` (default) and `qwen3:4b`; Piper voice downloaded; FFmpeg via winget and bundled imageio-ffmpeg |
 
@@ -188,17 +193,17 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
 
 ## 8. Open items and known gaps
 
-- YouTube audit approval is pending; nothing to code, but re-run `aimz youtube auth` if Google
-  asks for re-consent after approval.
+- YouTube compliance review is still open (see section 1). The OAuth consent screen still needs switching from Testing to In
+  production (owner, 1 Oct); re-auth after `PLAN_FULL_CONTROL.md` stage 0 adds the revenue scope.
 - YouTube impressions/CTR and TikTok watch time are not exposed by any API; manual entry stays
   optional. Bluesky exposes no view count at all, so its publications carry engagement only.
 - Per-platform captions: the shared hashtag formatting now lives in
   `providers/publishers/captions.py`; each publisher composes its own caption on top of it
   (`build_caption` for TikTok, `build_post_text` for Bluesky's 300-grapheme limit). Keep it that
   way rather than pushing platform formatting up into `agents/publisher.py`.
-- Posting time: `recommended_post_time` is a fixed 17:00 heuristic; make it an experiment
-  variable once two or more platforms report metrics. With Bluesky live this becomes worth doing,
-  since it is the one platform that will report back within hours instead of days.
+- Posting time: `recommended_post_time` is a fixed 17:00 heuristic and videos publish the moment
+  they render, in pairs. Planned in `PLAN_FULL_CONTROL.md` stage 3 (queue, owner limits, AI-chosen
+  slots).
 - The learning loop compares publications across platforms that expose different metrics. Watch
   the first few weeks of `aimz analytics` for a platform with fewer signals being scored unfairly
   against YouTube; if that shows up, normalise per platform in `experiments/allocation.py`.

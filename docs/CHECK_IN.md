@@ -5,7 +5,9 @@ _For adding platforms or changing code, read `docs/HANDOFF.md` instead._
 
 ## The system is running unattended right now
 
-Windows Task Scheduler runs `scripts/run-cycle.ps1` at **09:00 and 18:00** daily. With
+Windows Task Scheduler runs `scripts/run-cycle.ps1` at **09:00 and 18:00** daily
+(since 2026-10-01). Posting is capped by the owner's limits: at most 2 videos per platform per run,
+runs at least 2.5 h apart, at most 2 posting runs a day (`aimz status` → `posting`). With
 `AUTOPUBLISH_CONSENT=true`, each cycle researches, writes, renders **and publishes** with no
 human in the loop. YouTube and Bluesky posts are **public immediately**. Nothing waits for review.
 

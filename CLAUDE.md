@@ -10,6 +10,9 @@ extend it, don't replace it.
 3. `docs/CHECK_IN.md` — returning-owner checklist.
 4. `docs/ARCHITECTURE.md`, `docs/COMPLIANCE.md` — design; verified platform rules.
 5. `docs/CEO_BRIEF.md` — what the owner has been told; keep it current (see below).
+6. `docs/PLAN_FULL_CONTROL.md` — owner-approved staged plan (2026-09-30) and current work; start
+   at the first stage not marked Done, and update its status table and session log.
+7. `docs/OWNER_TODO.md` — the owner's remaining steps (A) and the checks an agent runs after them (B).
 
 Launch through the interpreter (`python -m aimz ...`); Windows Smart App Control
 blocks the `aimz.exe` shim and the block is silent under Task Scheduler.
