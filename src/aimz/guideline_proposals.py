@@ -363,6 +363,54 @@ def sync_version(db: Database, engine: Any) -> list[str]:
     return closed
 
 
+# -- one-time switch-over -----------------------------------------------------------------------
+MIGRATED_KEY = "guideline_migrated"
+RESCOPE_REASON = "rescope 2026-10-07"
+
+
+def migrate_to_guideline(
+    db: Database, settings_engine: Any, experiment_engine: Any, g: Guideline | None
+) -> bool:
+    """The switch to a guideline (spec 2026-10-07 section 5), run once; returns True when it ran.
+
+    Retires every running experiment, turns ``off`` each ``setting_space`` row the guideline locks (its
+    values and the per-video ``video_settings`` evidence are kept) and records what it did in the
+    ``guideline_migrated`` state.
+    """
+    if g is None or db.get_state(MIGRATED_KEY):
+        return False
+    retired = []
+    for e in experiment_engine.running():
+        experiment_engine.retire(e["id"], RESCOPE_REASON)
+        retired.append(e["id"])
+    space = settings_engine.space()
+    off: list[str] = []
+    refused: dict[str, str] = {}
+    for var in sorted(g.locked):
+        row = space.get(var)
+        if row is None or row["status"] == "off":
+            continue
+        why = settings_engine.change(var, "off", by="guideline")
+        if why:  # e.g. a dial with no default; the guideline's locked value still outranks it
+            refused[var] = why
+        else:
+            off.append(var)
+    db.set_state(
+        MIGRATED_KEY,
+        json.dumps(
+            {
+                "at": now_iso(),
+                "guideline_version": g.version,
+                "reason": RESCOPE_REASON,
+                "retired": retired,
+                "settings_off": off,
+                "settings_refused": refused,
+            }
+        ),
+    )
+    return True
+
+
 # -- status -----------------------------------------------------------------------------------
 def attention_entries(db: Database) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}

@@ -29,7 +29,11 @@ from aimz.experiments.allocation import family_stats, per_video
 from aimz.experiments.engine import MEASURABLE_KPIS, ExperimentEngine
 from aimz.experiments.settings import SettingsEngine, capabilities
 from aimz.experiments.value import niche_value_text, niche_values, ypp_progress, ypp_text
+from aimz.strategy.memory import GUIDELINE_EXPLORE_TEXT
 from aimz.util import hours_since, iso_ago, now_iso
+
+# Recorded as the identity refusal while a guideline is active.
+GUIDELINE_IDENTITY_NOTE = "identity is set by the guideline"
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -246,26 +250,123 @@ class AnalystAgent(Agent):
             "errors_7d": errors,
         }
 
-    def propose_guideline_changes(self, exp_results: list[dict[str, Any]], ai_summary: str) -> list[str]:
-        """A pending owner proposal for each guideline experiment whose variant won; returns their ids.
+    def propose_guideline_changes(self, exp_results: list[dict[str, Any]]) -> dict[str, str]:
+        """A pending owner proposal for each guideline experiment whose variant won.
 
-        An empty or unverifiable ``ai_summary`` is replaced by the evidence template.
+        Returns ``{experiment_id: proposal_id}``. Each starts with the evidence template as its summary,
+        so a later model failure can never lose a proposal; ``apply_proposal_summaries`` replaces it with
+        the strategist's own words when every number checks out.
         """
         from aimz import guideline_proposals
 
-        ids = []
+        out: dict[str, str] = {}
         for r in exp_results:
             if r.get("status") != "variant_won":
                 continue
             exp = self.svc.db.get("experiments", r["id"])
             if exp is not None:
-                ids.append(guideline_proposals.create_from_experiment(self.svc.db, dict(exp), r, ai_summary))
-        return ids
+                out[r["id"]] = guideline_proposals.create_from_experiment(self.svc.db, dict(exp), r, "")
+        return out
+
+    def apply_proposal_summaries(self, proposals: dict[str, str], summaries: dict[str, str]) -> None:
+        """Replace a new proposal's template summary with the strategist's, if every number in it checks out."""
+        from aimz import guideline_proposals as gp
+
+        for exp_id, pid in proposals.items():
+            text = str(summaries.get(exp_id) or "").strip()
+            if not text:
+                continue
+            try:
+                row = self.svc.db.get("guideline_proposals", pid)
+                # A pending proposal from an earlier experiment on the same item keeps its own summary.
+                if row is None or row["status"] != "pending" or row["experiment_id"] != exp_id:
+                    continue
+                if gp.check_summary(text, gp.evidence_of(dict(row))):
+                    self.svc.db.update("guideline_proposals", pid, {"summary": text})
+            except Exception as exc:  # the template summary stays; never lose learning over this
+                self.log.warning("could not store the summary for proposal %s: %s", pid, exc)
+
+    def guideline_prompt(self, g: guideline.Guideline, exp_results: list[dict[str, Any]]) -> str:
+        """The strategist's view of the channel guideline: items, the experiment, cooldowns, proposals."""
+        from aimz import guideline_proposals as gp
+
+        lines = [
+            f"Channel guideline v{g.version} ({g.channel}; genre: {g.genre}), approved by the owner. It sets the "
+            "channel's identity, look, sound and craft; you cannot change it directly. Items (id: current value):"
+        ]
+        lines += [f"- G-{k} (locked setting): {v}" for k, v in sorted(g.locked.items())]
+        lines.append(f"- G-runtime: {g.runtime_min}-{g.runtime_max} s")
+        lines += [f"- {r.id} [{r.stage} stage] {r.title}: {r.text}" for r in g.rules.values()]
+        if g.unavailable:
+            lines.append(
+                "Not available on this machine (cannot be tested): "
+                + "; ".join(f"G-{k}: {why}" for k, why in sorted(g.unavailable.items()))
+            )
+        if g.checks:
+            lines.append("Code checks: " + "; ".join(f"{k}={v}" for k, v in g.checks.items()))
+        running = self.experiments.running()
+        lines.append(
+            "Running experiment: "
+            + (
+                "; ".join(
+                    f"{e['id']} on {e['variable']}: guideline '{e['control']}' vs variant '{e['treatment']}'"
+                    for e in running
+                )
+                or "none"
+            )
+        )
+        if exp_results:
+            lines.append("Experiments evaluated this cycle (score is the composite; avg viewed in %):")
+            for r in exp_results:
+                c, t = r.get("control") or {}, r.get("treatment") or {}
+                lines.append(
+                    f"- {r['id']} {r.get('name', '')}: status={r.get('status')} "
+                    f"guideline n={c.get('n')} mean={c.get('mean')} avg viewed={c.get('mean_avg_percent_viewed')}; "
+                    f"variant n={t.get('n')} mean={t.get('mean')} avg viewed={t.get('mean_avg_percent_viewed')}; "
+                    f"P(variant better)={r.get('p_treatment_better')}"
+                )
+        cooling = [(i, self.experiments.cooldown_left(i)) for i in sorted(g.item_ids())]
+        cooling = [(i, n) for i, n in cooling if n > 0]
+        lines.append(
+            "Cooling down (cannot be tested yet): "
+            + ("; ".join(f"{i}: {n} more videos" for i, n in cooling) or "none")
+        )
+        pending = gp.pending(self.svc.db)
+        lines.append(
+            "Proposals waiting for the owner (test a different item while one is waiting): "
+            + ("; ".join(f"{p['id']} {p['item']} -> '{str(p['after'])[:120]}'" for p in pending) or "none")
+        )
+        rejected = self.svc.db.query(
+            "SELECT item, after, owner_note FROM guideline_proposals WHERE status='rejected' "
+            "ORDER BY decided_at DESC LIMIT 5"
+        )
+        if rejected:
+            lines.append("Proposals the owner rejected:")
+            lines += [
+                f"- {r['item']} -> '{str(r['after'])[:120]}'; owner's note: {r['owner_note'] or '(none)'}"
+                for r in rejected
+            ]
+        lines.append(f"The owner's last rejection: {self.svc.db.get_state(gp.REJECTED_KEY) or 'none'}")
+        lines.append(
+            "You may propose one experiment: name one guideline_item and a variant. Everything else follows the "
+            "guideline. A variant is a setting value within its bounds, whole seconds for G-runtime, or the full "
+            "replacement text of a rule. In new_experiments set guideline_item and variant; fill the required "
+            "variable, control, treatment and primary_kpi with the item, its current value, the variant and "
+            "'score'. Nothing starts while an experiment is running or the item is cooling down."
+        )
+        lines.append(
+            "For each experiment marked variant_won above, write proposal_summaries[<experiment id>]: two or three "
+            "plain-English sentences telling the owner what changed and what it did. Quote only numbers shown above."
+        )
+        return "\n".join(lines)
 
     def learn(self, run: RunContext, strategy_state: dict[str, Any]) -> dict[str, Any]:
         perf_rows = self.svc.analytics_store.video_performance()
         exp_results = self.experiments.evaluate_all(perf_rows)
-        self.propose_guideline_changes(exp_results, "")
+        # Created now with the template summary so nothing below can lose them; the strategist's
+        # summaries replace the template after its call.
+        proposals = self.propose_guideline_changes(exp_results)
+        g = self.experiments.guideline
         ev = self.evidence(perf_rows, strategy_state)
         instance = self.svc.env.instance
         settings_text = self.settings.evidence_text(
@@ -311,13 +412,37 @@ class AnalystAgent(Agent):
             )
             or "- none"
         )
+        if g is None:
+            experiments_text = (
+                "Propose at most one new experiment, only if none is running on that variable. "
+                "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels) "
+                "or runtime (two integer runtimes in seconds). "
+                f"Its primary_kpi must be one of the measured metrics: {', '.join(MEASURABLE_KPIS)}. "
+                "Suggest an explore ratio between 0.25 and 0.8 that fits the evidence (more evidence -> less exploration). "
+            )
+            settings_rule = (
+                "Production settings: the system gives every video a value of each open setting, chosen independently of the idea, "
+                "so their effects can be measured. You decide which settings to test: in setting_changes, open one with 2-4 values "
+                "inside its bounds, lock it to one value, or turn it off (the renderer default). Scores are per video.\n"
+            )
+            identity_text = (
+                "Channel identity: every channel the owner runs must be clearly distinct in genre, voice and look, and "
+                "you may experiment with all three. Set or change them in channel_identity (leave it empty to keep them).\n"
+                f"{identity.prompt_text(self.svc.db, instance, self.starting_genres())}\n\n"
+            )
+        else:
+            experiments_text = "Every video follows the channel guideline below; experiments test one guideline item at a time. "
+            settings_rule = (
+                f"Production settings: the guideline locks {', '.join(sorted(g.locked)) or 'none'}. A setting_changes "
+                "entry on a locked setting is refused; test it with an experiment instead. Settings the guideline does "
+                "not lock stay yours to open (2-4 values within bounds), lock or turn off. Scores are per video.\n"
+            )
+            identity_text = f"{self.guideline_prompt(g, exp_results)}\n\n"
         user = (
             "Update the strategy memory using ONLY the evidence below. Be conservative: with fewer than ~5 measured videos per family, keep statuses at 'testing' or 'hypothesis'. "
-            "Do not declare winners from tiny samples; do not let one video lock the strategy. Propose at most one new experiment, only if none is running on that variable. "
-            "The editor can only assign these variables to ideas, so an experiment must vary one of them: hook_type (any two of your hook labels) "
-            "or runtime (two integer runtimes in seconds). "
-            f"Its primary_kpi must be one of the measured metrics: {', '.join(MEASURABLE_KPIS)}. "
-            "Suggest an explore ratio between 0.25 and 0.8 that fits the evidence (more evidence -> less exploration). Write a one-paragraph audience model and a concise change_summary.\n\n"
+            "Do not declare winners from tiny samples; do not let one video lock the strategy. "
+            + experiments_text
+            + "Write a one-paragraph audience model and a concise change_summary.\n\n"
             f"Measured videos: {ev['measured_videos']} (published {ev['published_videos']}, rendered {ev['rendered_videos']}; "
             f"{ev['late_scores']} scored later than 120 h after posting because collection missed the 72 h window; "
             f"{ev['reach_only_scores']} scored on views alone because YouTube returned no retention/shares/subscribers by 120 h)\n"
@@ -327,10 +452,8 @@ class AnalystAgent(Agent):
             f"Niche value per video:\n{value_text}\n{ypp_line}\n"
             f"Audience requests so far: {'; '.join(strategy_state.get('audience_requests', [])) or 'none'}\n"
             f"Your last experiment proposal that could not run: {self.svc.db.get_state('last_rejected_experiment') or 'none'}\n\n"
-            "Production settings: the system gives every video a value of each open setting, chosen independently of the idea, "
-            "so their effects can be measured. You decide which settings to test: in setting_changes, open one with 2-4 values "
-            "inside its bounds, lock it to one value, or turn it off (the renderer default). Scores are per video.\n"
-            f"Settings and evidence:\n{settings_text}\n"
+            + settings_rule
+            + f"Settings and evidence:\n{settings_text}\n"
             f"Your last setting changes or niche merges that were refused: {self.svc.db.get_state('last_rejected_setting') or 'none'}\n"
             "If two niche labels mean the same niche, you may merge them in niche_merges (alias -> into); results are then counted together.\n"
             + (
@@ -340,10 +463,11 @@ class AnalystAgent(Agent):
                 else ""
             )
             + "\n"
-            "Channel identity: every channel the owner runs must be clearly distinct in genre, voice and look, and "
-            "you may experiment with all three. Set or change them in channel_identity (leave it empty to keep them).\n"
-            f"{identity.prompt_text(self.svc.db, instance, self.starting_genres())}\n\n"
-            f"Current strategy:\n{self.strategy.prompt_summary(strategy_state)}"
+            + identity_text
+            + "Current strategy:\n"
+            + self.strategy.prompt_summary(
+                strategy_state if g is None else {**strategy_state, "guideline_version": g.version}
+            )
         )
         with self.svc.tracker.agent(
             run, self.name, "strategy_update", {"measured": ev["measured_videos"]}
@@ -393,12 +517,18 @@ class AnalystAgent(Agent):
                 ][:10],
             }
             merged = self.apply_setting_changes(upd)
-            if upd.channel_identity is not None:
+            if g is not None:
+                # The guideline sets the channel identity; the strategist's channel_identity is ignored.
+                self.svc.db.set_state(identity.REJECTED_KEY, GUIDELINE_IDENTITY_NOTE)
+                self.apply_proposal_summaries(proposals, upd.proposal_summaries)
+            elif upd.channel_identity is not None:
                 refused = identity.propose(
                     self.svc.db, instance, upd.channel_identity.model_dump(), self.settings.catalog
                 )
                 self.svc.db.set_state(identity.REJECTED_KEY, refused or "")
-            new_state = self.strategy.apply_update(strategy_state, upd, fam_objs, exps)
+            new_state = self.strategy.apply_update(
+                strategy_state, upd, fam_objs, exps, guideline_version=g.version if g is not None else None
+            )
             for alias in merged:  # a merged niche's results now count under its canonical label
                 new_state["families"].pop(alias, None)
             own = per_video(self.svc.analytics_store.video_performance())
@@ -472,7 +602,12 @@ class AnalystAgent(Agent):
         lines = [
             f"# Daily learning summary — {today}",
             "",
-            f"Strategy version: {state.get('version')}  |  confidence: {state.get('confidence', 0):.2f}  |  explore ratio: {state.get('explore_ratio', 0.7):.0%}",
+            f"Strategy version: {state.get('version')}  |  confidence: {state.get('confidence', 0):.2f}  |  "
+            + (
+                GUIDELINE_EXPLORE_TEXT
+                if state.get("guideline_version") is not None
+                else f"explore ratio: {state.get('explore_ratio', 0.7):.0%}"
+            ),
             f"Measured videos: {ev['measured_videos']}  |  published: {ev['published_videos']}  |  rendered: {ev['rendered_videos']}",
             f"Scored late (after 120 h; collection missed the 72 h window): {ev['late_scores']}",
             f"Scored on views alone (no YouTube Analytics rows by 120 h): {ev['reach_only_scores']}",

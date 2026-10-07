@@ -284,3 +284,179 @@ def test_script_length_follows_sources_unless_runtime_is_under_test() -> None:
     assert ScriptAgent.word_budget_ok(draft, 150)[0]
     ok, msg = ScriptAgent.word_budget_ok(draft, 150, enforce_target=True)  # needs >= 0.6 * 150 s
     assert not ok and "only facts in the sources" in msg
+
+
+# -- strategist under a guideline (2026-10-07 rescope, Task 6) ----------------------------
+
+
+def _learn_prompt(svc: Any, upd: Any = None, rows: list[dict[str, Any]] | None = None) -> tuple[Any, str]:
+    """(orchestrator, the strategist's prompt) for one learn; the model returns ``upd``."""
+    from aimz.domain.models import StrategyUpdate
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    orch = Orchestrator(svc, seed=1)
+    if rows is not None:
+        svc.analytics_store.video_performance = lambda: rows
+    seen: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, *a: Any, **kw: Any) -> Any:
+        seen.append(user)
+        out = upd(user) if callable(upd) else upd
+        return out or StrategyUpdate(audience_model="a", change_summary="c")
+
+    orch.analyst.ask = fake_ask
+    with svc.tracker.run("learn") as run:
+        orch.analyst.learn(run, orch.strategy.current())
+    return orch, seen[0]
+
+
+def _guideline_on(svc: Any) -> None:
+    from tests.test_experiments import _activate
+
+    _activate(svc)
+
+
+def test_strategist_prompt_has_guideline_not_identity(svc) -> None:  # noqa: ANN001
+    from aimz import guideline_proposals as gp
+
+    _guideline_on(svc)
+    svc.db.set_state(
+        gp.REJECTED_KEY, "G-title: variant 'x' was rejected by the owner. Owner's note: too vague"
+    )
+    _orch, prompt = _learn_prompt(svc)
+    assert "guideline_item" in prompt
+    assert "The first sentence states the most surprising fact. No greetings." in prompt  # G-hook
+    assert "G-caption_max_words" in prompt and "G-runtime" in prompt
+    assert (
+        "You may propose one experiment: name one guideline_item and a variant. "
+        "Everything else follows the guideline." in prompt
+    )
+    assert "Owner's note: too vague" in prompt
+    assert "Channel identity:" not in prompt
+    assert "open one with 2-4 values" not in prompt
+    assert "Suggest an explore ratio" not in prompt
+
+
+def test_identity_ignored_with_guideline(svc) -> None:  # noqa: ANN001
+    from aimz import identity
+    from aimz.domain.models import ChannelIdentityProposal, StrategyUpdate
+
+    _guideline_on(svc)
+    before = identity.load(svc.db)
+    upd = StrategyUpdate(
+        audience_model="a",
+        change_summary="c",
+        channel_identity=ChannelIdentityProposal(genre="true crime"),
+    )
+    _learn_prompt(svc, upd)
+    assert identity.load(svc.db) == before
+    assert svc.db.get_state(identity.REJECTED_KEY) == "identity is set by the guideline"
+
+
+def test_migrate_once(svc) -> None:  # noqa: ANN001
+    import json
+
+    from aimz import guideline
+    from aimz.domain.models import ExperimentProposal
+    from aimz.experiments.engine import ExperimentEngine
+    from aimz.experiments.settings import SettingsEngine
+    from aimz.guideline_proposals import migrate_to_guideline
+
+    legacy = ExperimentEngine(svc.db)
+    eid = legacy.propose(
+        ExperimentProposal(
+            name="hooks",
+            hypothesis="h",
+            variable="hook_type",
+            control="question",
+            treatment="fact",
+            primary_kpi="score",
+        )
+    )
+    assert eid
+    settings = SettingsEngine(svc.db)
+    assert settings.change("caption_max_words", "open", [2, 3, 4]) is None
+    assert settings.change("caption_size", "lock", locked_value=0.05) is None
+    assert settings.change("progress_counter", "open", ["on", "off"]) is None  # not in the guideline
+    _guideline_on(svc)
+    g = guideline.for_services(svc)
+    assert g is not None
+    eng = ExperimentEngine(svc.db, guideline=g)
+    assert migrate_to_guideline(svc.db, settings, eng, g) is True
+    exp = svc.db.get("experiments", eid)
+    assert exp["status"] == "retired" and exp["conclusion"] == "rescope 2026-10-07"
+    space = settings.space()
+    assert space["caption_max_words"]["status"] == "off"
+    assert space["caption_max_words"]["values"] == [2, 3, 4]  # the evidence history is kept
+    assert space["caption_size"]["status"] == "off"
+    assert space["progress_counter"]["status"] == "open"  # the guideline does not cover it
+    rec = json.loads(svc.db.get_state("guideline_migrated"))
+    assert rec["retired"] == [eid] and "caption_max_words" in rec["settings_off"]
+    assert migrate_to_guideline(svc.db, settings, eng, g) is False
+
+
+def test_cycle_runs_migration(svc) -> None:  # noqa: ANN001
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    _guideline_on(svc)
+    orch = Orchestrator(svc, seed=1)
+    orch.cycle(stages=["learn"])
+    assert svc.db.get_state("guideline_migrated")
+
+
+def test_variant_won_creates_proposal_with_ai_summary(svc) -> None:  # noqa: ANN001
+    from tests.test_experiments import HIGH, LOW, _gp, _grows
+
+    from aimz import guideline_proposals as gp
+    from aimz.domain.models import StrategyUpdate
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    _guideline_on(svc)
+    eid = Orchestrator(svc).experiments.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    rows = [
+        {**r, "title": "A video", "content_family": "forgotten_history", "hook_type": "fact"}
+        for r in _grows(eid, LOW, HIGH)
+    ]
+    summary = "The question opening held viewers longer: 60% average viewed against 40%, over 10 videos each."
+
+    def answer(prompt: str) -> StrategyUpdate:
+        assert eid in prompt and "variant_won" in prompt  # the model sees which experiment just won
+        return StrategyUpdate(audience_model="a", change_summary="c", proposal_summaries={eid: summary})
+
+    _learn_prompt(svc, answer, rows)
+    [p] = gp.pending(svc.db)
+    assert p["experiment_id"] == eid and p["summary"] == summary
+
+
+def test_variant_won_proposal_survives_model_failure(svc) -> None:  # noqa: ANN001
+    from tests.test_experiments import HIGH, LOW, _gp, _grows
+
+    from aimz import guideline_proposals as gp
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    _guideline_on(svc)
+    eid = Orchestrator(svc).experiments.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    rows = [
+        {**r, "title": "A video", "content_family": "forgotten_history", "hook_type": "fact"}
+        for r in _grows(eid, LOW, HIGH)
+    ]
+
+    def boom(prompt: str) -> Any:
+        raise RuntimeError("model down")
+
+    _learn_prompt(svc, boom, rows)
+    [p] = gp.pending(svc.db)
+    assert p["summary"] == gp.template_summary(gp.evidence_of(p))
+
+
+def test_without_guideline_prompt_unchanged(svc) -> None:  # noqa: ANN001
+    from aimz import identity
+
+    orch, prompt = _learn_prompt(svc)
+    assert "open one with 2-4 values" in prompt and "Channel identity:" in prompt
+    assert "Suggest an explore ratio between 0.25 and 0.8" in prompt
+    assert "guideline_item" not in prompt and "follows the guideline" not in prompt
+    assert svc.db.get_state(identity.REJECTED_KEY) != "identity is set by the guideline"
+    assert orch.strategy.current().get("guideline_version") is None

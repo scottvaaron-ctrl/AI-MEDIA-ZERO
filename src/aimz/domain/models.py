@@ -270,6 +270,9 @@ class StrategyUpdate(BaseModel):
     setting_changes: list[SettingChange] = Field(default_factory=list)
     niche_merges: list[NicheMerge] = Field(default_factory=list)
     channel_identity: ChannelIdentityProposal | None = None
+    # With a channel guideline: {experiment_id: plain-English summary for the owner} for each experiment
+    # the evaluation marked variant_won. Code checks every number against the evidence.
+    proposal_summaries: dict[str, str] = Field(default_factory=dict)
     explore_ratio_suggestion: float = Field(ge=0.0, le=1.0, default=0.7)
     confidence: float = Field(ge=0.0, le=1.0, default=0.1)
     change_summary: str

@@ -32,7 +32,7 @@ class FamilyStat:
 
 @dataclass
 class AllocationSlot:
-    mode: str  # explore | exploit
+    mode: str  # explore | exploit | guideline (set by the editor when a channel guideline is active)
     family: str | None
     reason: str
 

@@ -17,7 +17,7 @@ from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import SelectionDecision, SelectionDecisionWithBreaks
 from aimz.experiments import niches
-from aimz.experiments.allocation import plan_allocation
+from aimz.experiments.allocation import AllocationSlot, plan_allocation
 from aimz.experiments.engine import ExperimentEngine
 from aimz.util import dumps, iso_ago, now_iso
 
@@ -80,16 +80,25 @@ class EditorInChief(Agent):
         # being made or measured counts as already being tried. Otherwise the least-sampled family, with one
         # stale idea the editor keeps turning down, won the explore slot every cycle and nothing was made.
         available = {str(c["content_family"]) for c in cands if c.get("content_family")}
-        slots = plan_allocation(
-            perf_rows,
-            families,
-            k,
-            alloc_cfg,
-            self.rng,
-            strategy_state.get("explore_ratio"),
-            available=available,
-            pending=self.in_flight(perf_rows),
-        )
+        g = guideline.for_services(self.svc)
+        if g is not None:
+            # The explore share is 0 under a guideline: every slot follows it, and the one experiment's
+            # arms ride on these slots (spec 2026-10-07 section 3).
+            slots = [
+                AllocationSlot("guideline", None, f"follows the channel guideline v{g.version}")
+                for _ in range(max(0, k))
+            ]
+        else:
+            slots = plan_allocation(
+                perf_rows,
+                families,
+                k,
+                alloc_cfg,
+                self.rng,
+                strategy_state.get("explore_ratio"),
+                available=available,
+                pending=self.in_flight(perf_rows),
+            )
 
         selected: list[str] = []
         used: set[str] = set()

@@ -18,6 +18,16 @@ from aimz.domain.models import StrategyUpdate
 from aimz.settings import ContentFamily
 from aimz.util import new_id, now_iso
 
+# With a channel guideline every slot follows it and one experiment at a time tests a change
+# (spec 2026-10-07 section 3); the state then carries ``guideline_version``.
+GUIDELINE_EXPLORE_TEXT = "Exploration ratio: replaced by the guideline (one experiment at a time)"
+
+
+def explore_line(state: dict[str, Any]) -> str:
+    if state.get("guideline_version") is not None:
+        return GUIDELINE_EXPLORE_TEXT
+    return f"Explore ratio: {state.get('explore_ratio', 0.7):.0%}"
+
 
 def default_state(families: list[ContentFamily], explore_ratio: float = 0.7) -> dict[str, Any]:
     return {
@@ -132,8 +142,13 @@ class StrategyMemory:
         upd: StrategyUpdate,
         family_stats: dict[str, Any],
         experiments: dict[str, Any],
+        guideline_version: int | None = None,
     ) -> dict[str, Any]:
-        """Merge an AI-proposed update into the state, keeping computed statistics authoritative."""
+        """Merge an AI-proposed update into the state, keeping computed statistics authoritative.
+
+        ``guideline_version``: the active channel guideline's version. With one, the explore share is 0:
+        every slot follows the guideline and experiment arms ride on those slots.
+        """
         new = json.loads(json.dumps(state))
         new["audience_model"] = upd.audience_model.strip() or new["audience_model"]
         for fu in upd.family_updates:
@@ -184,6 +199,11 @@ class StrategyMemory:
         new["explore_ratio"] = (
             suggested if measured >= self.min_measured_for_exploit else max(suggested, self.explore_ratio)
         )
+        if guideline_version is not None:
+            new["explore_ratio"] = 0.0
+            new["guideline_version"] = guideline_version
+        else:
+            new.pop("guideline_version", None)
         return new
 
     # -- prompts -----------------------------------------------------------------------
@@ -195,7 +215,7 @@ class StrategyMemory:
         text = (
             f"STRATEGY MEMORY v{state.get('version', 0)} (confidence {state.get('confidence', 0):.2f})\n"
             f"Audience model: {state.get('audience_model', '')}\n"
-            f"Explore ratio: {state.get('explore_ratio', 0.7):.0%}\n"
+            f"{explore_line(state)}\n"
             f"Content families:\n{fams}\n"
             f"Strong hooks: {', '.join(state.get('strong_hooks', [])) or 'unknown'}\n"
             f"Weak hooks: {', '.join(state.get('weak_hooks', [])) or 'unknown'}\n"
@@ -234,8 +254,12 @@ def render_markdown(state: dict[str, Any]) -> str:
         f"# Strategy Memory (AI-editable within the constitution)\n\n"
         f"_Version {state.get('version', 0)} — updated {state.get('last_updated', '')} — confidence {state.get('confidence', 0):.2f}_\n\n"
         f"## Current audience model\n{state.get('audience_model', '')}\n\n"
-        f"## Exploration ratio\n{state.get('explore_ratio', 0.7):.0%} of production slots explore.\n\n"
-        f"## Winning content families\n{bullets(winners)}\n\n"
+        + (
+            f"{GUIDELINE_EXPLORE_TEXT}\n\n"
+            if state.get("guideline_version") is not None
+            else f"## Exploration ratio\n{state.get('explore_ratio', 0.7):.0%} of production slots explore.\n\n"
+        )
+        + f"## Winning content families\n{bullets(winners)}\n\n"
         f"## Losing / retired content families\n{bullets(losers)}\n\n"
         f"## Families under test\n{bullets(testing)}\n\n"
         f"## Untested hypotheses\n{bullets(hyp)}\n\n"

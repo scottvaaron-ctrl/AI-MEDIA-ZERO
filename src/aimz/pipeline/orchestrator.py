@@ -88,6 +88,17 @@ class Orchestrator:
                 "guideline_version",
                 lambda: guideline_proposals.sync_version(self.svc.db, self.experiments),
             )
+            # The first cycle with a guideline: retire the old experiments and hand the settings it
+            # locks to it (spec section 5). Runs once; before any stage that selects or learns.
+            migrated = self._safe(
+                run,
+                "guideline_migration",
+                lambda: guideline_proposals.migrate_to_guideline(
+                    self.svc.db, self.analyst.settings, self.experiments, self.experiments.guideline
+                ),
+            )
+            if migrated:
+                run.note("guideline_migration", self.svc.db.get_state(guideline_proposals.MIGRATED_KEY))
             state = self.strategy.current()
             if "research" in stages:
                 self._safe(run, "research", lambda: self.research.run(run))
