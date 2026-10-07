@@ -10,13 +10,14 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from aimz import identity
+from aimz import guideline, identity
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
 from aimz.experiments.allocation import per_video
-from aimz.experiments.settings import SettingsEngine, capabilities
+from aimz.experiments.settings import CATALOG, SettingsEngine, capabilities
+from aimz.guideline import Guideline
 from aimz.providers.audio.library import sfx, track_for
 from aimz.providers.base import SpeechOptions
 from aimz.util import loads, new_id, now_iso, slugify
@@ -157,6 +158,8 @@ class ProducerAgent(Agent):
         super().__init__(svc, strategy)
         self.settings = SettingsEngine(svc.db, caps=capabilities(svc))
         self.rng = rng or random.Random()
+        self._guideline: Guideline | None = None
+        self._guideline_loaded = False
 
     def default_settings(self) -> dict[str, Any]:
         """What the renderer does for a setting that is off (today's behaviour)."""
@@ -192,7 +195,28 @@ class ProducerAgent(Agent):
         scored = shared.pooled_rows(self.svc.env.instance, own, self.settings)
         fixed = identity.fixed_settings(self.svc.db)
         exclude = {"voice": identity.taken_voices(self.svc.env.instance)}
-        return self.settings.assign(video_id, idea, defaults, scored, self.rng, fixed, exclude).values
+        g = self.guideline()
+        return self.settings.assign(
+            video_id,
+            idea,
+            defaults,
+            scored,
+            self.rng,
+            fixed,
+            exclude,
+            guideline=g.locked if g else None,
+            unavailable=set(g.unavailable) if g else None,
+            experiment=None,  # Task 4: ExperimentEngine.setting_override(idea)
+        ).values
+
+    def guideline(self) -> Guideline | None:
+        """The active guideline, loaded once per cycle (None when the channel has never had one)."""
+        if not self._guideline_loaded:
+            self._guideline = guideline.load(
+                self.svc.db, self.svc.env.config_dir, CATALOG, capabilities(self.svc)
+            )
+            self._guideline_loaded = True
+        return self._guideline
 
     def assemble(
         self,

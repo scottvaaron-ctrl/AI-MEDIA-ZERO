@@ -284,3 +284,53 @@ def test_a_cycle_renders_with_the_settings_it_recorded(svc, ffmpeg_available: bo
             for r in svc.db.query("SELECT duration_s FROM scenes WHERE video_id=?", [rendered[0]["id"]])
         ]
         assert durations and min(durations) >= 1.2  # every beat ends with the locked pause
+
+
+# -- the guideline outranks the AI's choices ---------------------------------------------------
+
+
+def test_guideline_value_wins_over_open(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    assert eng.change("caption_max_words", "open", [4, 8]) is None
+    a = eng.assign("g1", IDEA, DEFAULTS, [], random.Random(1), guideline={"caption_max_words": 3})
+    assert (a.values["caption_max_words"], a.sources["caption_max_words"]) == (3, "guideline")
+
+
+def test_experiment_value_wins_over_guideline(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    a = eng.assign(
+        "g2",
+        IDEA,
+        DEFAULTS,
+        [],
+        random.Random(1),
+        guideline={"caption_max_words": 3},
+        experiment={"variable": "caption_max_words", "value": 5},
+    )
+    assert (a.values["caption_max_words"], a.sources["caption_max_words"]) == (5, "experiment")
+
+
+def test_unavailable_falls_back_to_default(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    defaults = {**DEFAULTS, "template": "card"}
+    a = eng.assign("g3", IDEA, defaults, [], random.Random(1), unavailable={"template"})
+    assert a.sources["template"] == "guideline_fallback"
+    assert a.values["template"] == defaults["template"]
+
+
+def test_change_refused_when_covered(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    why = eng.change("template", "lock", locked_value="card", covered={"template"})
+    assert why is not None and "covered by the guideline" in why
+    assert eng.change("template", "lock", locked_value="card") is None
+
+
+def test_no_guideline_unchanged(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    eng.change("speech_length_scale", "open", [0.9, 1.1])
+    eng.change("beat_pause_s", "lock", locked_value=0.6)
+    plain = eng.assign("n1", IDEA, DEFAULTS, [], random.Random(7))
+    explicit = eng.assign(
+        "n2", IDEA, DEFAULTS, [], random.Random(7), guideline=None, unavailable=None, experiment=None
+    )
+    assert plain.values == explicit.values and plain.sources == explicit.sources

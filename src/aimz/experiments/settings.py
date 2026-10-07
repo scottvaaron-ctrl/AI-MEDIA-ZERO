@@ -314,9 +314,15 @@ class SettingsEngine:
         values: list[Any] | None = None,
         locked_value: Any = None,
         by: str = "ai",
+        covered: set[str] | None = None,
     ) -> str | None:
-        """Open, lock or turn off a dial. Returns why it was refused, or None when applied."""
+        """Open, lock or turn off a dial. Returns why it was refused, or None when applied.
+
+        ``covered`` are the settings the channel guideline fixes; the AI may not change those.
+        """
         var = variable.strip().lower()
+        if var in (covered or set()):
+            return f"{var}: covered by the guideline; propose an experiment instead"
         d = self.catalog.get(var)
         if d is None:
             return f"{variable!r} is not a setting (available: {', '.join(sorted(self.catalog))})"
@@ -359,6 +365,9 @@ class SettingsEngine:
         rng: random.Random | None = None,
         fixed: dict[str, Any] | None = None,
         exclude: dict[str, set[Any]] | None = None,
+        guideline: dict[str, Any] | None = None,
+        unavailable: set[str] | None = None,
+        experiment: dict[str, Any] | None = None,
     ) -> Assignment:
         """Choose and record every setting for one video. ``scored``: per-video rows with ``video_id``/``score``.
 
@@ -369,8 +378,21 @@ class SettingsEngine:
         sources: dict[str, str] = {}
         fixed = fixed or {}
         exclude = exclude or {}
+        guideline = guideline or {}
+        unavailable = unavailable or set()
         for var, row in self.space().items():
             d = self.catalog[var]
+            # Precedence: experiment treatment, then the guideline, then the guideline's fallback for a
+            # setting this machine cannot do, then the chain below (identity, open, locked, always-on, default).
+            if experiment and experiment.get("variable") == var and d.check(experiment.get("value"))[1] is None:
+                values[var], sources[var] = d.check(experiment["value"])[0], "experiment"
+                continue
+            if var in guideline and d.check(guideline[var])[1] is None:
+                values[var], sources[var] = d.check(guideline[var])[0], "guideline"
+                continue
+            if var in unavailable:
+                values[var], sources[var] = defaults.get(var), "guideline_fallback"
+                continue
             # The channel's identity (aimz/identity.py) fixes its voice and look for every video.
             if var in fixed and d.check(fixed[var])[1] is None:
                 values[var], sources[var] = d.check(fixed[var])[0], "identity"
