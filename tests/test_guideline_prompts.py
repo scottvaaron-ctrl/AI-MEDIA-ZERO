@@ -98,6 +98,7 @@ def _gate(
     g: guideline.Guideline,
     result: CriticResult | None = None,
     replace: dict[str, str] | None = None,
+    **kw: Any,
 ) -> CriticResult:
     narration = " ".join(b.narration for b in draft.beats)
     return CriticAgent._overrides(
@@ -109,6 +110,7 @@ def _gate(
         [],
         guideline=g,
         replace=replace,
+        **kw,
     )
 
 

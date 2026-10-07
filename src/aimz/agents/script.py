@@ -39,9 +39,13 @@ class ScriptAgent(Agent):
         sf = cfg.short_form
         min_s, max_s = int(sf.get("min_seconds", 10)), int(sf.get("max_seconds", 180))
         g = guideline.for_services(self.svc)
-        if g is not None:  # the guideline's runtime range replaces the platform limits
+        tested_runtime = guideline.runtime_variant(idea, self.svc.db)
+        if (
+            g is not None and tested_runtime is None
+        ):  # the guideline's runtime range replaces the platform limits
             min_s, max_s = g.runtime_min, g.runtime_max
-        target_s = int(idea.get("suggested_runtime_s") or sf.get("target_seconds", 45))
+        # A G-runtime treatment idea is made at the tested runtime, inside the platform limits only (R6).
+        target_s = tested_runtime or int(idea.get("suggested_runtime_s") or sf.get("target_seconds", 45))
         target_s = max(min_s, min(max_s, target_s))
         if self.runtime_under_test(idea):
             runtime_line = (
@@ -171,6 +175,8 @@ class ScriptAgent(Agent):
         if not idea.get("experiment_id"):
             return False
         exp = self.svc.db.get("experiments", idea["experiment_id"])
+        if exp and exp["variable"] == "G-runtime":  # guideline runtime test: only the treatment arm binds
+            return guideline.runtime_variant(idea, self.svc.db) is not None
         return bool(exp and exp["variable"] == "runtime")
 
     def hook_type_under_test(self, idea: dict[str, Any]) -> bool:

@@ -49,6 +49,12 @@ def opportunity_score(draft: IdeaDraft, family_state: dict[str, Any] | None) -> 
 class IdeationAgent(Agent):
     name = "ideation"
 
+    def __init__(self, svc: Any, strategy: Any, experiments: Any = None):
+        super().__init__(svc, strategy)
+        # The ExperimentEngine: under a topic-rule experiment, half of each batch is written under the
+        # variant rule and every idea is labelled with the arm it was written under.
+        self.experiments = experiments
+
     def pick_leads(self, k: int) -> list[SourceItemView]:
         rows = self.svc.db.query(
             "SELECT si.*, s.name AS source_name FROM source_items si JOIN sources s ON s.id=si.source_id "
@@ -128,94 +134,147 @@ class IdeationAgent(Agent):
         claimed = instances.claimed_niches(self.svc.env.instance, own_counts)
         others_text = shared.other_channels_text(self.svc.env.instance)
         sf = cfg.short_form
-        user = (
-            f"{self.strategy.prompt_summary(strategy_state)}\n\n"
-            f"{identity.genre_line(self.svc.db)}"
-            f"Generate {n_ideas} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
-            "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
-            "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "
-            "within that niche. content_family, angle and hook_type are your own labels (snake_case) for grouping ideas so results "
-            "can be compared; reuse a label when an idea belongs to it, or create a new one. "
-            "Score each criterion 0-10 honestly; do not inflate. zero_budget_feasibility must consider that visuals are limited to licensed archival photos, generated cards, charts and maps.\n\n"
-            + self.guideline_text(("topic",))
-            + f"Niches (content families) so far:\n{fam_lines or '- none yet'}\n\n"
-            f"Angles used so far: {', '.join(used_angles) or 'none yet'}\n"
-            + (
-                f"Niches held by the owner's other channels; ideas in them are dropped: {', '.join(sorted(claimed))}\n"
-                if claimed
-                else ""
+
+        def prompt(n: int, gtext: str, leads: list[SourceItemView]) -> str:
+            return (
+                f"{self.strategy.prompt_summary(strategy_state)}\n\n"
+                f"{identity.genre_line(self.svc.db)}"
+                f"Generate {n} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
+                "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
+                "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "
+                "within that niche. content_family, angle and hook_type are your own labels (snake_case) for grouping ideas so results "
+                "can be compared; reuse a label when an idea belongs to it, or create a new one. "
+                "Score each criterion 0-10 honestly; do not inflate. zero_budget_feasibility must consider that visuals are limited to licensed archival photos, generated cards, charts and maps.\n\n"
+                + gtext
+                + f"Niches (content families) so far:\n{fam_lines or '- none yet'}\n\n"
+                f"Angles used so far: {', '.join(used_angles) or 'none yet'}\n"
+                + (
+                    f"Niches held by the owner's other channels; ideas in them are dropped: {', '.join(sorted(claimed))}\n"
+                    if claimed
+                    else ""
+                )
+                + (f"The owner's other channels:\n{others_text}\n" if others_text else "")
+                + "\n"
+                f"Hook types used so far: {', '.join(used_hooks) or 'none yet'}\n\nLeads:\n{self.sources_block(leads, 500)}\n"
             )
-            + (f"The owner's other channels:\n{others_text}\n" if others_text else "")
-            + "\n"
-            f"Hook types used so far: {', '.join(used_hooks) or 'none yet'}\n\nLeads:\n{self.sources_block(leads, 500)}\n"
-        )
+
+        # Under a topic-rule experiment the batch is written in two halves, one per arm, each labelled.
+        topic = self.experiments.topic_experiment() if self.experiments is not None else None
+        sizes = [n_ideas] if topic is None else [(n_ideas + 1) // 2, n_ideas // 2]
         with self.svc.tracker.agent(run, self.name, "generate", {"leads": [s.id for s in leads]}) as span:
-            batch = self.ask(
-                self.pctx(run, span=span),
-                "Idea Generation agent",
-                user,
-                IdeaBatch,
-                "ideation",
-                temperature=0.7,
-                max_tokens=4000,
-            )
-            known = {s.id for s in leads}
             created: list[str] = []
             seen_titles: set[str] = set()
-            for d in batch.ideas:
-                refs = [r for r in d.source_refs if r in known]
-                if not refs:
+            used_refs: set[str] = set()
+            for size in sizes:
+                part_leads = [s for s in leads if s.id not in used_refs]
+                if size <= 0 or not part_leads:
                     continue
-                key = d.title.strip().lower()
-                if key in seen_titles or self.svc.db.one("SELECT 1 FROM ideas WHERE lower(title)=?", [key]):
-                    continue
-                seen_titles.add(key)
-                if d.scores.zero_budget_feasibility < 7 or d.scores.production_feasibility < 5:
-                    continue
-                fam_key = niches.canonical(niches.norm_label(d.content_family), amap) or ""
-                if fam_key in claimed:  # another channel already exploits this niche
-                    continue
-                fam_state = families.get(fam_key)
-                if fam_state and fam_state.get("status") == "retired":
-                    continue
-                score = opportunity_score(d, fam_state)
-                idea_id = new_id("idea")
-                self.svc.db.insert(
-                    "ideas",
-                    {
-                        "id": idea_id,
-                        "run_id": run.id,
-                        "title": d.title.strip()[:120],
-                        "premise": d.premise.strip(),
-                        "hook": d.hook.strip(),
-                        "hook_type": d.hook_type.strip().lower().replace(" ", "_").replace("-", "_"),
-                        "content_family": fam_key,
-                        "angle": niches.norm_label(d.angle) or None,
-                        "target_platform": d.target_platform,
-                        "format": "short",
-                        "suggested_runtime_s": int(
-                            clamp(d.suggested_runtime_s, sf.get("min_seconds", 20), sf.get("max_seconds", 90))
-                        ),
-                        "source_item_ids_json": dumps(refs),
-                        "production_difficulty": d.production_difficulty,
-                        "expected_cost_usd": 0.0,
-                        "originality_notes": d.originality_assessment,
-                        "scores_json": dumps(d.scores.model_dump()),
-                        "opportunity_score": score,
-                        "rationale": d.rationale,
-                        "status": "candidate",
-                        "created_at": now_iso(),
-                        "updated_at": now_iso(),
-                    },
+                replace: dict[str, str] | None = None
+                label: dict[str, Any] = {}
+                if topic is not None:
+                    arm_text = self.experiments.topic_arm_for_new_idea()
+                    if arm_text is not None:
+                        arm, text = arm_text
+                        label = {"experiment_id": topic["id"], "experiment_arm": arm}
+                        if arm == "treatment":
+                            replace = {str(topic["variable"]): text}
+                created += self._generate(
+                    run,
+                    span,
+                    prompt(size, self.guideline_text(("topic",), replace), part_leads),
+                    part_leads,
+                    families,
+                    amap,
+                    claimed,
+                    sf,
+                    label,
+                    seen_titles,
+                    used_refs,
                 )
-                created.append(idea_id)
-                for r in refs:
-                    self.svc.db.update("source_items", r, {"status": "used"})
-                    self.svc.db.execute(
-                        "UPDATE sources SET ideas_yielded = ideas_yielded + 1 WHERE id = (SELECT source_id FROM source_items WHERE id=?)",
-                        [r],
-                    )
             span.output_refs["ideas"] = created
         # leads that were considered but not used are left 'new' for a later cycle; the least fresh get ignored
         run.note("ideation", {"ideas": len(created), "leads": len(leads)})
+        return created
+
+    def _generate(
+        self,
+        run: RunContext,
+        span: Any,
+        user: str,
+        leads: list[SourceItemView],
+        families: dict[str, Any],
+        amap: Any,
+        claimed: dict[str, str],
+        sf: dict[str, Any],
+        label: dict[str, Any],
+        seen_titles: set[str],
+        used_refs: set[str],
+    ) -> list[str]:
+        """One model call; its accepted ideas are stored as candidates (with ``label`` columns added)."""
+        batch = self.ask(
+            self.pctx(run, span=span),
+            "Idea Generation agent",
+            user,
+            IdeaBatch,
+            "ideation",
+            temperature=0.7,
+            max_tokens=4000,
+        )
+        known = {s.id for s in leads}
+        created: list[str] = []
+        for d in batch.ideas:
+            refs = [r for r in d.source_refs if r in known]
+            if not refs:
+                continue
+            key = d.title.strip().lower()
+            if key in seen_titles or self.svc.db.one("SELECT 1 FROM ideas WHERE lower(title)=?", [key]):
+                continue
+            seen_titles.add(key)
+            if d.scores.zero_budget_feasibility < 7 or d.scores.production_feasibility < 5:
+                continue
+            fam_key = niches.canonical(niches.norm_label(d.content_family), amap) or ""
+            if fam_key in claimed:  # another channel already exploits this niche
+                continue
+            fam_state = families.get(fam_key)
+            if fam_state and fam_state.get("status") == "retired":
+                continue
+            score = opportunity_score(d, fam_state)
+            idea_id = new_id("idea")
+            self.svc.db.insert(
+                "ideas",
+                {
+                    "id": idea_id,
+                    "run_id": run.id,
+                    "title": d.title.strip()[:120],
+                    "premise": d.premise.strip(),
+                    "hook": d.hook.strip(),
+                    "hook_type": d.hook_type.strip().lower().replace(" ", "_").replace("-", "_"),
+                    "content_family": fam_key,
+                    "angle": niches.norm_label(d.angle) or None,
+                    "target_platform": d.target_platform,
+                    "format": "short",
+                    "suggested_runtime_s": int(
+                        clamp(d.suggested_runtime_s, sf.get("min_seconds", 20), sf.get("max_seconds", 90))
+                    ),
+                    "source_item_ids_json": dumps(refs),
+                    "production_difficulty": d.production_difficulty,
+                    "expected_cost_usd": 0.0,
+                    "originality_notes": d.originality_assessment,
+                    "scores_json": dumps(d.scores.model_dump()),
+                    "opportunity_score": score,
+                    "rationale": d.rationale,
+                    "status": "candidate",
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                    **label,
+                },
+            )
+            created.append(idea_id)
+            used_refs.update(refs)
+            for r in refs:
+                self.svc.db.update("source_items", r, {"status": "used"})
+                self.svc.db.execute(
+                    "UPDATE sources SET ideas_yielded = ideas_yielded + 1 WHERE id = (SELECT source_id FROM source_items WHERE id=?)",
+                    [r],
+                )
         return created

@@ -55,10 +55,16 @@ allocation:
   decay_full_sample: 60
 
 experiments:
-  default_min_sample_per_arm: 8
-  max_concurrent: 2
+  # Guideline spec 2026-10-07 section 3: one experiment per channel; a variant wins at P>=0.95 with
+  # n>=10 per arm, a clearly worse variant is stopped at n>=6, and n>=30 without a decision is inconclusive.
+  default_min_sample_per_arm: 10
+  max_concurrent: 1
   # Confidence required to conclude an experiment.
-  min_confidence: 0.85
+  min_confidence: 0.95
+  safety_min_sample: 6
+  max_sample: 30
+  # Videos published before an item that was inconclusive or rejected may be tested again.
+  cooldown_videos: 20
 
 # Owner guidance, 2026-10-01: each channel is distinct in genre, voice and look, and the AI may experiment
 # with all three (aimz/identity.py). These are starting options to get it going, not instructions: a

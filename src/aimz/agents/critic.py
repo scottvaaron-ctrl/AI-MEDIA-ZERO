@@ -134,6 +134,7 @@ class CriticAgent(Agent):
         narration = " ".join(b.narration for b in draft.beats)
         g = guideline.for_services(self.svc)
         replace = guideline.variant_for(idea, self.svc.db) if g else {}
+        tested_runtime = guideline.runtime_variant(idea, self.svc.db) if g else None
         gtext = self.guideline_text(("script", "title"), replace, g)
         if gtext:
             gtext += "List in broken_rules the ID of every guideline rule the script breaks.\n\n"
@@ -188,6 +189,7 @@ class CriticAgent(Agent):
                     waive_unexplained=waive,
                     guideline=g,
                     replace=replace,
+                    runtime_override=tested_runtime,
                 )
 
             raw = ask(user)
@@ -233,8 +235,12 @@ class CriticAgent(Agent):
         narration: str,
         g: Guideline,
         replace: dict[str, str] | None,
+        runtime_override: int | None = None,
     ) -> list[str]:
-        """Required revisions from the owner's guideline: broken rules and the code checks."""
+        """Required revisions from the owner's guideline: broken rules and the code checks.
+
+        ``runtime_override`` is the tested runtime of a G-runtime treatment idea; its runtime is not
+        gated on the guideline range (controller ruling R6)."""
         out: list[str] = []
         variants = replace or {}
         for rid in dict.fromkeys(result.broken_rules):
@@ -242,7 +248,7 @@ class CriticAgent(Agent):
             if rule is not None:
                 out.append(f"Breaks {rid} ({rule.title}): {variants.get(rid, rule.text)}")
         seconds = len(narration.split()) / WORDS_PER_SECOND
-        if not g.runtime_min <= seconds <= g.runtime_max:
+        if runtime_override is None and not g.runtime_min <= seconds <= g.runtime_max:
             out.append(f"Runtime {seconds:.0f}s is outside the guideline's {g.runtime_min}-{g.runtime_max}s")
         first = _SENTENCES.split(narration.strip(), maxsplit=1)[0].lower()
         for opening in g.checks.get("banned_openings") or []:
@@ -265,6 +271,7 @@ class CriticAgent(Agent):
         waive_unexplained: bool = False,
         guideline: Guideline | None = None,
         replace: dict[str, str] | None = None,
+        runtime_override: int | None = None,
     ) -> CriticResult:
         """Apply the deterministic gate. ``waive_unexplained`` drops the two gates that need no stated
         reason (the score threshold and the deserves-video verdict); every other gate still applies."""
@@ -288,7 +295,9 @@ class CriticAgent(Agent):
             result.passed = False
         if guideline is not None:
             result.required_revisions.extend(
-                CriticAgent._guideline_revisions(result, draft, narration, guideline, replace)
+                CriticAgent._guideline_revisions(
+                    result, draft, narration, guideline, replace, runtime_override
+                )
             )
         # The V0 pipeline renders archival photos and generated cards only; it cannot produce synthetic
         # depictions of real people or altered footage, so those model flags are structural false positives.

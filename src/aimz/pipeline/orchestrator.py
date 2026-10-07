@@ -10,6 +10,7 @@ import logging
 import random
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.analyst import AnalystAgent
 from aimz.agents.comments import CommentAgent
 from aimz.agents.critic import CriticAgent
@@ -51,15 +52,20 @@ class Orchestrator:
             int(cfg.get("experiments.max_concurrent", 2)),
             float(cfg.get("experiments.min_confidence", 0.85)),
             hook_types=cfg.hook_types,
+            # With a guideline: one experiment per channel on one guideline item (spec section 3).
+            guideline=guideline.for_services(svc),
+            safety_min_sample=int(cfg.get("experiments.safety_min_sample", 6)),
+            max_sample=int(cfg.get("experiments.max_sample", 30)),
+            cooldown_videos=int(cfg.get("experiments.cooldown_videos", 20)),
         )
         rng = random.Random(seed)
         self.research = ResearchAgent(svc, self.strategy)
-        self.ideation = IdeationAgent(svc, self.strategy)
+        self.ideation = IdeationAgent(svc, self.strategy, self.experiments)
         self.editor = EditorInChief(svc, self.strategy, self.experiments, rng)
         self.script = ScriptAgent(svc, self.strategy)
         self.factcheck = FactCheckAgent(svc, self.strategy)
         self.critic = CriticAgent(svc, self.strategy)
-        self.producer = ProducerAgent(svc, self.strategy, rng)
+        self.producer = ProducerAgent(svc, self.strategy, rng, self.experiments)
         self.publisher = PublishStage(svc, self.strategy)
         self.analyst = AnalystAgent(svc, self.strategy, self.experiments)
         self.comments = CommentAgent(svc, self.strategy)

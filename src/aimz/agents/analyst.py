@@ -372,7 +372,7 @@ class AnalystAgent(Agent):
                 "retired": [
                     f"{e['id']}: {e['name']} - {e.get('conclusion') or ''}"
                     for e in self.experiments.all()
-                    if e["status"] in {"concluded", "retired"}
+                    if e["status"] in {"concluded", "retired", "variant_won", "inconclusive"}
                 ][:10],
             }
             merged = self.apply_setting_changes(upd)

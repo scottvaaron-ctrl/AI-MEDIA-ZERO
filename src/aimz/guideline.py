@@ -142,7 +142,7 @@ def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guidelin
         runtime_min=rmin,
         runtime_max=rmax,
         checks=dict(checks),
-        rules=_parse_rules(text[m.end():]),
+        rules=_parse_rules(text[m.end() :]),
         unavailable=unavailable,
         content=text,
     )
@@ -154,7 +154,7 @@ def _parse_rules(body: str) -> dict[str, Rule]:
     for i, h in enumerate(heads):
         rid, title = h.group(1), h.group(2)
         end = heads[i + 1].start() if i + 1 < len(heads) else len(body)
-        chunk = _ANY_HEADING_RE.split(body[h.end():end], maxsplit=1)[0]  # other headings end the rule
+        chunk = _ANY_HEADING_RE.split(body[h.end() : end], maxsplit=1)[0]  # other headings end the rule
         lines = chunk.strip().splitlines()
         sm = _STAGE_RE.match(lines[0].strip()) if lines else None
         if not sm:
@@ -265,6 +265,25 @@ def variant_for(idea: dict[str, Any], db: Database) -> dict[str, str]:
     if not var.startswith("G-") or var == "G-runtime" or var[2:] in CATALOG:
         return {}
     return {var: str(exp["treatment"])}
+
+
+def runtime_variant(idea: dict[str, Any], db: Database) -> int | None:
+    """The tested runtime in seconds when the idea is on the treatment arm of a running G-runtime experiment.
+
+    That runtime replaces the guideline's runtime range for this idea only (controller ruling R6): the
+    script agent does not clamp to the range and the critic does not gate on it. Control-arm ideas
+    follow the guideline range.
+    """
+    exp_id = idea.get("experiment_id")
+    if not exp_id or idea.get("experiment_arm") != "treatment":
+        return None
+    exp = db.get("experiments", exp_id)
+    if not exp or exp["status"] != "running" or exp["variable"] != "G-runtime":
+        return None
+    try:
+        return int(exp["treatment"])
+    except (TypeError, ValueError):
+        return None
 
 
 def section(g: Guideline | None, stages: tuple[str, ...], replace: dict[str, str] | None = None) -> str:

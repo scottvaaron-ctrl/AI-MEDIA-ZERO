@@ -154,10 +154,12 @@ def split_shots(
 class ProducerAgent(Agent):
     name = "producer"
 
-    def __init__(self, svc: Any, strategy: Any, rng: random.Random | None = None):
+    def __init__(self, svc: Any, strategy: Any, rng: random.Random | None = None, experiments: Any = None):
         super().__init__(svc, strategy)
         self.settings = SettingsEngine(svc.db, caps=capabilities(svc))
         self.rng = rng or random.Random()
+        # The ExperimentEngine: a G-<setting> treatment value reaches the render through it.
+        self.experiments = experiments
         self._guideline: Guideline | None = None
         self._guideline_loaded = False
 
@@ -206,7 +208,7 @@ class ProducerAgent(Agent):
             exclude,
             guideline=g.locked if g else None,
             unavailable=set(g.unavailable) if g else None,
-            experiment=None,  # Task 4: ExperimentEngine.setting_override(idea)
+            experiment=self.experiments.setting_override(idea) if self.experiments is not None else None,
         ).values
 
     def guideline(self) -> Guideline | None:

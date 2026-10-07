@@ -213,6 +213,10 @@ class ExperimentProposal(BaseModel):
     treatment: str
     primary_kpi: str
     secondary_kpi: str = ""
+    # With a channel guideline: the item tested (a rule id such as "G-hook", "G-runtime", or
+    # "G-<setting>") and the variant (a setting value, runtime seconds, or the replacement rule text).
+    guideline_item: str = ""
+    variant: str = ""
 
 
 class FamilyUpdate(BaseModel):

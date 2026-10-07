@@ -103,6 +103,22 @@ class EditorInChief(Agent):
                 pool = [c for c in cands if c["id"] not in used]
             if not pool:
                 break
+            topic_exp = self.experiments.topic_experiment()
+            if topic_exp is not None:
+                # A topic-rule experiment: ideation labelled each idea's arm. Offer the arm with fewer
+                # ideas in production first, so the arms stay balanced.
+                made = self.experiments.topic_arm_counts(
+                    topic_exp, ("selected", "scripted", "produced", "published")
+                )
+                arm = "treatment" if made["treatment"] < made["control"] else "control"
+                if made["treatment"] == made["control"]:
+                    arm = self.rng.choice(["control", "treatment"])
+                on_arm = [
+                    c
+                    for c in pool
+                    if c.get("experiment_id") == topic_exp["id"] and c.get("experiment_arm") == arm
+                ]
+                pool = on_arm or pool
             mode, reason = slot.mode, slot.reason
             choice, turned_down = self._choose(run, strategy_state, pool[:4], mode, reason)
             used.update(turned_down)
@@ -127,6 +143,10 @@ class EditorInChief(Agent):
             # experiment arm assignment: force the variable's value onto the idea. One experiment per idea
             # keeps attribution clean; the least-filled one goes first so a second experiment is not starved.
             exp = self.experiments.next_for_assignment()
+            if exp is not None and topic_exp is not None and exp["id"] == topic_exp["id"]:
+                # The arm was set at ideation (the idea was written under it); an idea from before the
+                # experiment stays outside it.
+                exp = None
             if exp is not None:
                 arm, value = self.experiments.assign_arm(exp, self.rng)
                 updates["experiment_id"] = exp["id"]
@@ -135,7 +155,10 @@ class EditorInChief(Agent):
                     # The idea's hook line was written for its old type; the script agent writes the
                     # opening from this type instead (ScriptAgent.hook_type_under_test).
                     updates["hook_type"] = value
-                elif exp["variable"] == "runtime":
+                elif exp["variable"] == "runtime" or (exp["variable"] == "G-runtime" and arm == "treatment"):
+                    # A G-runtime control idea follows the guideline range; its treatment is made at the
+                    # tested runtime. G-<setting> treatments reach the render through the producer
+                    # (ExperimentEngine.setting_override); rule variants through the prompts (variant_for).
                     with contextlib.suppress(ValueError):
                         updates["suggested_runtime_s"] = int(value)
             self.svc.db.update("ideas", choice["id"], updates)
