@@ -16,7 +16,7 @@ from aimz.core.runs import RunContext
 from aimz.domain.models import AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
 from aimz.experiments.allocation import per_video
-from aimz.experiments.settings import CATALOG, SettingsEngine, capabilities
+from aimz.experiments.settings import SettingsEngine, capabilities
 from aimz.guideline import Guideline
 from aimz.providers.audio.library import sfx, track_for
 from aimz.providers.base import SpeechOptions
@@ -212,9 +212,7 @@ class ProducerAgent(Agent):
     def guideline(self) -> Guideline | None:
         """The active guideline, loaded once per cycle (None when the channel has never had one)."""
         if not self._guideline_loaded:
-            self._guideline = guideline.load(
-                self.svc.db, self.svc.env.config_dir, CATALOG, capabilities(self.svc)
-            )
+            self._guideline = guideline.for_services(self.svc)
             self._guideline_loaded = True
         return self._guideline
 

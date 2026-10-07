@@ -5,10 +5,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.base import Agent
+from aimz.agents.script import WORDS_PER_SECOND
 from aimz.core.errors import TechnicalFailure
 from aimz.core.runs import RunContext
 from aimz.domain.models import CriticResult, FactCheckResult, ScriptDraft, SourceItemView
+from aimz.guideline import Guideline
 from aimz.util import dumps, now_iso
 
 ELEVATED_KEYWORDS = {
@@ -129,6 +132,11 @@ class CriticAgent(Agent):
         threshold = int(cfg.get("pipeline.qa_pass_threshold", 70))
         elevated = "\n".join(f"- {t}" for t in cfg.elevated_review_topics)
         narration = " ".join(b.narration for b in draft.beats)
+        g = guideline.for_services(self.svc)
+        replace = guideline.variant_for(idea, self.svc.db) if g else {}
+        gtext = self.guideline_text(("script", "title"), replace, g)
+        if gtext:
+            gtext += "List in broken_rules the ID of every guideline rule the script breaks.\n\n"
         user = (
             "You are adversarial. Assume the script is mediocre until proven otherwise. The constitution requires you to check: factual support against the sources, "
             "originality (not generic mass-produced AI content, not a duplicate of common content), copyright risk, policy risk, deceptive-media risk, "
@@ -140,7 +148,8 @@ class CriticAgent(Agent):
             f"Flag elevated_review_required if the script touches any of:\n{elevated}\n"
             "Only list a topic in elevated_review_reasons if the script actually touches it, and put the exact words from the script "
             "that touch it in elevated_review_evidence. If you cannot quote the script, do not list the topic.\n\n"
-            f"Channel strategy memory:\n{self.strategy.prompt_summary(self.strategy.current(), 1200)}\n\n"
+            + gtext
+            + f"Channel strategy memory:\n{self.strategy.prompt_summary(self.strategy.current(), 1200)}\n\n"
             f"Idea: {idea['title']} | family {idea['content_family']} | hook_type {idea.get('hook_type')}\n"
             f"Fact-check outcome: {factcheck.overall} ({factcheck.notes[:200]})\n\n"
             f"Script title: {draft.title}\nHook line: {draft.hook_line}\nBeats:\n"
@@ -177,6 +186,8 @@ class CriticAgent(Agent):
                     threshold,
                     cfg.banned_patterns,
                     waive_unexplained=waive,
+                    guideline=g,
+                    replace=replace,
                 )
 
             raw = ask(user)
@@ -216,6 +227,33 @@ class CriticAgent(Agent):
         ]
 
     @staticmethod
+    def _guideline_revisions(
+        result: CriticResult,
+        draft: ScriptDraft,
+        narration: str,
+        g: Guideline,
+        replace: dict[str, str] | None,
+    ) -> list[str]:
+        """Required revisions from the owner's guideline: broken rules and the code checks."""
+        out: list[str] = []
+        variants = replace or {}
+        for rid in dict.fromkeys(result.broken_rules):
+            rule = g.rules.get(rid)
+            if rule is not None:
+                out.append(f"Breaks {rid} ({rule.title}): {variants.get(rid, rule.text)}")
+        seconds = len(narration.split()) / WORDS_PER_SECOND
+        if not g.runtime_min <= seconds <= g.runtime_max:
+            out.append(f"Runtime {seconds:.0f}s is outside the guideline's {g.runtime_min}-{g.runtime_max}s")
+        first = _SENTENCES.split(narration.strip(), maxsplit=1)[0].lower()
+        for opening in g.checks.get("banned_openings") or []:
+            if str(opening).strip() and first.startswith(str(opening).strip().lower()):
+                out.append(f"Opening '{opening}' is banned by the guideline")
+        limit = g.checks.get("title_max_chars")
+        if limit is not None and len(draft.title) > int(limit):
+            out.append(f"Title is {len(draft.title)} characters; the guideline allows {int(limit)}")
+        return out
+
+    @staticmethod
     def _overrides(
         result: CriticResult,
         draft: ScriptDraft,
@@ -225,6 +263,8 @@ class CriticAgent(Agent):
         banned: list[str],
         *,
         waive_unexplained: bool = False,
+        guideline: Guideline | None = None,
+        replace: dict[str, str] | None = None,
     ) -> CriticResult:
         """Apply the deterministic gate. ``waive_unexplained`` drops the two gates that need no stated
         reason (the score threshold and the deserves-video verdict); every other gate still applies."""
@@ -246,6 +286,10 @@ class CriticAgent(Agent):
         if factcheck.overall == "reject":
             result.required_revisions.insert(0, "Fact-check rejected the premise.")
             result.passed = False
+        if guideline is not None:
+            result.required_revisions.extend(
+                CriticAgent._guideline_revisions(result, draft, narration, guideline, replace)
+            )
         # The V0 pipeline renders archival photos and generated cards only; it cannot produce synthetic
         # depictions of real people or altered footage, so those model flags are structural false positives.
         impossible = {"realistic depictions of real people", "altered real-world events"}

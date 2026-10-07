@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import ScriptDraft, SourceItemView
@@ -37,6 +38,9 @@ class ScriptAgent(Agent):
         cfg = self.svc.config
         sf = cfg.short_form
         min_s, max_s = int(sf.get("min_seconds", 10)), int(sf.get("max_seconds", 180))
+        g = guideline.for_services(self.svc)
+        if g is not None:  # the guideline's runtime range replaces the platform limits
+            min_s, max_s = g.runtime_min, g.runtime_max
         target_s = int(idea.get("suggested_runtime_s") or sf.get("target_seconds", 45))
         target_s = max(min_s, min(max_s, target_s))
         if self.runtime_under_test(idea):
@@ -49,6 +53,8 @@ class ScriptAgent(Agent):
                 f"Runtime: your ideation estimate was {target_s}s. The script may be any length from {min_s}s to {max_s}s "
                 f"({int(min_s * WORDS_PER_SECOND)}-{int(max_s * WORDS_PER_SECOND)} spoken words); let the facts in the sources decide."
             )
+            if g is not None:
+                runtime_line += f" Guideline runtime: {min_s}-{max_s}s."
         hook_type = (idea.get("hook_type") or "").lower()
         if hook_type and self.hook_type_under_test(idea):
             # The ideation hook line may be of the other arm's type; both arms write the opening from the
@@ -78,7 +84,8 @@ class ScriptAgent(Agent):
             f"Banned phrases: {banned}. Do not address the viewer with engagement bait.\n"
             "List every factual claim (dates, numbers, names, events) in `claims` with the beat index and the source ids that support it. "
             "Only use facts present in the sources below; if the sources do not say it, do not say it.\n\n"
-            f"Sources:\n{self.sources_block(sources, text_budget=5000)}\n\n"
+            + self.guideline_text(("script", "title"), guideline.variant_for(idea, self.svc.db), g)
+            + f"Sources:\n{self.sources_block(sources, text_budget=5000)}\n\n"
             f"Channel strategy memory (your own notes on what has worked):\n{self.strategy.prompt_summary(strategy_state, 1500)}\n"
         )
         if feedback:

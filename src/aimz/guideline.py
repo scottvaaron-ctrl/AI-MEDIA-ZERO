@@ -240,3 +240,38 @@ def write(db: Database, config_dir: Path, content: str, source: str, reason: str
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return save_version(db, content, source, reason)
+
+
+def for_services(svc: Any) -> Guideline | None:
+    """The active guideline for a services bundle: the one place that knows how to call ``load``."""
+    from aimz.experiments.settings import capabilities  # local import: keeps module import order simple
+
+    return load(svc.db, svc.env.config_dir, CATALOG, capabilities(svc))
+
+
+def variant_for(idea: dict[str, Any], db: Database) -> dict[str, str]:
+    """``{rule_id: variant_text}`` when the idea is on the treatment arm of a running craft-rule experiment.
+
+    A craft-rule experiment's variable is a guideline rule id ("G-..."), other than G-runtime and the
+    G-<setting> ids of locked settings. Its treatment column holds the variant text.
+    """
+    exp_id = idea.get("experiment_id")
+    if not exp_id or idea.get("experiment_arm") != "treatment":
+        return {}
+    exp = db.get("experiments", exp_id)
+    if not exp or exp["status"] != "running":
+        return {}
+    var = str(exp["variable"])
+    if not var.startswith("G-") or var == "G-runtime" or var[2:] in CATALOG:
+        return {}
+    return {var: str(exp["treatment"])}
+
+
+def section(g: Guideline | None, stages: tuple[str, ...], replace: dict[str, str] | None = None) -> str:
+    """The prompt text for the given stages, headed for the model; empty without a guideline or rules."""
+    if g is None:
+        return ""
+    blocks = [b for b in (g.prompt_block(s, replace) for s in stages) if b]
+    if not blocks:
+        return ""
+    return "Channel guideline (owner-approved; follow it):\n" + "\n".join(blocks)

@@ -12,13 +12,14 @@ import contextlib
 import random
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
-from aimz.domain.models import SelectionDecision
+from aimz.domain.models import SelectionDecision, SelectionDecisionWithBreaks
 from aimz.experiments import niches
 from aimz.experiments.allocation import plan_allocation
 from aimz.experiments.engine import ExperimentEngine
-from aimz.util import iso_ago, now_iso
+from aimz.util import dumps, iso_ago, now_iso
 
 GOALS = (
     "Optimization goals in priority order: 1) viewer retention, 2) shares per 1,000 views, 3) followers/subscribers gained per 1,000 views, "
@@ -178,12 +179,18 @@ class EditorInChief(Agent):
             lines.append(
                 f"- {c['id']} | score {c['opportunity_score']} | family {c['content_family']} | hook_type {c['hook_type']} | {c['title']}\n  Premise: {c['premise'][:300]}\n  Hook: {c['hook'][:200]}"
             )
+        g = guideline.for_services(self.svc)
+        topic_rules = g.rules_for("topic") if g else []
+        gtext = self.guideline_text(("topic",), g=g)
+        if gtext:
+            gtext += "In breaks, list one 'idea_id:rule_id' entry for every shortlist idea that breaks a topic rule above.\n\n"
         user = (
             f"{GOALS}\n\n{self.strategy.prompt_summary(strategy_state)}\n\n"
             f"Allocation for this slot: {mode.upper()} ({reason}).\n"
             "Select up to 1 idea from the shortlist that best serves the goals and the allocation. Reject the rest with a one-line reason. "
-            "If none deserves a video, select nothing.\n\nShortlist:\n" + "\n".join(lines)
+            "If none deserves a video, select nothing.\n\n" + gtext + "Shortlist:\n" + "\n".join(lines)
         )
+        schema = SelectionDecisionWithBreaks if topic_rules else SelectionDecision
         with self.svc.tracker.agent(
             run, self.name, "select", {"shortlist": [c["id"] for c in shortlist]}
         ) as span:
@@ -192,7 +199,7 @@ class EditorInChief(Agent):
                     self.pctx(run, span=span),
                     "Editor-in-Chief",
                     user,
-                    SelectionDecision,
+                    schema,
                     "eic_select",
                     temperature=0.3,
                     max_tokens=1200,
@@ -203,15 +210,34 @@ class EditorInChief(Agent):
                     selected_idea_ids=[shortlist[0]["id"]], notes="fallback: top opportunity score"
                 )
             by_id = {c["id"]: c for c in shortlist}
-            chosen = next((by_id[s] for s in decision.selected_idea_ids if s in by_id), None)
-            if chosen is None and decision.selected_idea_ids:
-                chosen = shortlist[0]  # the model named an id that is not on the shortlist
-            reasons = {r.idea_id: r.reason for r in decision.rejected if r.idea_id in by_id}
+            broken = self._topic_breaks(decision, by_id, {r.id for r in topic_rules})
             turned_down: set[str] = set()
+            for cid, ids in broken.items():
+                self.svc.db.update(
+                    "ideas",
+                    cid,
+                    {
+                        "status": "rejected",
+                        "guideline_breaks": dumps(ids),
+                        "eic_notes": f"breaks guideline {', '.join(ids)}",
+                        "updated_at": now_iso(),
+                    },
+                )
+                turned_down.add(cid)
+            by_id = {k: v for k, v in by_id.items() if k not in broken}
+            named = [s for s in decision.selected_idea_ids if s not in broken]
+            chosen = next((by_id[s] for s in named if s in by_id), None)
+            if chosen is None and named:
+                chosen = next(
+                    iter(by_id.values()), None
+                )  # the model named an id that is not on the shortlist
+            # Selecting nothing is the editor's verdict on the whole shortlist; a pick that broke a rule is not.
+            nothing_selected = not decision.selected_idea_ids
+            reasons = {r.idea_id: r.reason for r in decision.rejected if r.idea_id in by_id}
             for cid in by_id:
                 if chosen is not None and cid == chosen["id"]:
                     continue
-                if chosen is None:
+                if chosen is None and nothing_selected:
                     why = reasons.get(cid) or "the editor selected nothing from this shortlist"
                     self.svc.db.update(
                         "ideas",
@@ -231,3 +257,14 @@ class EditorInChief(Agent):
                     )
             span.output_refs["selected"] = chosen["id"] if chosen else None
         return chosen, turned_down
+
+    @staticmethod
+    def _topic_breaks(decision: Any, by_id: dict[str, Any], topic_ids: set[str]) -> dict[str, list[str]]:
+        """Shortlist ideas the editor says break a topic rule: ``{idea_id: [rule ids]}``."""
+        out: dict[str, list[str]] = {}
+        for entry in getattr(decision, "breaks", []) or []:
+            idea_id, _, rule_id = str(entry).partition(":")
+            idea_id, rule_id = idea_id.strip(), rule_id.strip()
+            if idea_id in by_id and rule_id in topic_ids and rule_id not in out.setdefault(idea_id, []):
+                out[idea_id].append(rule_id)
+        return {k: v for k, v in out.items() if v}

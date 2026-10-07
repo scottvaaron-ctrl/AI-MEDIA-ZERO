@@ -100,6 +100,15 @@ class SelectionDecision(BaseModel):
     notes: str = ""
 
 
+class SelectionDecisionWithBreaks(SelectionDecision):
+    """The editor's decision when a channel guideline is active: it also names the topic rules ideas break."""
+
+    breaks: list[str] = Field(
+        default_factory=list,
+        description="One entry per broken topic rule, as 'idea_id:rule_id' (for example 'idea_ab12:G-topic').",
+    )
+
+
 # --------------------------------------------------------------------------------------
 # Script
 # --------------------------------------------------------------------------------------
@@ -187,6 +196,8 @@ class CriticResult(BaseModel):
     elevated_review_reasons: list[str] = Field(default_factory=list)
     # Exact words from the script behind each elevated reason; reasons without a verifiable quote are dropped.
     elevated_review_evidence: list[str] = Field(default_factory=list)
+    # Ids of the channel guideline's rules the script breaks (the critic prompt asks for them only when a guideline is active).
+    broken_rules: list[str] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
 

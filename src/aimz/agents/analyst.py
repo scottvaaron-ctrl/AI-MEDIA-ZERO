@@ -27,7 +27,7 @@ from aimz.domain.models import StrategyUpdate
 from aimz.experiments import niches, shared
 from aimz.experiments.allocation import family_stats, per_video
 from aimz.experiments.engine import MEASURABLE_KPIS, ExperimentEngine
-from aimz.experiments.settings import CATALOG, SettingsEngine, capabilities
+from aimz.experiments.settings import SettingsEngine, capabilities
 from aimz.experiments.value import niche_value_text, niche_values, ypp_progress, ypp_text
 from aimz.util import hours_since, iso_ago, now_iso
 
@@ -418,9 +418,7 @@ class AnalystAgent(Agent):
         Returns the niche labels that were merged away.
         """
         refused: list[str] = []
-        g = guideline.load(
-            self.svc.db, self.svc.env.config_dir, CATALOG, capabilities(self.svc)
-        )
+        g = guideline.for_services(self.svc)
         covered = set(g.locked) if g else None
         for ch in upd.setting_changes[:6]:
             why = self.settings.change(

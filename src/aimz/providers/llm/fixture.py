@@ -117,6 +117,9 @@ class FixtureLLMProvider(LLMProvider):
             )
         return {"ideas": ideas}
 
+    def _gen_SelectionDecisionWithBreaks(self, user: str) -> dict[str, Any]:  # noqa: N802
+        return self._gen_SelectionDecision(user)
+
     def _gen_SelectionDecision(self, user: str) -> dict[str, Any]:  # noqa: N802
         ids = list(dict.fromkeys(_IDEA_RE.findall(user)))
         m = re.search(r"Select up to (\d+)", user)

@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from aimz import guideline
 from aimz.core.runs import RunContext
 from aimz.domain.models import SourceItemView
 from aimz.providers.base import ProviderContext
@@ -102,6 +103,17 @@ class Agent:
         return self.svc.llm.complete_model(
             ctx, system, user, schema, purpose, temperature=temperature, max_tokens=max_tokens
         )
+
+    def guideline_text(
+        self,
+        stages: tuple[str, ...],
+        replace: dict[str, str] | None = None,
+        g: guideline.Guideline | None = None,
+        tail: str = "\n\n",
+    ) -> str:
+        """The channel guideline's rules for these stages, ready to put in a prompt; empty without a guideline."""
+        text = guideline.section(g or guideline.for_services(self.svc), stages, replace)
+        return text + tail if text else ""
 
     def pctx(self, run: RunContext, content_id: str | None = None, span: Any = None) -> ProviderContext:
         return self.svc.ctx(run.id, content_id, span)

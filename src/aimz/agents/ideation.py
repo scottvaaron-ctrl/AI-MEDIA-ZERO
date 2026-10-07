@@ -137,7 +137,8 @@ class IdeationAgent(Agent):
             "within that niche. content_family, angle and hook_type are your own labels (snake_case) for grouping ideas so results "
             "can be compared; reuse a label when an idea belongs to it, or create a new one. "
             "Score each criterion 0-10 honestly; do not inflate. zero_budget_feasibility must consider that visuals are limited to licensed archival photos, generated cards, charts and maps.\n\n"
-            f"Niches (content families) so far:\n{fam_lines or '- none yet'}\n\n"
+            + self.guideline_text(("topic",))
+            + f"Niches (content families) so far:\n{fam_lines or '- none yet'}\n\n"
             f"Angles used so far: {', '.join(used_angles) or 'none yet'}\n"
             + (
                 f"Niches held by the owner's other channels; ideas in them are dropped: {', '.join(sorted(claimed))}\n"
