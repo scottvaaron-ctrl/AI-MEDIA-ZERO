@@ -81,6 +81,17 @@ def path(config_dir: Path) -> Path:
     return Path(config_dir) / "guideline.md"
 
 
+NOT_APPROVED_MARKER = "NOT APPROVED"
+
+
+def is_approved(config_dir: Path) -> bool:
+    """The channel's guideline file exists and the owner has removed its ``NOT APPROVED`` marker."""
+    p = path(config_dir)
+    if not p.exists():
+        return False
+    return NOT_APPROVED_MARKER not in p.read_text(encoding="utf-8")
+
+
 def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guideline:
     m = _YAML_RE.search(text)
     if not m:

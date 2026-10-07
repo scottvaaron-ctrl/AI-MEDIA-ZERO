@@ -230,3 +230,43 @@ def test_poll_pending_promotes_uploading_publications(svc) -> None:  # noqa: ANN
     pub = svc.db.get("publications", "pub1")
     assert pub["status"] == "published" and pub["platform_video_id"] == "tt1" and pub["posted_at"]
     assert svc.db.get("videos", vid)["status"] == "published"
+
+
+def test_unapproved_guideline_blocks_upload(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    from aimz import guideline
+    from aimz.core.attention import attention
+
+    rec = RecordingPublisher()
+    svc.publishers = {"youtube": rec}
+    stage = _stage(svc, consent=True)  # consent given, per-channel guideline not
+    cfg = tmp_path / "chan_config"
+    cfg.mkdir()
+    svc.env = dataclasses.replace(svc.env, instance="space", config_dir=cfg)
+    vid = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        res = stage.publish(run, vid)  # no guideline file at all
+    assert res[0]["status"] == "blocked" and rec.calls == []
+    blocked = attention(svc.db)["uploads_blocked"]
+    assert "channel guideline not approved" in blocked[0]["error"]
+
+    (cfg / "guideline.md").write_text("<!-- NOT APPROVED: x -->\n# g\n", encoding="utf-8")
+    vid2 = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        assert stage.publish(run, vid2)[0]["status"] == "blocked"
+    assert rec.calls == []
+    (cfg / "guideline.md").write_text("# g\n", encoding="utf-8")  # the owner removes the marker
+    vid3 = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        assert stage.publish(run, vid3)[0]["status"] == "uploaded"
+    assert len(rec.calls) == 1
+
+
+def test_main_instance_ignores_the_guideline_gate(svc) -> None:  # noqa: ANN001
+    rec = RecordingPublisher()
+    svc.publishers = {"youtube": rec}
+    stage = _stage(svc, consent=True)
+    assert svc.env.instance == "main"
+    vid = _seed_video(svc)
+    with svc.tracker.run("publish") as run:
+        res = stage.publish(run, vid)
+    assert res[0]["status"] == "uploaded"

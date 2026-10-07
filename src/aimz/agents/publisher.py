@@ -30,6 +30,7 @@ from typing import Any
 
 import httpx
 
+from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.agents.producer import package_name
 from aimz.core.errors import (
@@ -320,6 +321,11 @@ class PublishStage(Agent):
                 try:
                     if pub.performs_api_writes:
                         self.svc.killswitch.guard(f"publish to {platform}")
+                        if self.svc.env.instance != "main" and not guideline.is_approved(
+                            self.svc.env.config_dir
+                        ):
+                            # A new channel needs its owner-approved guideline, per-video approval or not.
+                            raise OwnerApprovalRequired("channel guideline not approved")
                         if not approved and self.svc.config.get("publishing.require_owner_approval", True):
                             raise OwnerApprovalRequired(
                                 f"video {video_id} needs owner approval before {platform} upload"

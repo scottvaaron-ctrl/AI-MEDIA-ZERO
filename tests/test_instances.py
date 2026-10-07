@@ -320,3 +320,19 @@ def test_an_instance_inherits_the_main_config_and_overrides_its_name(
     cfg = load_app_config(root / "config")
     assert cfg.get("project.name") == "Deep Space Daily"
     assert cfg.get("publishing.limits.max_runs_per_day") == 4  # the owner's limits reach every channel
+
+
+def test_create_writes_unapproved_template(svc, main_root: Path) -> None:  # noqa: ANN001
+    from aimz import guideline
+    from aimz.experiments.settings import CATALOG
+
+    root = instances.create("space", "Deep Space Daily", main_root)
+    f = root / "config" / "guideline.md"
+    text = f.read_text(encoding="utf-8")
+    assert text.splitlines()[0] == "<!-- NOT APPROVED: the owner must remove this line to approve -->"
+    g = guideline.parse(text, CATALOG, set())  # the template is a valid guideline as written
+    assert g.locked == {} and g.rules
+    assert not guideline.is_approved(root / "config")
+    f.write_text("\n".join(text.splitlines()[1:]) + "\n", encoding="utf-8")
+    assert guideline.is_approved(root / "config")
+    assert not guideline.is_approved(root / "nowhere")

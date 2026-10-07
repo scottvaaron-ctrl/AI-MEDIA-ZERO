@@ -51,7 +51,7 @@ aimz = "aimz.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-aimz = ["db/migrations/*.sql", "dashboard/templates/*.html", "dashboard/static/*"]
+aimz = ["db/migrations/*.sql", "dashboard/templates/*.html", "dashboard/static/*", "templates/*.md"]
 
 [tool.ruff]
 line-length = 110

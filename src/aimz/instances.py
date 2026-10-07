@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +131,11 @@ def create(name: str, channel_name: str, main_root: Path = REPO_ROOT) -> Path:
     feeds = main_root / "config" / "feeds.yaml"
     if feeds.exists():  # research sources: the channel's own copy, to edit for its niches
         shutil.copyfile(feeds, root / "config" / "feeds.yaml")
+    # Uploads stay blocked until the owner edits the template and removes its NOT APPROVED line.
+    (root / "config" / "guideline.md").write_text(
+        (resources.files("aimz") / "templates" / "guideline_template.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     # Only this channel's differences: everything else (posting limits, scoring, stock switch, ...) is read
     # from the main config.yaml, so one owner edit applies to every channel.
     (root / "config" / "config.yaml").write_text(
