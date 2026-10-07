@@ -334,3 +334,21 @@ def test_no_guideline_unchanged(svc) -> None:  # noqa: ANN001
         "n2", IDEA, DEFAULTS, [], random.Random(7), guideline=None, unavailable=None, experiment=None
     )
     assert plain.values == explicit.values and plain.sources == explicit.sources
+
+
+def test_capability_gated_dial_records_guideline_fallback(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db, caps=set())  # no stock_video: clip_scenes is not in the space
+    assert "clip_scenes" not in eng.space()
+    a = eng.assign(
+        "g5", IDEA, {**DEFAULTS, "clip_scenes": "off"}, [], random.Random(1), unavailable={"clip_scenes"}
+    )
+    assert (a.values["clip_scenes"], a.sources["clip_scenes"]) == ("off", "guideline_fallback")
+    row = svc.db.one("SELECT value, source FROM video_settings WHERE video_id='g5' AND variable='clip_scenes'")
+    assert row["source"] == "guideline_fallback" and json.loads(row["value"]) == "off"
+
+
+def test_invalid_guideline_value_falls_through(svc) -> None:  # noqa: ANN001
+    eng = SettingsEngine(svc.db)
+    eng.change("beat_pause_s", "lock", locked_value=0.6)
+    a = eng.assign("g6", IDEA, DEFAULTS, [], random.Random(1), guideline={"beat_pause_s": 99.0})
+    assert (a.values["beat_pause_s"], a.sources["beat_pause_s"]) == (0.6, "locked")

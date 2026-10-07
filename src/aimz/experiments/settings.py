@@ -384,12 +384,16 @@ class SettingsEngine:
             d = self.catalog[var]
             # Precedence: experiment treatment, then the guideline, then the guideline's fallback for a
             # setting this machine cannot do, then the chain below (identity, open, locked, always-on, default).
-            if experiment and experiment.get("variable") == var and d.check(experiment.get("value"))[1] is None:
-                values[var], sources[var] = d.check(experiment["value"])[0], "experiment"
-                continue
-            if var in guideline and d.check(guideline[var])[1] is None:
-                values[var], sources[var] = d.check(guideline[var])[0], "guideline"
-                continue
+            if experiment and experiment.get("variable") == var:
+                norm, why = d.check(experiment.get("value"))
+                if why is None:
+                    values[var], sources[var] = norm, "experiment"
+                    continue
+            if var in guideline:
+                norm, why = d.check(guideline[var])
+                if why is None:
+                    values[var], sources[var] = norm, "guideline"
+                    continue
             if var in unavailable:
                 values[var], sources[var] = defaults.get(var), "guideline_fallback"
                 continue
@@ -414,6 +418,11 @@ class SettingsEngine:
                 values[var], sources[var] = self._choose(var, options, scored, rng)
             else:
                 values[var], sources[var] = defaults.get(var), "default"
+        # A dial the machine cannot run is not in the space, so the loop above never sees it; record the
+        # renderer default so every video still has a row saying why.
+        for var in unavailable:
+            if var not in values:
+                values[var], sources[var] = defaults.get(var), "guideline_fallback"
         content = {
             "niche": idea.get("content_family"),
             "angle": idea.get("angle"),
@@ -424,7 +433,7 @@ class SettingsEngine:
                 values[var], sources[var] = val, "ai"
         now = now_iso()
         for var, val in values.items():
-            if val is None and var not in self.catalog:
+            if val is None and var not in self.catalog and sources[var] != "guideline_fallback":
                 continue  # a content choice the idea did not make; a dial's None default is recorded
             self.db.execute(
                 "INSERT OR REPLACE INTO video_settings (video_id, variable, value, source, created_at) VALUES (?,?,?,?,?)",
