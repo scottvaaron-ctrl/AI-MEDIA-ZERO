@@ -121,3 +121,74 @@ def test_manual_metrics_feed_learning(svc, orch, ffmpeg_available: bool) -> None
     assert orch.analyst.milestone()["measured_videos"] == 1
     report = orch.analyst.review("weekly")
     assert report.exists() and "Which hooks worked" in report.read_text(encoding="utf-8")
+
+
+def test_dry_run_cycle_follows_guideline(svc, ffmpeg_available: bool) -> None:  # noqa: ANN001
+    """Guideline dry run (2026-10-07): the sample guideline drives a whole offline cycle.
+
+    Locked settings are recorded with source 'guideline'; a forced G-caption_max_words experiment
+    (variant 5 against the guideline's 3) gives one control video at 3 and one treatment video at 5.
+    """
+    import json
+
+    from aimz.domain.models import ExperimentProposal
+
+    if not ffmpeg_available:
+        pytest.skip("ffmpeg required for production")
+    sample = Path(__file__).resolve().parent / "fixtures" / "guideline_sample.md"
+    # The fixture LLM writes 80-character titles; the sample's 60-character check would fail nearly every
+    # script, so the temporary copy relaxes that one check. The locked settings stay as the sample has them.
+    text = sample.read_text(encoding="utf-8").replace("title_max_chars: 60", "title_max_chars: 100")
+    assert "title_max_chars: 100" in text
+    (svc.env.config_dir / "guideline.md").write_text(text, encoding="utf-8")
+    fp = FixtureFeedProvider()
+    svc.research = {k: fp for k in fp.kinds}
+    orch = Orchestrator(svc, seed=7)
+    assert orch.experiments.guideline is not None
+
+    # Cycle 1 under the guideline: no experiment yet, so every locked setting comes from the guideline.
+    orch.cycle(produce_limit=1)
+    first = svc.db.query("SELECT id FROM videos")
+    assert first, "the first cycle produced no video"
+    locked = {"caption_max_words": 3, "caption_size": 0.04, "music": "off"}
+    for v in first:
+        rows = {
+            r["variable"]: r
+            for r in svc.db.query("SELECT * FROM video_settings WHERE video_id=?", [v["id"]])
+        }
+        for key, value in locked.items():
+            assert rows[key]["source"] == "guideline", key
+            assert json.loads(rows[key]["value"]) == value, key
+
+    # Force the experiment, then run until a control and a treatment video exist.
+    eid = orch.experiments.propose(
+        ExperimentProposal(
+            name="Caption words 3 vs 5",
+            hypothesis="Longer caption chunks hold attention.",
+            variable="",
+            control="",
+            treatment="",
+            primary_kpi="score",
+            guideline_item="G-caption_max_words",
+            variant="5",
+        )
+    )
+    assert eid is not None
+    exp = svc.db.get("experiments", eid)
+    assert exp["status"] == "running" and exp["variable"] == "G-caption_max_words"
+    assert exp["guideline_version"] == orch.experiments.guideline.version and exp["min_sample"] == 10
+
+    seen: dict[str, tuple[object, str]] = {}
+    for _ in range(6):
+        orch.cycle(stages=["research", "ideas", "select", "write", "produce"], produce_limit=2)
+        for r in svc.db.query(
+            "SELECT i.experiment_arm arm, vs.value, vs.source FROM videos v "
+            "JOIN ideas i ON i.id=v.idea_id JOIN video_settings vs ON vs.video_id=v.id "
+            "WHERE i.experiment_id=? AND vs.variable='caption_max_words'",
+            [eid],
+        ):
+            seen[r["arm"]] = (json.loads(r["value"]), r["source"])
+        if {"control", "treatment"} <= set(seen):
+            break
+    assert seen.get("control") == (3, "guideline"), seen
+    assert seen.get("treatment") == (5, "experiment"), seen

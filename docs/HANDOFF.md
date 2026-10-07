@@ -210,6 +210,14 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
 - `docs/DRY_RUN.md` documents 4B-vs-8B model calibration; re-run one cycle after any prompt
   change and check `aimz analytics` before committing.
 
+## 8a. Guideline system (2026-10-07)
+
+Each channel can follow an owner-approved guideline (`config/guideline.md`) and test one change at a time; a
+winning change becomes a proposal the owner approves (`python -m aimz guideline proposals|approve|reject`).
+Where it lives, how experiments and proposals work, and the build rulings are in `docs/PLAN_GUIDELINE.md`.
+Parts 2 (production abilities) and 3 (the Backhouse Explainers guideline text) are not started. A channel with
+no guideline file behaves as before.
+
 ## 9. Commands the next agent will use
 
 ```powershell

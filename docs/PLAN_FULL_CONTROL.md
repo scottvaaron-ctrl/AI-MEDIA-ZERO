@@ -1,3 +1,5 @@
+> Superseded on 2026-10-07 by docs/PLAN_GUIDELINE.md (owner rescope).
+
 # Plan: full AI control, faster learning, 3–4 channels
 
 _Approved by the owner 2026-09-30 (option "B+D"). This is the working plan for every stage. Any agent

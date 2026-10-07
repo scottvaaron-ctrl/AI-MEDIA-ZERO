@@ -100,4 +100,9 @@ def test_a_story_another_channel_used_is_not_offered_again(svc) -> None:  # noqa
 def test_the_strategist_prompt_offers_the_owners_starting_genres(svc) -> None:  # noqa: ANN001
     text = identity.prompt_text(svc.db, "main", ["space and astronomy explainers", "silent-film era stories"])
     assert "no identity yet" in text and "silent-film era stories" in text
-    assert svc.config.get("channels.starting_genres")  # the owner's guidance ships in config.yaml
+    # starting_genres moved into the guideline (2026-10-07): config.yaml no longer ships a list, and an
+    # empty list still gives a working prompt.
+    assert not svc.config.get("channels.starting_genres", [])
+    assert "Starting options from the owner (take one, adapt it, or name your own): none" in identity.prompt_text(
+        svc.db, "main", []
+    )

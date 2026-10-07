@@ -68,21 +68,9 @@ experiments:
   # Videos published before an item that was inconclusive or rejected may be tested again.
   cooldown_videos: 20
 
-# Owner guidance, 2026-10-01: each channel is distinct in genre, voice and look, and the AI may experiment
-# with all three (aimz/identity.py). These are starting options to get it going, not instructions: a
-# channel's strategist may take one, adapt it, or name its own. Every option here can be made with media
-# the pipeline may legally use (public domain, Creative Commons, NASA/US-government works, free stock once
-# enabled, generated charts and cards). Owner-edited; agents do not change this list.
-channels:
-  starting_genres:
-    - "space and astronomy explainers (NASA imagery is public domain)"
-    - "silent-film era stories: plots and behind-the-scenes of public-domain films made before 1930"
-    - "history mysteries and unsolved cases from archival records"
-    - "how everyday inventions were made, and who made them"
-    - "strange-but-true nature and animal science"
-    - "maps and geography oddities (borders, enclaves, lost places)"
-    - "business rises and collapses told through the numbers"
-    - "science myths checked against the evidence"
+# `channels.starting_genres` was removed on 2026-10-07: the genre a channel makes now lives in the owner-approved
+# guideline (config/guideline.md, docs/PLAN_GUIDELINE.md). Without a guideline the strategist is offered no
+# starting genres and chooses one itself (aimz/identity.py).
 
 content:
   short_form:

@@ -226,7 +226,7 @@ For each new channel (about 5 minutes each):
    ```
 
 On its first runs each channel's AI chooses a genre, voice and look that differ from the other
-channels' (owner guidance: `channels.starting_genres` in `config/config.yaml`). To disconnect a channel
+channels' (until a channel has a guideline; see `docs/PLAN_GUIDELINE.md`). To disconnect a channel
 and delete its YouTube data: `python -m aimz --instance space youtube revoke`.
 
 Every channel reads the main `config/config.yaml` (posting limits, score weights, the stock-media switch):

@@ -8,8 +8,9 @@ whole), and wants the AI to be able to experiment with all three. So:
   has published ``GENRE_DWELL_VIDEOS`` videos under the current genre, so a channel stays recognisable
   long enough for its results to mean something.
 * No two channels may hold the same genre, the same voice, or the same look (template + colour).
-* Until a channel has an identity, the strategist is shown ``channels.starting_genres`` from config.yaml:
-  the owner's starting guidance. The AI may take one, adapt it, or name its own.
+* Until a channel has an identity, the strategist is offered ``starting_genres`` if the caller has any (the
+  config key was removed on 2026-10-07: the genre now lives in the channel guideline). With none, the AI
+  names its own.
 * The identity's voice and look are used for every video (``ProducerAgent``); its genre steers ideation.
 """
 
