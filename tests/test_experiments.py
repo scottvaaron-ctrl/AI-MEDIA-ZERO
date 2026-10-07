@@ -325,7 +325,7 @@ def _run_eval(svc: Any, control: list[float], treatment: list[float]) -> dict[st
 
 def test_variant_wins_at_95_with_10(svc) -> None:  # noqa: ANN001
     res = _run_eval(svc, LOW, HIGH)
-    assert res["status"] == "variant_won" and res["p_treatment_better"] >= 0.95
+    assert res["status"] == "variant_won" and res["p_treatment_better"] >= 0.90
     assert svc.db.scalar("SELECT concluded_at FROM experiments") is not None
 
 
@@ -562,24 +562,44 @@ def test_ideation_writes_half_the_batch_per_topic_arm(svc, monkeypatch) -> None:
 # -- review fixes ------------------------------------------------------------------------
 
 
-def test_guideline_bar_is_095_not_legacy_085(svc) -> None:  # noqa: ANN001
+def test_guideline_bar_is_090_not_legacy_085(svc) -> None:  # noqa: ANN001
     eng = _geng(svc)
     assert eng.min_confidence == 0.85  # the legacy setting the review found leaking into the guideline path
     eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
     assert eid
     exp = dict(svc.db.get("experiments", eid))
     res = eng.evaluate(exp, _grows(eid, LOW, [v + 1 for v in LOW]))
-    assert 0.85 < res["p_treatment_better"] < 0.95
+    assert 0.85 < res["p_treatment_better"] < 0.90
     assert res["status"] == "running"
 
 
-def test_guideline_low_p_between_005_and_015_stays_running(svc) -> None:  # noqa: ANN001
+def test_guideline_variant_wins_between_090_and_095(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    exp = dict(svc.db.get("experiments", eid))
+    res = eng.evaluate(exp, _grows(eid, LOW, [v + 1.2 for v in LOW]))
+    assert 0.90 <= res["p_treatment_better"] < 0.95
+    assert res["status"] == "variant_won"
+
+
+def test_guideline_wins_between_005_and_010(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    exp = dict(svc.db.get("experiments", eid))
+    res = eng.evaluate(exp, _grows(eid, LOW, [v - 1.2 for v in LOW]))
+    assert 0.05 < res["p_treatment_better"] <= 0.10
+    assert res["status"] == "concluded" and res["conclusion"].startswith("Guideline won")
+
+
+def test_guideline_low_p_between_010_and_015_stays_running(svc) -> None:  # noqa: ANN001
     eng = _geng(svc)
     eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
     assert eid
     exp = dict(svc.db.get("experiments", eid))
     res = eng.evaluate(exp, _grows(eid, LOW, [v - 1 for v in LOW]))
-    assert 0.05 < res["p_treatment_better"] < 0.15
+    assert 0.10 < res["p_treatment_better"] < 0.15
     assert res["status"] == "running" and not res["conclusion"]
 
 

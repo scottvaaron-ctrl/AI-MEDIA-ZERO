@@ -21,8 +21,8 @@ A second new module, `aimz/guideline_proposals.py`, turns winning experiments in
 - Scope is the `main` instance only (Backhouse Explainers). The owner's Breakdown and Monmouth County & Politics channels are out of scope.
 - A channel without `guideline.md` behaves exactly as it does today. Every new code path is a no-op when `guideline.load(...)` returns `None`.
 - The AI never writes `guideline.md`. Only the owner's direct edits and `guideline approve` change it.
-- Proposal bar: P(variant better) ≥ **0.95** and n ≥ **10** scored videos per arm.
-- Guideline wins at P ≤ 0.05 with n ≥ 10. Safety stop at P ≤ 0.05 with n ≥ **6**. Inconclusive at n ≥ **30** per arm.
+- Proposal bar: P(variant better) ≥ **0.90** and n ≥ **10** scored videos per arm. (Built at 0.95; the owner lowered it to 0.90 on 2026-10-07.)
+- Guideline wins at P ≤ 0.10 with n ≥ 10. Safety stop at P ≤ 0.10 with n ≥ **6**. Inconclusive at n ≥ **30** per arm.
 - One running experiment per channel. An item is blocked for **20** published videos after an inconclusive result or a rejected proposal.
 - A pending proposal is flagged overdue after **14** days.
 - Metric: the composite score from `analytics/store.py` (one sample per video, at the 72 h rule). Mean `avg_percent_viewed` per arm is reported alongside it.

@@ -26,7 +26,7 @@ Owner decisions made during the design:
 | D4 | How do channels stay distinct? | One full guideline per channel |
 | D5 | What is "better" measured on? | The composite score (average % viewed is already its largest part, weight 0.35), with average % viewed shown alongside |
 | D6 | Approach | A: hard values plus a written playbook, with locked settings and craft rules |
-| D7 | Bar for proposing a change | ≥95% confidence and ≥10 scored videos per arm |
+| D7 | Bar for proposing a change | ≥90% confidence and ≥10 scored videos per arm (owner lowered it from 95% on 2026-10-07, after the build) |
 | D8 | Constitution wording | The agent drafts it; after owner approval the agent edits `config/constitution.md` directly |
 
 The rescope has three parts, built in this order:
@@ -168,13 +168,13 @@ The channel identity (genre, voice, look) is now part of each guideline. `identi
 
   | Outcome | When | What happens |
   |---|---|---|
-  | **Variant wins** | P(variant better) ≥ 0.95 and n ≥ 10 per arm | Proposal (section 4); the experiment closes |
-  | **Guideline wins** | P(variant better) ≤ 0.05 and n ≥ 10 per arm | Closes; logged in `strategy.md` |
-  | **Safety stop** | P ≤ 0.05 and n ≥ 6 per arm | Closes early |
+  | **Variant wins** | P(variant better) ≥ 0.90 and n ≥ 10 per arm | Proposal (section 4); the experiment closes |
+  | **Guideline wins** | P(variant better) ≤ 0.10 and n ≥ 10 per arm | Closes; logged in `strategy.md` |
+  | **Safety stop** | P ≤ 0.10 and n ≥ 6 per arm | Closes early |
   | **Inconclusive** | n ≥ 30 per arm with no decision | Closes |
 
 - Each result reports the mean composite and mean average % viewed for each arm.
-- Config: `experiments.min_sample=10`, `experiments.min_confidence=0.95`, `experiments.safety_min_sample=6`, `experiments.max_sample=30`.
+- Config: `experiments.min_sample=10`, `experiments.min_confidence=0.90`, `experiments.safety_min_sample=6`, `experiments.max_sample=30`.
 
 ## 4. Proposals and owner approval
 
@@ -253,7 +253,7 @@ The channel identity (genre, voice, look) is now part of each guideline. `identi
 - refusal of `setting_changes` on covered settings;
 - proposal validation: unknown item, out of bounds, concurrent, cooldown;
 - arm alternation, and craft-variant prompt substitution;
-- the evaluation outcomes: win, loss, safety stop, inconclusive, and the boundaries 0.95 / 10 / 6 / 30;
+- the evaluation outcomes: win, loss, safety stop, inconclusive, and the boundaries 0.90 / 10 / 6 / 30;
 - approve/reject versioning and the cooldown;
 - the summary number check;
 - `broken_rules` → required revision;

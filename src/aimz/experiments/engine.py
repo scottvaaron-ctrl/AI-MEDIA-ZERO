@@ -131,7 +131,8 @@ DEAD_IDEA_STATUSES = ("rejected", "killed")
 # With a channel guideline (spec 2026-10-07 section 3): one experiment per channel on one guideline item.
 GUIDELINE_MIN_SAMPLE = 10
 # The guideline bar is fixed, not the legacy experiments.min_confidence (controller ruling R7).
-GUIDELINE_MIN_CONFIDENCE = 0.95
+# Owner decision 2026-10-07: 90% (lowered from 95%).
+GUIDELINE_MIN_CONFIDENCE = 0.90
 # A variant whose text asks for any of these contradicts the constitution (sourced facts only, no
 # deception). A phrase screen matched on whole words, so "inventions" or "debunk fake claims" pass; the
 # critic's policy checks still run on every script.

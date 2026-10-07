@@ -61,7 +61,7 @@ experiments:
   # Confidence required to conclude an experiment.
   min_confidence: 0.85
   # With a guideline (spec 2026-10-07 section 3) the engine fixes one experiment per channel, a win at
-  # P>=0.95 with n>=10 per arm (GUIDELINE_MIN_CONFIDENCE / GUIDELINE_MIN_SAMPLE), and these:
+  # P>=0.90 with n>=10 per arm (GUIDELINE_MIN_CONFIDENCE / GUIDELINE_MIN_SAMPLE), and these:
   # a clearly worse variant is stopped at n>=safety_min_sample, n>=max_sample without a decision is inconclusive.
   safety_min_sample: 6
   max_sample: 30

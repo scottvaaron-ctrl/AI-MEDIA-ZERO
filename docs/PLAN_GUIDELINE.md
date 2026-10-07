@@ -83,8 +83,8 @@ and the attention list show "N guideline change(s) waiting"; a proposal waiting 
   replaces that single rule in the script and critic prompts for that idea. A topic-stage item is split at
   ideation time.
 * The measure is the composite score; average % viewed is reported beside it.
-* Outcomes: the variant wins at 95% confidence and 10 videos per arm (a proposal is written); the guideline
-  wins at 95% (closed, logged); safety stop at 95% against the variant with 6 per arm; inconclusive at 30 per arm.
+* Outcomes: the variant wins at 90% confidence and 10 videos per arm (a proposal is written); the guideline
+  wins at 90% (closed, logged); safety stop at 90% against the variant with 6 per arm; inconclusive at 30 per arm.
 * A proposal's plain-English summary is checked by code: every number must match the evidence, else a template
   built from the evidence replaces it.
 * While a proposal is pending, videos follow the current guideline, and an item can have only one pending proposal.
@@ -148,7 +148,7 @@ guideline or the constitution.
 * **R6.** Under a guideline, a `G-runtime` experiment's treatment value bypasses the guideline runtime clamp in the
   script agent and the critic for treatment-arm ideas.
 * **R7.** The legacy experiment keys in `config.yaml` stay at 8 / 2 / 0.85 so "no guideline = unchanged" holds. The
-  guideline path uses engine constants `GUIDELINE_MIN_SAMPLE = 10`, `GUIDELINE_MIN_CONFIDENCE = 0.95` and one
+  guideline path uses engine constants `GUIDELINE_MIN_SAMPLE = 10`, `GUIDELINE_MIN_CONFIDENCE = 0.90` (owner lowered it from 0.95 on 2026-10-07) and one
   experiment per channel. The new keys `safety_min_sample`, `max_sample`, `cooldown_videos` are in config.
 * **R8.** Approving a `G-runtime` proposal sets `runtime_s` to round(0.6N) to round(1.4N), clamped to 10-180.
 * **R9.** Settings the guideline does not lock stay the AI's to open.
