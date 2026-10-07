@@ -259,7 +259,21 @@ class ExperimentEngine:
         left = self.cooldown_left(item)
         if left > 0:
             return f"{item} is cooling down for {left} more videos"
+        if self.has_pending_proposal(item):
+            # While the owner decides, the channel may test a different item (spec section 4).
+            return f"{item} has a change proposal waiting for the owner"
         return None
+
+    def has_pending_proposal(self, item: str) -> bool:
+        """True when ``item`` has a guideline change proposal waiting for the owner."""
+        # The proposals table is written by the approval flow; tolerate a database without it.
+        with contextlib.suppress(sqlite3.OperationalError):
+            return bool(
+                self.db.scalar(
+                    "SELECT 1 FROM guideline_proposals WHERE item=? AND status='pending' LIMIT 1", [item]
+                )
+            )
+        return False
 
     def cooldown_left(self, item: str) -> int:
         """Videos still to publish before ``item`` may be tested again.

@@ -274,6 +274,33 @@ def test_validate_constitution_screen(svc) -> None:  # noqa: ANN001
         assert eng.validate(_gp("G-hook", bad)) == "variant contradicts the constitution"
 
 
+def test_validate_refuses_item_with_pending_proposal(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    svc.db.insert(
+        "guideline_proposals",
+        {
+            "id": "gp_pending",
+            "experiment_id": "exp_old",
+            "item": "G-hook",
+            "before": "The first sentence states the most surprising fact. No greetings.",
+            "after": "Open on a question.",
+            "evidence_json": "{}",
+            "summary": "s",
+            "status": "pending",
+            "created_at": now_iso(),
+        },
+    )
+    assert eng.validate(_gp("G-hook", "Open on a number.")) == (
+        "G-hook has a change proposal waiting for the owner"
+    )
+    assert eng.propose(_gp("G-hook", "Open on a number.")) is None
+    # A different item may be tested while the owner decides.
+    assert eng.validate(_gp("G-title", "Name the year in the title.")) is None
+    # Once decided, the item is no longer held by a pending proposal.
+    svc.db.update("guideline_proposals", "gp_pending", {"status": "approved", "decided_at": now_iso()})
+    assert eng.validate(_gp("G-hook", "Open on a number.")) is None
+
+
 def test_guideline_proposal_stored_values(svc) -> None:  # noqa: ANN001
     eng = _geng(svc)
     eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))

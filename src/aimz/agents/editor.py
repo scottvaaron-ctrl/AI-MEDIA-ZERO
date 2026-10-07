@@ -12,7 +12,6 @@ import contextlib
 import random
 from typing import Any
 
-from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import SelectionDecision, SelectionDecisionWithBreaks
@@ -80,7 +79,7 @@ class EditorInChief(Agent):
         # being made or measured counts as already being tried. Otherwise the least-sampled family, with one
         # stale idea the editor keeps turning down, won the explore slot every cycle and nothing was made.
         available = {str(c["content_family"]) for c in cands if c.get("content_family")}
-        g = guideline.for_services(self.svc)
+        g = self.experiments.guideline  # loaded once per process, with the engine
         if g is not None:
             # The explore share is 0 under a guideline: every slot follows it, and the one experiment's
             # arms ride on these slots (spec 2026-10-07 section 3).
@@ -224,7 +223,7 @@ class EditorInChief(Agent):
                     f"{tested_rule}: {texp['treatment']}"
                 )
             lines.append(line)
-        g = guideline.for_services(self.svc)
+        g = self.experiments.guideline  # loaded once per process, with the engine
         topic_rules = g.rules_for("topic") if g else []
         gtext = self.guideline_text(("topic",), g=g)
         if gtext:

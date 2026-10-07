@@ -259,7 +259,45 @@ def test_enrich_records_status_and_failure_is_not_a_run_error(
 # -- AI creative control (owner decision 2026-09-23) ------------------------------------
 
 
-def test_editor_can_explore_families_the_ai_invented(svc) -> None:  # noqa: ANN001
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any socket connection, so a test that reaches the network fails instead of passing slowly."""
+    import socket
+
+    def refuse(*a: Any, **kw: Any) -> None:
+        raise AssertionError("test tried to use the network")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+
+
+def seed_source_items(svc: Any, orch: Any, n: int = 8) -> None:
+    """Offline stand-in for ``research.run``: new source items spread over the configured feeds."""
+    from aimz.util import new_id, now_iso, sha256_text
+
+    orch.research.sync_sources()
+    sources = [r["id"] for r in svc.db.query("SELECT id FROM sources WHERE enabled=1 ORDER BY id")]
+    assert sources
+    for i in range(n):
+        url = f"https://example.org/story-{i}"
+        svc.db.insert(
+            "source_items",
+            {
+                "id": new_id("src"),  # the fixture model reads lead ids of this form
+                "source_id": sources[i % len(sources)],
+                "url": url,
+                "url_hash": sha256_text(url),
+                "dedupe_key": f"seed{i}",
+                "title": f"The forgotten moon discovered in 189{i}",
+                "summary": "Astronomers found a small moon hiding in plain sight near Jupiter.",
+                "ingested_at": now_iso(),
+                "freshness_score": 0.8,
+                "credibility": 0.8,
+                "status": "new",
+            },
+        )
+
+
+def test_editor_can_explore_families_the_ai_invented(svc, monkeypatch) -> None:  # noqa: ANN001
     """With no human starting families, a family named during ideation must still get selected."""
     import random
 
@@ -267,10 +305,11 @@ def test_editor_can_explore_families_the_ai_invented(svc) -> None:  # noqa: ANN0
     from aimz.experiments.engine import ExperimentEngine
     from aimz.pipeline.orchestrator import Orchestrator
 
+    no_network(monkeypatch)
     orch = Orchestrator(svc, seed=3)
     assert orch.strategy.current()["families"] == {}
+    seed_source_items(svc, orch)
     with svc.tracker.run("cycle") as run:
-        orch.research.run(run)
         orch.ideation.run(run, orch.strategy.current())
         editor = EditorInChief(svc, orch.strategy, ExperimentEngine(svc.db), random.Random(3))
         chosen = editor.select(run, orch.strategy.current(), [])
@@ -318,12 +357,37 @@ def _guideline_on(svc: Any) -> None:
 
 def test_strategist_prompt_has_guideline_not_identity(svc) -> None:  # noqa: ANN001
     from aimz import guideline_proposals as gp
+    from aimz.util import now_iso
 
     _guideline_on(svc)
     svc.db.set_state(
         gp.REJECTED_KEY, "G-title: variant 'x' was rejected by the owner. Owner's note: too vague"
     )
+    for pid, item, status, note in (
+        ("gp_rej", "G-title", "rejected", "titles must stay calm"),
+        ("gp_wait", "G-hook", "pending", None),
+    ):
+        svc.db.insert(
+            "guideline_proposals",
+            {
+                "id": pid,
+                "experiment_id": f"exp_{pid}",
+                "item": item,
+                "before": "old",
+                "after": f"new {item}",
+                "evidence_json": "{}",
+                "summary": "s",
+                "status": status,
+                "owner_note": note,
+                "created_at": now_iso(),
+                "decided_at": now_iso() if status == "rejected" else None,
+            },
+        )
     _orch, prompt = _learn_prompt(svc)
+    # A rejected item cools down for 20 published videos; none are published here.
+    assert "Cooling down (cannot be tested yet): G-title: 20 more videos" in prompt
+    assert "Proposals waiting for the owner" in prompt and "gp_wait G-hook -> 'new G-hook'" in prompt
+    assert "G-title -> 'new G-title'; owner's note: titles must stay calm" in prompt
     assert "guideline_item" in prompt
     assert "The first sentence states the most surprising fact. No greetings." in prompt  # G-hook
     assert "G-caption_max_words" in prompt and "G-runtime" in prompt

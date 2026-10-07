@@ -55,16 +55,18 @@ def test_learn_with_guideline_sets_explore_share_zero(svc) -> None:  # noqa: ANN
     assert "Exploration ratio: replaced by the guideline (one experiment at a time)" in md
 
 
-def test_editor_has_no_explore_slots_with_guideline(svc) -> None:  # noqa: ANN001
-    from tests.test_learning_inputs import _guideline_on
+def test_editor_has_no_explore_slots_with_guideline(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_learning_inputs import _guideline_on, no_network
+    from tests.test_reliability import _idea
 
     from aimz.pipeline.orchestrator import Orchestrator
 
+    no_network(monkeypatch)
     _guideline_on(svc)
     orch = Orchestrator(svc, seed=3)
+    for fam in ("forgotten_history", "space", "forgotten_history", "inventions"):
+        _idea(svc, family=fam)
     with svc.tracker.run("cycle") as run:
-        orch.research.run(run)
-        orch.ideation.run(run, orch.strategy.current())
         chosen = orch.editor.select(run, orch.strategy.current(), [])
     assert chosen
     modes = {svc.db.get("ideas", i)["allocation_mode"] for i in chosen}
