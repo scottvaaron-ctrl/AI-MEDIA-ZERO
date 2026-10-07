@@ -1,6 +1,8 @@
 # Design: owner guideline per channel, one experiment at a time (part 1 of the 2026-10-07 rescope)
 
-_Status: designed with the owner on 2026-10-07; each section approved in chat. This spec covers part 1._
+_Status: the owner approved the written spec on 2026-10-07. This spec covers part 1._
+
+**Scope:** the `main` instance only, which is the **Backhouse Explainers** YouTube channel that aimz uploads to. The owner's other YouTube projects (Breakdown, and the Monmouth County & Politics channel) are separate and owner-run. They are not aimz instances, and nothing in this work touches them.
 
 ## 0. Context and decision
 
