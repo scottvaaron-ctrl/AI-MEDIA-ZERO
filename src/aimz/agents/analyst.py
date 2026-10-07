@@ -246,9 +246,26 @@ class AnalystAgent(Agent):
             "errors_7d": errors,
         }
 
+    def propose_guideline_changes(self, exp_results: list[dict[str, Any]], ai_summary: str) -> list[str]:
+        """A pending owner proposal for each guideline experiment whose variant won; returns their ids.
+
+        An empty or unverifiable ``ai_summary`` is replaced by the evidence template.
+        """
+        from aimz import guideline_proposals
+
+        ids = []
+        for r in exp_results:
+            if r.get("status") != "variant_won":
+                continue
+            exp = self.svc.db.get("experiments", r["id"])
+            if exp is not None:
+                ids.append(guideline_proposals.create_from_experiment(self.svc.db, dict(exp), r, ai_summary))
+        return ids
+
     def learn(self, run: RunContext, strategy_state: dict[str, Any]) -> dict[str, Any]:
         perf_rows = self.svc.analytics_store.video_performance()
         exp_results = self.experiments.evaluate_all(perf_rows)
+        self.propose_guideline_changes(exp_results, "")
         ev = self.evidence(perf_rows, strategy_state)
         instance = self.svc.env.instance
         settings_text = self.settings.evidence_text(

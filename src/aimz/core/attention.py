@@ -77,4 +77,8 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
                 "fix": "python -m aimz youtube auth",
             }
         ]
+    # Local import: guideline_proposals imports the experiment settings, which this module does not need.
+    from aimz.guideline_proposals import attention_entries
+
+    out.update(attention_entries(db))
     return {k: v for k, v in out.items() if v}

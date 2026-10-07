@@ -11,7 +11,7 @@
   <span class="brand">{{ title }}</span>
   <nav>
     <a href="/">Status</a><a href="/feeds">Feeds</a><a href="/ideas">Ideas</a><a href="/scripts">Scripts</a><a href="/videos">Videos</a>
-    <a href="/publishing">Publishing</a><a href="/metrics">Metrics</a><a href="/experiments">Experiments</a><a href="/strategy">Strategy</a><a href="/runs">Runs</a><a href="/controls">Controls</a>
+    <a href="/publishing">Publishing</a><a href="/metrics">Metrics</a><a href="/experiments">Experiments</a><a href="/strategy">Strategy</a><a href="/guideline">Guideline</a><a href="/runs">Runs</a><a href="/controls">Controls</a>
   </nav>
   <span class="badge {{ 'bad' if kill.engaged else 'ok' }}">{{ 'KILL SWITCH ENGAGED' if kill.engaged else 'kill switch off' }}</span>
   <span class="badge">budget ${{ '%.2f'|format(budget.budget_usd) }} · spent ${{ '%.4f'|format(budget.spent_usd) }} · denied {{ budget.denied_count }}</span>

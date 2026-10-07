@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+{% if error %}<div class="card"><b>Not done:</b> {{ error }}</div>{% endif %}
+<div class="grid">
+  <div class="card">
+    <h3>Proposed changes waiting for you ({{ proposals|length }})</h3>
+    {% if not proposals %}<p class="muted">None. A change is proposed only when a tested variant beats the guideline.</p>{% endif %}
+    {% for p in proposals %}
+    <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+      <p><b>{{ p.item }}</b> <span class="muted">{{ p.id }} · since {{ p.created_at[:10] }}</span></p>
+      <p>{{ p.summary }}</p>
+      <table>
+        <tr><td>Now</td><td>{{ p.before }}</td></tr>
+        <tr><td>Proposed</td><td>{{ p.after }}</td></tr>
+      </table>
+      <table>
+        <tr><th></th><th>videos</th><th>mean score</th><th>average % viewed</th></tr>
+        {% for arm, label in [('control', 'guideline'), ('treatment', 'variant')] %}
+        {% set a = p.evidence.get(arm, {}) %}
+        <tr><td>{{ label }}</td><td>{{ a.get('n') }}</td><td>{{ a.get('mean') }}</td><td>{{ a.get('mean_avg_percent_viewed') if a.get('mean_avg_percent_viewed') is not none else 'n/a' }}</td></tr>
+        {% endfor %}
+      </table>
+      <p class="muted">Probability the variant is better: {{ p.evidence.get('p_treatment_better') }} (correlational)</p>
+      <form class="inline" method="post" action="/guideline/proposals/{{ p.id }}/approve">
+        <button type="submit">Approve</button>
+      </form>
+      <form class="inline" method="post" action="/guideline/proposals/{{ p.id }}/reject">
+        <input name="note" placeholder="why (the strategist reads this)">
+        <button class="danger" type="submit">Reject</button>
+      </form>
+    </div>
+    {% endfor %}
+    <h3 style="margin-top:14px">Version history</h3>
+    <table>{% for v in versions %}<tr><td>v{{ v.version }}</td><td>{{ v.source }}</td><td>{{ v.reason or '' }}</td><td class="muted">{{ v.created_at }}</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Current guideline{% if g %} (v{{ g.version }}){% endif %}</h3>
+    {% if file_error %}<p><b>The file on disk is invalid and is not used:</b> {{ file_error }}</p>{% endif %}
+    {% if g %}<pre style="white-space:pre-wrap">{{ g.content }}</pre>{% else %}<p class="muted">No guideline. Write one at config/guideline.md.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

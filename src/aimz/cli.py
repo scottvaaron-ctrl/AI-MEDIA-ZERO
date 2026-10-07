@@ -27,6 +27,10 @@ bluesky_app = typer.Typer(help="Owner-only Bluesky account helpers.", no_args_is
 schedule_app = typer.Typer(help="Run the cycle automatically (Windows Task Scheduler).", no_args_is_help=True)
 strategy_app = typer.Typer(help="Inspect or edit strategy memory.", no_args_is_help=True)
 instance_app = typer.Typer(help="Several channels: one instance per channel.", no_args_is_help=True)
+guideline_app = typer.Typer(
+    help="The channel guideline: show it, its versions, and approve or reject proposed changes.",
+    no_args_is_help=True,
+)
 app.add_typer(metric_app, name="metric")
 app.add_typer(publish_app, name="publish")
 app.add_typer(youtube_app, name="youtube")
@@ -35,6 +39,7 @@ app.add_typer(bluesky_app, name="bluesky")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(strategy_app, name="strategy")
 app.add_typer(instance_app, name="instance")
+app.add_typer(guideline_app, name="guideline")
 console = Console()
 
 
@@ -534,6 +539,109 @@ def strategy_edit(
         state = json.loads(file.read_text(encoding="utf-8"))
         v = _orch(svc).strategy.save(state, created_by="owner", change_summary=f"owner edit from {file.name}")
         console.print(f"[green]saved strategy v{v}[/]")
+    finally:
+        svc.close()
+
+
+@guideline_app.command("show")
+def guideline_show() -> None:
+    """Print the active guideline text and its version."""
+    from aimz import guideline
+
+    svc = _svc(quiet=True)
+    try:
+        g = guideline.for_services(svc)
+        if g is None:
+            console.print(f"(no guideline; write one at {guideline.path(svc.env.config_dir)})")
+            return
+        console.print(f"guideline v{g.version}", markup=False)
+        console.print(g.content, markup=False, highlight=False)
+        err = svc.db.get_state(guideline.ERROR_KEY)
+        if err:
+            console.print(f"[red]the file on disk is invalid and is not used:[/] {err}")
+    finally:
+        svc.close()
+
+
+@guideline_app.command("history")
+def guideline_history() -> None:
+    """List stored guideline versions."""
+    svc = _svc(quiet=True)
+    try:
+        # Plain lines, not a table: a proposal id in the source column must never be cut short.
+        rows = svc.db.query("SELECT * FROM guideline_versions ORDER BY version DESC")
+        if not rows:
+            console.print("no guideline versions yet")
+        for r in rows:
+            console.print(
+                f"v{r['version']}  {r['created_at'][:19]}  {r['source']}  {r['reason'] or ''}",
+                markup=False,
+                highlight=False,
+                soft_wrap=True,
+            )
+    finally:
+        svc.close()
+
+
+@guideline_app.command("proposals")
+def guideline_proposals_cmd() -> None:
+    """List pending guideline change proposals with their evidence summary."""
+    from aimz import guideline_proposals as gp
+
+    svc = _svc(quiet=True)
+    try:
+        rows = gp.pending(svc.db)
+        if not rows:
+            console.print("no pending guideline proposals")
+            return
+        for r in rows:
+            console.print(f"[bold]{r['id']}[/]  {r['item']}  (since {r['created_at'][:10]})")
+            console.print(f"  before: {r['before']}", markup=False, highlight=False)
+            console.print(f"  after:  {r['after']}", markup=False, highlight=False)
+            console.print(f"  {r['summary']}", markup=False, highlight=False)
+            console.print(
+                f"  approve: python -m aimz guideline approve {r['id']}\n"
+                f'  reject:  python -m aimz guideline reject {r["id"]} --note "..."',
+                markup=False,
+                highlight=False,
+            )
+    finally:
+        svc.close()
+
+
+@guideline_app.command("approve")
+def guideline_approve(proposal_id: str) -> None:
+    """Approve a proposal: rewrite that item in guideline.md and save a new version."""
+    from aimz import guideline_proposals as gp
+
+    svc = _svc(quiet=True)
+    try:
+        try:
+            v = gp.approve(svc.db, svc.env.config_dir, proposal_id)
+        except ValueError as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(1) from e
+        console.print(f"[green]approved[/] {proposal_id}: guideline v{v}")
+    finally:
+        svc.close()
+
+
+@guideline_app.command("reject")
+def guideline_reject(
+    proposal_id: str,
+    note: Annotated[str, typer.Option("--note", help="Why; the strategist reads it")] = "",
+) -> None:
+    """Reject a proposal: the guideline stays; the item is blocked for the cooldown."""
+    from aimz import guideline_proposals as gp
+
+    svc = _svc(quiet=True)
+    try:
+        try:
+            gp.reject(svc.db, proposal_id, note)
+        except ValueError as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(1) from e
+        console.print(f"[yellow]rejected[/] {proposal_id}")
     finally:
         svc.close()
 

@@ -10,7 +10,7 @@ import logging
 import random
 from typing import Any
 
-from aimz import guideline
+from aimz import guideline, guideline_proposals
 from aimz.agents.analyst import AnalystAgent
 from aimz.agents.comments import CommentAgent
 from aimz.agents.critic import CriticAgent
@@ -82,6 +82,12 @@ class Orchestrator:
             # Holding the lock means no other cycle is alive, so anything a dead one left half-done is
             # finished or set back before this cycle starts on new work.
             self._safe(run, "recover", lambda: self.recover(run))
+            # An owner edit to the guideline closes running experiments whose item it changed (ruling R2).
+            self._safe(
+                run,
+                "guideline_version",
+                lambda: guideline_proposals.sync_version(self.svc.db, self.experiments),
+            )
             state = self.strategy.current()
             if "research" in stages:
                 self._safe(run, "research", lambda: self.research.run(run))

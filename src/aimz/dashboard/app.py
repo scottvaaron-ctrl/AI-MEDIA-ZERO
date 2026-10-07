@@ -215,6 +215,49 @@ def create_app(svc: Services | None = None) -> FastAPI:
             constitution=read_text(svc.env.constitution_file),
         )
 
+    @app.get("/guideline", response_class=HTMLResponse)
+    def guideline_page(request: Request, error: str = "") -> HTMLResponse:
+        from aimz import guideline
+        from aimz import guideline_proposals as gp
+
+        g = guideline.for_services(svc)
+        proposals = [{**p, "evidence": gp.evidence_of(p)} for p in gp.pending(svc.db)]
+        return render(
+            request,
+            "guideline.html",
+            g=g,
+            file_error=svc.db.get_state(guideline.ERROR_KEY) or "",
+            versions=q(
+                "SELECT version, source, reason, created_at FROM guideline_versions ORDER BY version DESC"
+            ),
+            proposals=proposals,
+            error=error,
+        )
+
+    @app.post("/guideline/proposals/{proposal_id}/approve")
+    def guideline_approve(proposal_id: str) -> RedirectResponse:
+        from urllib.parse import quote
+
+        from aimz import guideline_proposals as gp
+
+        try:
+            gp.approve(svc.db, svc.env.config_dir, proposal_id)
+        except ValueError as e:
+            return RedirectResponse(f"/guideline?error={quote(str(e))}", status_code=303)
+        return RedirectResponse("/guideline", status_code=303)
+
+    @app.post("/guideline/proposals/{proposal_id}/reject")
+    def guideline_reject(proposal_id: str, note: str = Form("")) -> RedirectResponse:
+        from urllib.parse import quote
+
+        from aimz import guideline_proposals as gp
+
+        try:
+            gp.reject(svc.db, proposal_id, note)
+        except ValueError as e:
+            return RedirectResponse(f"/guideline?error={quote(str(e))}", status_code=303)
+        return RedirectResponse("/guideline", status_code=303)
+
     @app.get("/feeds", response_class=HTMLResponse)
     def feeds(request: Request) -> HTMLResponse:
         return render(
