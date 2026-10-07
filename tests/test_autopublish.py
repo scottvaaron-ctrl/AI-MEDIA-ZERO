@@ -233,7 +233,6 @@ def test_poll_pending_promotes_uploading_publications(svc) -> None:  # noqa: ANN
 
 
 def test_unapproved_guideline_blocks_upload(svc, tmp_path: Path) -> None:  # noqa: ANN001
-    from aimz import guideline
     from aimz.core.attention import attention
 
     rec = RecordingPublisher()
