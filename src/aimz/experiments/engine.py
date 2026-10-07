@@ -129,6 +129,8 @@ DEAD_IDEA_STATUSES = ("rejected", "killed")
 
 # With a channel guideline (spec 2026-10-07 section 3): one experiment per channel on one guideline item.
 GUIDELINE_MIN_SAMPLE = 10
+# The guideline bar is fixed, not the legacy experiments.min_confidence (controller ruling R7).
+GUIDELINE_MIN_CONFIDENCE = 0.95
 # A variant whose text asks for any of these contradicts the constitution (sourced facts only, no
 # deception). A keyword screen; the critic's policy checks still run on every script.
 CONSTITUTION_KEYWORDS = ("fabricat", "invent", "no source", "unsourced", "clickbait", "fake")
@@ -214,7 +216,7 @@ class ExperimentEngine:
             control = f"{g.runtime_min}-{g.runtime_max}"
             try:
                 seconds = int(round(float(variant.lower().rstrip("s").strip())))
-            except ValueError:
+            except (ValueError, OverflowError):
                 return control, None, f"variant out of bounds: runtime {variant!r} is not whole seconds"
             if not RUNTIME_LIMIT_MIN <= seconds <= RUNTIME_LIMIT_MAX:
                 return (
@@ -228,7 +230,10 @@ class ExperimentEngine:
             return control, str(seconds), None
         if setting in g.locked:
             control = str(g.locked[setting])
-            norm, why = CATALOG[setting].check(variant)
+            try:
+                norm, why = CATALOG[setting].check(variant)
+            except OverflowError:  # e.g. "inf" for a whole-number setting
+                norm, why = None, f"{setting}: {variant!r} is not a finite number"
             if why:
                 return control, None, f"variant out of bounds: {why}"
             if str(norm) == control:
@@ -592,8 +597,9 @@ class ExperimentEngine:
         min_n = int(experiment["min_sample"])
         kpi = experiment["primary_kpi"]
         n = f"n={a.n}/{b.n}"
-        lose = 1 - self.min_confidence
-        if a.n >= min_n and b.n >= min_n and conf >= self.min_confidence:
+        win = GUIDELINE_MIN_CONFIDENCE
+        lose = 1 - GUIDELINE_MIN_CONFIDENCE
+        if a.n >= min_n and b.n >= min_n and conf >= win:
             return "variant_won", (
                 f"Variant won: '{experiment['treatment']}' beat the guideline on {kpi} (p={conf:.2f}, {n}). "
                 "Correlational; the owner decides."

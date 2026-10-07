@@ -55,12 +55,14 @@ allocation:
   decay_full_sample: 60
 
 experiments:
-  # Guideline spec 2026-10-07 section 3: one experiment per channel; a variant wins at P>=0.95 with
-  # n>=10 per arm, a clearly worse variant is stopped at n>=6, and n>=30 without a decision is inconclusive.
-  default_min_sample_per_arm: 10
-  max_concurrent: 1
+  # These three apply to channels without a guideline (the legacy hook_type/runtime experiments).
+  default_min_sample_per_arm: 8
+  max_concurrent: 2
   # Confidence required to conclude an experiment.
-  min_confidence: 0.95
+  min_confidence: 0.85
+  # With a guideline (spec 2026-10-07 section 3) the engine fixes one experiment per channel, a win at
+  # P>=0.95 with n>=10 per arm (GUIDELINE_MIN_CONFIDENCE / GUIDELINE_MIN_SAMPLE), and these:
+  # a clearly worse variant is stopped at n>=safety_min_sample, n>=max_sample without a decision is inconclusive.
   safety_min_sample: 6
   max_sample: 30
   # Videos published before an item that was inconclusive or rejected may be tested again.

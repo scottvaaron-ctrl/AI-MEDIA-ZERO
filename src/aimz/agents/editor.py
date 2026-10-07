@@ -197,11 +197,24 @@ class EditorInChief(Agent):
         stay candidates. Selecting *nothing* is the editor's verdict that none deserves a video: those
         ideas are marked ``rejected`` so they are not offered again every cycle.
         """
+        # Under a topic-rule experiment, treatment ideas were written under the variant on purpose: they
+        # are judged by the variant text, never rejected for breaking the rule under test.
+        texp = self.experiments.topic_experiment()
+        tested_rule = str(texp["variable"]) if texp else ""
+        variant_ideas = {
+            c["id"]
+            for c in shortlist
+            if texp and c.get("experiment_id") == texp["id"] and c.get("experiment_arm") == "treatment"
+        }
         lines = []
         for c in shortlist:
-            lines.append(
-                f"- {c['id']} | score {c['opportunity_score']} | family {c['content_family']} | hook_type {c['hook_type']} | {c['title']}\n  Premise: {c['premise'][:300]}\n  Hook: {c['hook'][:200]}"
-            )
+            line = f"- {c['id']} | score {c['opportunity_score']} | family {c['content_family']} | hook_type {c['hook_type']} | {c['title']}\n  Premise: {c['premise'][:300]}\n  Hook: {c['hook'][:200]}"
+            if c["id"] in variant_ideas and texp:
+                line += (
+                    f"\n  Written under a test variant of {tested_rule}; judge it by this text instead of "
+                    f"{tested_rule}: {texp['treatment']}"
+                )
+            lines.append(line)
         g = guideline.for_services(self.svc)
         topic_rules = g.rules_for("topic") if g else []
         gtext = self.guideline_text(("topic",), g=g)
@@ -234,6 +247,9 @@ class EditorInChief(Agent):
                 )
             by_id = {c["id"]: c for c in shortlist}
             broken = self._topic_breaks(decision, by_id, {r.id for r in topic_rules})
+            for cid in variant_ideas & set(broken):
+                broken[cid] = [rid for rid in broken[cid] if rid != tested_rule]
+            broken = {k: v for k, v in broken.items() if v}
             turned_down: set[str] = set()
             for cid, ids in broken.items():
                 self.svc.db.update(

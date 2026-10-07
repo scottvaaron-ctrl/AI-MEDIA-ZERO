@@ -160,24 +160,28 @@ class IdeationAgent(Agent):
 
         # Under a topic-rule experiment the batch is written in two halves, one per arm, each labelled.
         topic = self.experiments.topic_experiment() if self.experiments is not None else None
-        sizes = [n_ideas] if topic is None else [(n_ideas + 1) // 2, n_ideas // 2]
+        # (size, arm): the first half takes the arm the engine says is due, the second half the other one,
+        # whatever the first half produced.
+        parts: list[tuple[int, str | None]] = [(n_ideas, None)]
+        if topic is not None:
+            first = self.experiments.topic_arm_for_new_idea()
+            first_arm = first[0] if first is not None else "control"
+            second_arm = "treatment" if first_arm == "control" else "control"
+            parts = [((n_ideas + 1) // 2, first_arm), (n_ideas // 2, second_arm)]
         with self.svc.tracker.agent(run, self.name, "generate", {"leads": [s.id for s in leads]}) as span:
             created: list[str] = []
             seen_titles: set[str] = set()
             used_refs: set[str] = set()
-            for size in sizes:
+            for size, arm in parts:
                 part_leads = [s for s in leads if s.id not in used_refs]
                 if size <= 0 or not part_leads:
                     continue
                 replace: dict[str, str] | None = None
                 label: dict[str, Any] = {}
-                if topic is not None:
-                    arm_text = self.experiments.topic_arm_for_new_idea()
-                    if arm_text is not None:
-                        arm, text = arm_text
-                        label = {"experiment_id": topic["id"], "experiment_arm": arm}
-                        if arm == "treatment":
-                            replace = {str(topic["variable"]): text}
+                if topic is not None and arm is not None:
+                    label = {"experiment_id": topic["id"], "experiment_arm": arm}
+                    if arm == "treatment":
+                        replace = {str(topic["variable"]): str(topic["treatment"])}
                 created += self._generate(
                     run,
                     span,

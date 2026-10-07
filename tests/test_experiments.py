@@ -530,3 +530,106 @@ def test_ideation_writes_half_the_batch_per_topic_arm(svc, monkeypatch) -> None:
     assert arms == ["control", "control", "treatment", "treatment"]
     assert all(svc.db.get("ideas", i)["experiment_id"] == eid for i in created)
     assert "si_0" not in prompts[1].split("Leads:")[1]  # the second half gets the leads the first left
+
+
+# -- review fixes ------------------------------------------------------------------------
+
+
+def test_guideline_bar_is_095_not_legacy_085(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    assert eng.min_confidence == 0.85  # the legacy setting the review found leaking into the guideline path
+    eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    exp = dict(svc.db.get("experiments", eid))
+    res = eng.evaluate(exp, _grows(eid, LOW, [v + 1 for v in LOW]))
+    assert 0.85 < res["p_treatment_better"] < 0.95
+    assert res["status"] == "running"
+
+
+def test_guideline_low_p_between_005_and_015_stays_running(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    eid = eng.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    exp = dict(svc.db.get("experiments", eid))
+    res = eng.evaluate(exp, _grows(eid, LOW, [v - 1 for v in LOW]))
+    assert 0.05 < res["p_treatment_better"] < 0.15
+    assert res["status"] == "running" and not res["conclusion"]
+
+
+def test_non_finite_variant_is_out_of_bounds(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    for item in ("G-runtime", "G-caption_max_words"):
+        why = eng.validate(_gp(item, "inf"))
+        assert why is not None and why.startswith("variant out of bounds"), (item, why)
+
+
+def test_config_keeps_legacy_values_for_channels_without_guideline(svc) -> None:  # noqa: ANN001
+    from tests.test_reliability import _orch
+
+    eng = _orch(svc).experiments
+    assert eng.guideline is None
+    assert (eng.default_min_sample, eng.max_concurrent, eng.min_confidence) == (8, 2, 0.85)
+    assert (eng.safety_min_sample, eng.max_sample, eng.cooldown_videos) == (6, 30, 20)
+
+
+def test_editor_does_not_reject_treatment_idea_for_breaking_tested_rule(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    eid = orch.experiments.propose(_gp("G-topic", "Pick a surprising number and explain it."))
+    t = _idea(svc, family="f", experiment_id=eid, experiment_arm="treatment")
+    c = _idea(svc, family="f", experiment_id=eid, experiment_arm="control")
+    seen: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a: Any, **kw: Any) -> Any:
+        seen.append(user)
+        return schema.model_validate({"selected_idea_ids": [t], "breaks": [f"{t}:G-topic", f"{c}:G-topic"]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    cands = [dict(svc.db.get("ideas", i)) for i in (t, c)]
+    with svc.tracker.run("test") as run:
+        chosen, turned_down = orch.editor._choose(run, orch.strategy.current(), cands, "exploit", "r")
+    assert chosen is not None and chosen["id"] == t
+    assert svc.db.get("ideas", t)["status"] == "candidate"
+    assert svc.db.get("ideas", c)["status"] == "rejected" and c in turned_down
+    assert (
+        "Pick a surprising number and explain it." in seen[0]
+    )  # the variant is shown for the treatment idea
+
+
+def test_ideation_second_half_takes_other_arm_when_first_is_empty(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    eid = orch.experiments.propose(_gp("G-topic", "Pick a surprising number and explain it."))
+    assert eid
+    leads = [
+        SourceItemView(id=f"si_{i}", source_name="s", url=f"https://e.x/{i}", title=f"t{i}") for i in range(2)
+    ]
+    prompts: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a: Any, **kw: Any) -> Any:
+        prompts.append(user)
+        if len(prompts) == 1:
+            return IdeaBatch(ideas=[])
+        idea = {
+            "title": "The only idea here",
+            "premise": "A premise long enough.",
+            "hook": "A hook line.",
+            "hook_type": "narrative",
+            "content_family": "f",
+            "suggested_runtime_s": 30,
+            "source_refs": ["si_0"],
+            "scores": dict.fromkeys(IdeaScores.model_fields, 8),
+        }
+        return IdeaBatch.model_validate({"ideas": [idea]})
+
+    monkeypatch.setattr(orch.ideation, "ask", fake_ask)
+    with svc.tracker.run("test") as run:
+        created = orch.ideation.run(run, orch.strategy.current(), n_ideas=2, leads=leads)
+    assert len(prompts) == 2 and len(created) == 1
+    assert "Pick a single named thing" in prompts[0]
+    assert "Pick a surprising number" in prompts[1]
+    assert svc.db.get("ideas", created[0])["experiment_arm"] == "treatment"
