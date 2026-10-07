@@ -174,12 +174,24 @@ def approve(db: Database, config_dir: Path, proposal_id: str) -> int:
     row = _pending_row(db, proposal_id)
     # A pending owner edit in the file is recorded as its own version first, so it is not filed under
     # this proposal.
-    guideline.load(db, config_dir, CATALOG, set())
+    # The capability set is a stand-in, so the unavailable-items warning is left as the cycle wrote it.
+    guideline.load(db, config_dir, CATALOG, set(), record_unavailable=False)
     p = guideline.path(config_dir)
     if not p.exists():
         raise ValueError(f"no guideline file at {p}")
     text = p.read_text(encoding="utf-8")
-    new_text = rewrite_item(text, str(row["item"]), str(row["after"]))
+    item = str(row["item"])
+    try:
+        now = current_value(guideline.parse(text, CATALOG, _all_caps()), item)
+    except GuidelineError as e:
+        raise ValueError(f"guideline.md is not valid, fix it first: {e}") from e
+    if row["before"] is not None and now != str(row["before"]):
+        # The owner changed this item after the experiment started; approving would overwrite that edit.
+        supersede(db, [proposal_id])
+        raise ValueError(
+            f"the owner changed {item} since this proposal was made; it is superseded and not applied"
+        )
+    new_text = rewrite_item(text, item, str(row["after"]))
     version = guideline.write(
         db,
         config_dir,
@@ -189,6 +201,37 @@ def approve(db: Database, config_dir: Path, proposal_id: str) -> int:
     )
     db.update("guideline_proposals", proposal_id, {"status": "approved", "decided_at": now_iso()})
     return version
+
+
+SUPERSEDED_NOTE = "baseline changed by owner"
+
+
+def supersede(db: Database, proposal_ids: list[str]) -> None:
+    """Close pending proposals whose item the owner edited directly; they can no longer be approved."""
+    for pid in proposal_ids:
+        db.update(
+            "guideline_proposals",
+            pid,
+            {"status": "superseded", "owner_note": SUPERSEDED_NOTE, "decided_at": now_iso()},
+        )
+
+
+def supersede_for_items(db: Database, items: set[str]) -> list[str]:
+    """Supersede every pending proposal on one of ``items``; returns their ids."""
+    ids = [str(r["id"]) for r in pending(db) if r["item"] in items]
+    supersede(db, ids)
+    return ids
+
+
+def current_value(g: Guideline, item: str) -> str | None:
+    """``item``'s value in ``g`` written as a proposal's ``before`` (an experiment's control)."""
+    if item == "G-runtime":
+        return f"{g.runtime_min}-{g.runtime_max}"
+    if item.startswith("G-") and item[2:] in CATALOG:
+        v = g.locked.get(item[2:])
+        return None if v is None else str(v)
+    rule = g.rules.get(item)
+    return None if rule is None else rule.text
 
 
 def reject(db: Database, proposal_id: str, note: str) -> None:
@@ -322,10 +365,17 @@ def changed_items(old: Guideline, new: Guideline) -> set[str]:
     return out
 
 
-def on_version_change(db: Database, old: Guideline, new: Guideline, engine: Any) -> list[str]:  # noqa: ARG001
-    """Close running experiments whose item the owner changed between ``old`` and ``new``."""
+def on_version_change(db: Database, old: Guideline, new: Guideline, engine: Any) -> list[str]:
+    """Close running experiments, and supersede pending proposals, whose item the owner changed.
+
+    Returns the closed experiment ids. A superseded proposal can no longer be approved, so it cannot
+    overwrite the owner's newer edit.
+    """
     changed = changed_items(old, new)
-    return engine.close_for_baseline_change(changed) if changed else []
+    if not changed:
+        return []
+    supersede_for_items(db, changed)
+    return engine.close_for_baseline_change(changed)
 
 
 def sync_version(db: Database, engine: Any) -> list[str]:
@@ -432,7 +482,31 @@ def attention_entries(db: Database) -> dict[str, list[dict[str, Any]]]:
     err = db.get_state(guideline.ERROR_KEY)
     if err:
         out["guideline_invalid"] = [{"error": err, "fix": "edit config/guideline.md"}]
+    unavailable = loads(db.get_state(guideline.UNAVAILABLE_KEY), {}) or {}
+    if unavailable:
+        out["guideline_items_unavailable"] = [
+            {
+                "setting": setting,
+                "why": f"the guideline locks {setting}, but it {why}; the renderer default is used instead",
+                "fix": _unavailable_fix(setting),
+            }
+            for setting, why in sorted(unavailable.items())
+        ]
     return out
+
+
+# What installs each capability a locked setting can need (experiments/settings.py ``capabilities``).
+_CAPABILITY_FIX = {
+    "stock_video": "add a Pexels or Pixabay API key to .env (stock video clips)",
+    "sfx": "add a 'whoosh' sound to assets/sfx/licenses.json",
+}
+
+
+def _unavailable_fix(setting: str) -> str:
+    d = CATALOG.get(setting)
+    need = d.requires if d is not None else ""
+    install = _CAPABILITY_FIX.get(need, f"install the '{need}' capability")
+    return f"{install}, or remove {setting} from locked: in config/guideline.md"
 
 
 def evidence_of(row: dict[str, Any]) -> dict[str, Any]:

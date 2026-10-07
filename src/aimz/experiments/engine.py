@@ -13,6 +13,7 @@ import contextlib
 import json
 import math
 import random
+import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any
@@ -132,12 +133,36 @@ GUIDELINE_MIN_SAMPLE = 10
 # The guideline bar is fixed, not the legacy experiments.min_confidence (controller ruling R7).
 GUIDELINE_MIN_CONFIDENCE = 0.95
 # A variant whose text asks for any of these contradicts the constitution (sourced facts only, no
-# deception). A keyword screen; the critic's policy checks still run on every script.
-CONSTITUTION_KEYWORDS = ("fabricat", "invent", "no source", "unsourced", "clickbait", "fake")
+# deception). A phrase screen matched on whole words, so "inventions" or "debunk fake claims" pass; the
+# critic's policy checks still run on every script.
+CONSTITUTION_PHRASES = (
+    "fabricate",
+    "fabricated",
+    "invented facts",
+    "invent facts",
+    "no source",
+    "unsourced",
+    "clickbait",
+    "fake quote",
+    "fake quotes",
+    "make up",
+)
+_CONSTITUTION_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(x).replace(r"\ ", r"\s+") for x in CONSTITUTION_PHRASES) + r")\b",
+    re.IGNORECASE,
+)
+# Conclusions of a closed guideline experiment that start the item's cooldown (controller ruling R11),
+# besides the inconclusive status.
+COOLDOWN_CONCLUSIONS = ("Guideline won", "Safety stop")
 # Video statuses that count as published for the cooldown.
 PUBLISHED_VIDEO_STATUSES = ("published", "measured")
 # Experiment statuses that close a guideline experiment.
 CLOSED_STATUSES = ("concluded", "variant_won", "inconclusive", "retired")
+
+
+def contradicts_constitution(text: str) -> bool:
+    """True when ``text`` asks for something the constitution forbids (whole-word phrase screen)."""
+    return bool(_CONSTITUTION_RE.search(text))
 
 
 class ExperimentEngine:
@@ -239,7 +264,10 @@ class ExperimentEngine:
             if str(norm) == control:
                 return control, None, "control and treatment are identical"
             return control, str(norm), None
-        control = g.rules[item].text
+        rule = g.rules[item]
+        if rule.stage == "cover":
+            return rule.text, None, f"{item} is a cover rule, which the pipeline does not apply yet"
+        control = rule.text
         if not variant:
             return control, None, "variant text required"
         if variant == control:
@@ -251,8 +279,7 @@ class ExperimentEngine:
         _control, _norm, why = self._check_item(item, variant)
         if why:
             return why
-        low = variant.lower()
-        if any(k in low for k in CONSTITUTION_KEYWORDS):
+        if contradicts_constitution(variant):
             return "variant contradicts the constitution"
         if self.running():
             return "an experiment is already running on this channel"
@@ -278,12 +305,15 @@ class ExperimentEngine:
     def cooldown_left(self, item: str) -> int:
         """Videos still to publish before ``item`` may be tested again.
 
-        The count restarts at the item's last inconclusive experiment or rejected proposal.
+        The count restarts at the item's last inconclusive experiment, last experiment the guideline won
+        or safety-stopped (ruling R11), or last rejected proposal.
         """
+        lost = " OR ".join("conclusion LIKE ?" for _ in COOLDOWN_CONCLUSIONS)
         marks = [
             self.db.scalar(
-                "SELECT MAX(COALESCE(concluded_at, updated_at)) FROM experiments WHERE variable=? AND status='inconclusive'",
-                [item],
+                "SELECT MAX(COALESCE(concluded_at, updated_at)) FROM experiments WHERE variable=? AND "
+                f"(status='inconclusive' OR (status='concluded' AND ({lost})))",
+                [item, *(f"{c}%" for c in COOLDOWN_CONCLUSIONS)],
             )
         ]
         # The proposals table is written by the approval flow; tolerate a database without it.

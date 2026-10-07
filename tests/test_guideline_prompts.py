@@ -281,3 +281,20 @@ def test_editor_prompt_unchanged_without_guideline(svc, monkeypatch) -> None:  #
     with svc.tracker.run("test") as run:
         orch.editor._choose(run, orch.strategy.current(), [dict(svc.db.get("ideas", a))], "exploit", "r")
     assert "Channel guideline" not in seen[0] and seen[0].endswith("SelectionDecision")
+
+
+def test_critic_ignores_broken_rules_outside_script_and_title(g) -> None:  # noqa: ANN001
+    r = _result()
+    r.broken_rules = ["G-topic", "G-cover", "G-title"]
+    out = _gate(_clean_draft(), g, r)
+    assert [x.split(" (")[0] for x in out.required_revisions] == ["Breaks G-title"]
+    # A topic rule alone does not fail the script.
+    r = _result()
+    r.broken_rules = ["G-topic"]
+    out = _gate(_clean_draft(), g, r)
+    assert out.required_revisions == [] and out.passed is True
+    # The variant text of a tested script rule is still what the revision quotes.
+    r = _result()
+    r.broken_rules = ["G-hook"]
+    out = _gate(_clean_draft(), g, r, replace={"G-hook": "Open on a question."})
+    assert out.required_revisions == ["Breaks G-hook (Open on the surprise): Open on a question."]

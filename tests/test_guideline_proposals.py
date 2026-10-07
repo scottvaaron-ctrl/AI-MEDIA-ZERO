@@ -268,3 +268,154 @@ def test_analyst_learn_creates_proposal(svc, monkeypatch) -> None:  # noqa: ANN0
 def test_module_has_no_import_in_guideline_load() -> None:
     src = Path(guideline.__file__).read_text(encoding="utf-8")
     assert "guideline_proposals" not in src
+
+
+def test_attention_warns_unavailable_locked_items(svc) -> None:  # noqa: ANN001
+    _engine(svc, GSAMPLE.replace("  music: off\n", "  music: off\n  clip_scenes: on\n"))
+    [entry] = attention(svc.db)["guideline_items_unavailable"]
+    assert entry["setting"] == "clip_scenes"
+    assert "stock_video" in entry["why"]
+    assert "Pexels or Pixabay" in entry["fix"] and "clip_scenes" in entry["fix"]
+    _engine(svc)  # the owner removes the item: the warning goes
+    assert "guideline_items_unavailable" not in attention(svc.db)
+
+
+def _learn(svc: Any, monkeypatch: Any, rows: list[dict[str, Any]]) -> None:
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    orch = Orchestrator(svc)
+    monkeypatch.setattr(svc.analytics_store, "video_performance", lambda: rows)
+    with svc.tracker.run("learn") as ctx:
+        orch.analyst.learn(ctx, orch.strategy.current())
+
+
+def test_learn_keeps_going_when_proposal_creation_fails_and_sweeps_later(svc, monkeypatch) -> None:  # noqa: ANN001
+    from aimz.pipeline.orchestrator import Orchestrator
+
+    _engine(svc)
+    eid = Orchestrator(svc).experiments.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert eid
+    rows = [
+        {**r, "title": "A video", "content_family": "forgotten_history", "hook_type": "fact"}
+        for r in _grows(eid, LOW, HIGH)
+    ]
+
+    def boom(*a: Any, **kw: Any) -> str:
+        raise RuntimeError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(gp, "create_from_experiment", boom)
+        _learn(svc, m, rows)  # must not raise
+    assert svc.db.get("experiments", eid)["status"] == "variant_won"
+    assert gp.pending(svc.db) == []
+    # The next learn finds the won experiment with no proposal and creates it from the stored result.
+    _learn(svc, monkeypatch, [])
+    [p] = gp.pending(svc.db)
+    assert p["experiment_id"] == eid and p["item"] == "G-hook"
+    ev = gp.evidence_of(p)
+    assert ev["treatment"]["n"] == 10 and ev["control"]["n"] == 10
+    # Swept once: a further learn does not duplicate it.
+    _learn(svc, monkeypatch, [])
+    assert svc.db.count("guideline_proposals") == 1
+
+
+def test_owner_edit_supersedes_pending_proposal_on_that_item(svc) -> None:  # noqa: ANN001
+    exp, res = _won(svc, "G-hook", "Open on a question the video answers.")
+    pid = gp.create_from_experiment(svc.db, exp, res, "")
+    eng = _engine(svc)
+    gp.sync_version(svc.db, eng)
+    # An edit to another item leaves it pending.
+    edited = GSAMPLE.replace("No listicles.", "No listicles, ever.")
+    gp.sync_version(svc.db, _engine(svc, edited))
+    assert svc.db.get("guideline_proposals", pid)["status"] == "pending"
+    # An edit to its own item supersedes it.
+    owner = edited.replace("No greetings.", "No greetings or intros.")
+    eng = _engine(svc, owner)
+    gp.sync_version(svc.db, eng)
+    row = svc.db.get("guideline_proposals", pid)
+    assert row["status"] == "superseded" and row["owner_note"] == "baseline changed by owner"
+    assert row["decided_at"]
+    assert gp.pending(svc.db) == []
+    assert eng.has_pending_proposal("G-hook") is False
+    assert eng.cooldown_left("G-hook") == 0  # superseded is not a rejection
+    assert "guideline_changes_waiting" not in attention(svc.db)
+    import pytest
+
+    with pytest.raises(ValueError, match="already superseded"):
+        gp.approve(svc.db, svc.env.config_dir, pid)
+    assert guideline.path(svc.env.config_dir).read_text(encoding="utf-8") == owner
+
+
+def test_approve_refuses_when_owner_changed_item_before_the_next_cycle(svc) -> None:  # noqa: ANN001
+    import pytest
+
+    exp, res = _won(svc, "G-hook", "Open on a question the video answers.")
+    pid = gp.create_from_experiment(svc.db, exp, res, "")
+    owner = GSAMPLE.replace("No greetings.", "No greetings or intros.")
+    guideline.path(svc.env.config_dir).write_text(owner, encoding="utf-8")
+    with pytest.raises(ValueError, match="changed G-hook"):
+        gp.approve(svc.db, svc.env.config_dir, pid)
+    assert svc.db.get("guideline_proposals", pid)["status"] == "superseded"
+    assert guideline.path(svc.env.config_dir).read_text(encoding="utf-8") == owner
+
+
+def test_owner_edit_closes_experiment_then_approval_reaches_next_assign(svc) -> None:  # noqa: ANN001
+    """Offline end to end: an owner edit at cycle start closes the experiment on that item; approving a
+    proposal on another item bumps the version and the next video's settings use the new value."""
+    from tests.test_reliability import _idea, _orch
+
+    # A won experiment on caption_size whose proposal waits for the owner.
+    exp, res = _won(svc, "G-caption_size", "0.05")
+    cap_pid = gp.create_from_experiment(svc.db, exp, res, "")
+    orch = _orch(svc)
+    gp.sync_version(svc.db, orch.experiments)
+    hook_eid = orch.experiments.propose(_gp("G-hook", "Open on a question the video answers."))
+    assert hook_eid
+    v_before = orch.experiments.guideline.version
+
+    # The owner edits the hook rule; the next cycle's orchestrator loads it and sync_version runs at start.
+    guideline.path(svc.env.config_dir).write_text(
+        GSAMPLE.replace("No greetings.", "No greetings or intros."), encoding="utf-8"
+    )
+    orch = _orch(svc)
+    assert orch.experiments.guideline.version == v_before + 1
+    assert gp.sync_version(svc.db, orch.experiments) == [hook_eid]
+    row = svc.db.get("experiments", hook_eid)
+    assert row["status"] == "retired" and row["conclusion"] == "baseline changed by owner"
+    assert svc.db.get("guideline_proposals", cap_pid)["status"] == "pending"
+
+    # The owner approves the caption_size proposal.
+    v = gp.approve(svc.db, svc.env.config_dir, cap_pid)
+    assert v == v_before + 2
+    text = guideline.path(svc.env.config_dir).read_text(encoding="utf-8")
+    assert "caption_size: 0.05" in text and "No greetings or intros." in text
+
+    # Next cycle: the producer's assignment uses the approved value.
+    orch = _orch(svc)
+    assert orch.experiments.guideline.version == v
+    assert gp.sync_version(svc.db, orch.experiments) == []
+    idea = dict(svc.db.get("ideas", _idea(svc, status="selected")))
+    assert orch.producer.choose_settings("vid_next", idea)["caption_size"] == 0.05
+
+
+def test_cli_and_dashboard_treat_superseded_as_closed(svc) -> None:  # noqa: ANN001
+    from fastapi.testclient import TestClient
+    from typer.testing import CliRunner
+
+    from aimz.cli import app
+    from aimz.dashboard.app import create_app
+
+    exp, res = _won(svc, "G-hook", "Open on a question the video answers.")
+    pid = gp.create_from_experiment(svc.db, exp, res, "")
+    gp.supersede(svc.db, [pid])
+    runner = CliRunner()
+    shown = runner.invoke(app, ["guideline", "proposals"])
+    assert shown.exit_code == 0 and pid not in shown.output
+    out = runner.invoke(app, ["guideline", "approve", pid])
+    assert out.exit_code == 1 and "already superseded" in out.output
+    client = TestClient(create_app(svc))
+    page = client.get("/guideline")
+    assert page.status_code == 200 and f"/guideline/proposals/{pid}/approve" not in page.text
+    r = client.post(f"/guideline/proposals/{pid}/approve", follow_redirects=False)
+    assert r.status_code == 303 and "superseded" in r.headers["location"]
+    assert svc.db.get("guideline_proposals", pid)["status"] == "superseded"

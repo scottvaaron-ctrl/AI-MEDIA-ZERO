@@ -8,6 +8,7 @@ replaces the last valid version: ``load`` keeps serving it and records the probl
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -23,6 +24,8 @@ STAGES = ("topic", "script", "title", "cover")
 # Platform limits, same as config/config.yaml content.short_form.
 RUNTIME_LIMIT_MIN, RUNTIME_LIMIT_MAX = 10, 180
 ERROR_KEY = "guideline_error"
+# JSON {setting: reason} of locked settings this machine cannot apply yet; empty means none (spec section 2).
+UNAVAILABLE_KEY = "guideline_unavailable"
 
 _YAML_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
 _RULE_RE = re.compile(r"^###[ \t]+(G-[A-Za-z0-9_-]+):[ \t]*(.*?)[ \t]*$", re.MULTILINE)
@@ -212,23 +215,81 @@ def _stored(row, catalog: dict[str, SettingDef], caps: set[str]) -> Guideline:  
     return replace(parse(row["content"], catalog, caps), version=int(row["version"]))
 
 
-def load(db: Database, config_dir: Path, catalog: dict[str, SettingDef], caps: set[str]) -> Guideline | None:
+def _newest_valid(
+    db: Database, catalog: dict[str, SettingDef], caps: set[str]
+) -> tuple[Guideline | None, list[str]]:
+    """The newest stored version that still parses, and a note for each newer one that no longer does.
+
+    A stored version can stop validating when the settings catalog changes (a bound narrowed, a choice
+    removed); it must never stop the cycle.
+    """
+    skipped: list[str] = []
+    for row in db.query("SELECT * FROM guideline_versions ORDER BY version DESC"):
+        try:
+            return _stored(row, catalog, caps), skipped
+        except GuidelineError as e:
+            skipped.append(f"stored v{row['version']} no longer validates ({e})")
+    return None, skipped
+
+
+def _fallback(
+    db: Database, catalog: dict[str, SettingDef], caps: set[str], file_error: str | None
+) -> Guideline | None:
+    """The newest valid stored version, recording in ``guideline_error`` anything that was passed over."""
+    g, skipped = _newest_valid(db, catalog, caps)
+    notes = [file_error] if file_error else []
+    if skipped:
+        notes += skipped
+        if g is None:
+            notes.append("no stored guideline version is valid; fix config/guideline.md")
+        else:
+            notes.append(f"using v{g.version}")
+    if notes:
+        db.set_state(ERROR_KEY, "; ".join(notes))
+    return g
+
+
+def _record_unavailable(db: Database, g: Guideline | None) -> None:
+    if g is not None and g.unavailable:
+        db.set_state(UNAVAILABLE_KEY, json.dumps(dict(sorted(g.unavailable.items()))))
+    elif db.get_state(UNAVAILABLE_KEY):
+        db.set_state(UNAVAILABLE_KEY, "")
+
+
+def load(
+    db: Database,
+    config_dir: Path,
+    catalog: dict[str, SettingDef],
+    caps: set[str],
+    *,
+    record_unavailable: bool = True,
+) -> Guideline | None:
     """The active guideline, recording a new version when the owner's file changed.
 
     A file that fails validation never replaces the last valid version; the problem is recorded in
-    the ``guideline_error`` state. Without a file, the last stored version (if any) is used.
+    the ``guideline_error`` state. Without a file, the last stored version (if any) is used. A stored
+    version that no longer validates is passed over for the newest one that does (None if none does).
+    ``record_unavailable`` stores the locked settings ``caps`` cannot apply in ``guideline_unavailable``;
+    a caller passing a stand-in capability set turns it off.
     """
+    g = _load(db, config_dir, catalog, caps)
+    if record_unavailable:
+        _record_unavailable(db, g)
+    return g
+
+
+def _load(db: Database, config_dir: Path, catalog: dict[str, SettingDef], caps: set[str]) -> Guideline | None:
     p = path(config_dir)
     latest = _latest(db)
     if not p.exists():
-        return _stored(latest, catalog, caps) if latest else None
+        return _fallback(db, catalog, caps, None) if latest else None
 
     text = p.read_text(encoding="utf-8")
     try:
         g = parse(text, catalog, caps)
     except GuidelineError as e:
         db.set_state(ERROR_KEY, str(e))
-        return _stored(latest, catalog, caps) if latest else None
+        return _fallback(db, catalog, caps, str(e)) if latest else None
 
     db.set_state(ERROR_KEY, "")
     if latest is not None and latest["content_hash"] == _hash(text):

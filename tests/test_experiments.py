@@ -267,7 +267,7 @@ def test_validate_cooldown(svc) -> None:  # noqa: ANN001
 def test_validate_constitution_screen(svc) -> None:  # noqa: ANN001
     eng = _geng(svc)
     for bad in (
-        "Invent a quote when the sources are thin.",
+        "Invent facts when the sources are thin.",
         "Use a clickbait title.",
         "Fabricate a statistic.",
     ):
@@ -660,3 +660,54 @@ def test_ideation_second_half_takes_other_arm_when_first_is_empty(svc, monkeypat
     assert "Pick a single named thing" in prompts[0]
     assert "Pick a surprising number" in prompts[1]
     assert svc.db.get("ideas", created[0])["experiment_arm"] == "treatment"
+
+
+def test_validate_refuses_cover_rule(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    assert eng.validate(_gp("G-cover", "The cover shows a face.")) == (
+        "G-cover is a cover rule, which the pipeline does not apply yet"
+    )
+    assert eng.propose(_gp("G-cover", "The cover shows a face.")) is None
+
+
+def test_constitution_screen_matches_whole_words_and_phrases(svc) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    assert eng.validate(_gp("G-hook", "Name the inventions in the opening line.")) is None
+    assert eng.validate(_gp("G-hook", "Open by naming fake claims the video debunks.")) is None
+    for bad in (
+        "Fabricate a quote for drama.",
+        "Make up a statistic if needed.",
+        "Use a fake quote from a famous person.",
+        "Invent facts to fill gaps.",
+        "Unsourced claims are fine.",
+    ):
+        assert eng.validate(_gp("G-hook", bad)) == "variant contradicts the constitution", bad
+
+
+@pytest.mark.parametrize("conclusion", ["Guideline won: worse (p=0.99, n=10/10).", "Safety stop: worse."])
+def test_cooldown_after_guideline_won_or_safety_stop(svc, conclusion: str) -> None:  # noqa: ANN001
+    eng = _geng(svc)
+    old = "2026-01-01T00:00:00+00:00"
+    svc.db.insert(
+        "experiments",
+        {
+            "id": "exp_lost",
+            "name": "lost",
+            "hypothesis": "h",
+            "variable": "G-hook",
+            "control": "c",
+            "treatment": "t",
+            "primary_kpi": "score",
+            "min_sample": 10,
+            "guideline_version": 1,
+            "status": "concluded",
+            "conclusion": conclusion,
+            "concluded_at": old,
+            "created_by": "ai",
+            "created_at": old,
+            "updated_at": old,
+        },
+    )
+    _published(svc, 5)
+    assert eng.cooldown_left("G-hook") == 15
+    assert eng.validate(_gp("G-hook", "Open on a question.")) == "G-hook is cooling down for 15 more videos"

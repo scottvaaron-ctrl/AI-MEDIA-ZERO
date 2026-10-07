@@ -124,3 +124,55 @@ def test_prompt_block_replace():
     assert "Open on a question." in block
     assert "most surprising fact" not in block
     assert "most surprising fact" in g.prompt_block("script")
+
+
+def _narrow_catalog():
+    """CATALOG with caption_max_words capped at 2, so a stored "caption_max_words: 3" stops validating."""
+    from dataclasses import replace as dc_replace
+
+    narrowed = dc_replace(CATALOG["caption_max_words"], bounds={"min": 1, "max": 2})
+    return {**CATALOG, "caption_max_words": narrowed}
+
+
+def test_load_survives_stored_version_that_stops_validating(svc):
+    p = path(svc.env.config_dir)
+    p.write_text(SAMPLE, encoding="utf-8")
+    assert load(svc.db, svc.env.config_dir, CATALOG, CAPS).version == 1
+    narrow = _narrow_catalog()
+    # The file and the only stored version are both invalid now: no raise, None, and a clear error.
+    assert load(svc.db, svc.env.config_dir, narrow, CAPS) is None
+    err = svc.db.get_state("guideline_error")
+    assert "no stored guideline version is valid" in err and "caption_max_words" in err
+    # Without the file, the same.
+    p.unlink()
+    assert load(svc.db, svc.env.config_dir, narrow, CAPS) is None
+    assert "no stored guideline version is valid" in svc.db.get_state("guideline_error")
+
+
+def test_load_walks_back_to_newest_still_valid_version(svc):
+    p = path(svc.env.config_dir)
+    p.write_text(_with("  caption_max_words: 3\n", ""), encoding="utf-8")
+    assert load(svc.db, svc.env.config_dir, CATALOG, CAPS).version == 1
+    p.write_text(SAMPLE, encoding="utf-8")
+    assert load(svc.db, svc.env.config_dir, CATALOG, CAPS).version == 2
+    g = load(svc.db, svc.env.config_dir, _narrow_catalog(), CAPS)
+    assert g is not None and g.version == 1
+    assert "caption_max_words" not in g.locked
+    err = svc.db.get_state("guideline_error")
+    assert "v2" in err and "using v1" in err
+    p.unlink()
+    g = load(svc.db, svc.env.config_dir, _narrow_catalog(), CAPS)
+    assert g is not None and g.version == 1
+
+
+def test_load_records_unavailable_items(svc):
+    import json
+
+    p = path(svc.env.config_dir)
+    p.write_text(_with("  music: off", "  music: off\n  clip_scenes: on"), encoding="utf-8")
+    load(svc.db, svc.env.config_dir, CATALOG, set())
+    got = json.loads(svc.db.get_state("guideline_unavailable"))
+    assert list(got) == ["clip_scenes"] and "stock_video" in got["clip_scenes"]
+    # Once the capability is there, the warning clears.
+    load(svc.db, svc.env.config_dir, CATALOG, {"stock_video"})
+    assert not svc.db.get_state("guideline_unavailable")

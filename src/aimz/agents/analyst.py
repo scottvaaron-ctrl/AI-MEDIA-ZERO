@@ -30,7 +30,7 @@ from aimz.experiments.engine import MEASURABLE_KPIS, ExperimentEngine
 from aimz.experiments.settings import SettingsEngine, capabilities
 from aimz.experiments.value import niche_value_text, niche_values, ypp_progress, ypp_text
 from aimz.strategy.memory import GUIDELINE_EXPLORE_TEXT
-from aimz.util import hours_since, iso_ago, now_iso
+from aimz.util import hours_since, iso_ago, loads, now_iso
 
 # Recorded as the identity refusal while a guideline is active.
 GUIDELINE_IDENTITY_NOTE = "identity is set by the guideline"
@@ -256,16 +256,35 @@ class AnalystAgent(Agent):
         Returns ``{experiment_id: proposal_id}``. Each starts with the evidence template as its summary,
         so a later model failure can never lose a proposal; ``apply_proposal_summaries`` replaces it with
         the strategist's own words when every number checks out.
+
+        A failure on one proposal is logged and never stops learning. Because a won experiment is not
+        evaluated again, every ``variant_won`` experiment that still has no proposal row is swept here
+        too, from its stored ``result_json``, so a win is never lost.
         """
         from aimz import guideline_proposals
 
+        db = self.svc.db
         out: dict[str, str] = {}
+        todo: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for r in exp_results:
             if r.get("status") != "variant_won":
                 continue
-            exp = self.svc.db.get("experiments", r["id"])
-            if exp is not None:
-                out[r["id"]] = guideline_proposals.create_from_experiment(self.svc.db, dict(exp), r, "")
+            row = db.get("experiments", r["id"])
+            if row is not None:
+                todo.append((dict(row), r))
+        fresh = {str(e["id"]) for e, _ in todo}
+        for won in db.query(
+            "SELECT * FROM experiments e WHERE e.status='variant_won' AND e.guideline_version IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM guideline_proposals p WHERE p.experiment_id = e.id) "
+            "ORDER BY e.concluded_at"
+        ):
+            if str(won["id"]) not in fresh:
+                todo.append((dict(won), {"id": won["id"], **loads(won["result_json"], {})}))
+        for exp, result in todo:
+            try:
+                out[str(exp["id"])] = guideline_proposals.create_from_experiment(db, exp, result, "")
+            except Exception as exc:  # retried by the sweep at the next learn
+                self.log.warning("could not create the guideline proposal for %s: %s", exp["id"], exc)
         return out
 
     def apply_proposal_summaries(self, proposals: dict[str, str], summaries: dict[str, str]) -> None:

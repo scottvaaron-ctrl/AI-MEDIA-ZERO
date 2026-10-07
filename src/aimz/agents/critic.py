@@ -103,6 +103,8 @@ ALLEGATION_TERMS = (
 )
 _NAME_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+")
 _SENTENCES = re.compile(r"(?<=[.!?])\s+")
+# Guideline stages whose rules the critic is shown and may report as broken.
+GATED_STAGES = ("script", "title")
 
 
 def allegation_sentences(text: str) -> list[str]:
@@ -135,7 +137,7 @@ class CriticAgent(Agent):
         g = guideline.for_services(self.svc)
         replace = guideline.variant_for(idea, self.svc.db) if g else {}
         tested_runtime = guideline.runtime_variant(idea, self.svc.db) if g else None
-        gtext = self.guideline_text(("script", "title"), replace, g)
+        gtext = self.guideline_text(GATED_STAGES, replace, g)
         if gtext:
             gtext += "List in broken_rules the ID of every guideline rule the script breaks.\n\n"
         user = (
@@ -242,11 +244,13 @@ class CriticAgent(Agent):
         ``runtime_override`` is the tested runtime of a G-runtime treatment idea; its runtime is not
         gated on the guideline range (controller ruling R6)."""
         out: list[str] = []
-        variants = replace or {}
+        # Only rules the critic was shown can be broken by the script: script and title rules, with a
+        # tested variant's text in place of its rule. A topic or cover rule ID is ignored.
+        shown = {r.id: r for stage in GATED_STAGES for r in g.rules_for(stage, replace)}
         for rid in dict.fromkeys(result.broken_rules):
-            rule = g.rules.get(rid)
+            rule = shown.get(rid)
             if rule is not None:
-                out.append(f"Breaks {rid} ({rule.title}): {variants.get(rid, rule.text)}")
+                out.append(f"Breaks {rid} ({rule.title}): {rule.text}")
         seconds = len(narration.split()) / WORDS_PER_SECOND
         if runtime_override is None and not g.runtime_min <= seconds <= g.runtime_max:
             out.append(f"Runtime {seconds:.0f}s is outside the guideline's {g.runtime_min}-{g.runtime_max}s")
