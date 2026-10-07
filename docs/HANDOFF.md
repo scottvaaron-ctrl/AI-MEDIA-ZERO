@@ -203,7 +203,7 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
   way rather than pushing platform formatting up into `agents/publisher.py`.
 - Posting time: `recommended_post_time` is a fixed 17:00 heuristic and videos publish the moment
   they render, in pairs. Planned in `PLAN_FULL_CONTROL.md` stage 3 (queue, owner limits, AI-chosen
-  slots).
+  slots) (plan superseded; see docs/PLAN_GUIDELINE.md).
 - The learning loop compares publications across platforms that expose different metrics. Watch
   the first few weeks of `aimz analytics` for a platform with fewer signals being scored unfairly
   against YouTube; if that shows up, normalise per platform in `experiments/allocation.py`.

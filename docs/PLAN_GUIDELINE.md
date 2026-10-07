@@ -88,7 +88,26 @@ and the attention list show "N guideline change(s) waiting"; a proposal waiting 
 * A proposal's plain-English summary is checked by code: every number must match the evidence, else a template
   built from the evidence replaces it.
 * While a proposal is pending, videos follow the current guideline, and an item can have only one pending proposal.
-* An owner edit that changes an item closes any experiment on it ("baseline changed by owner").
+* An owner edit that changes an item closes any experiment on it ("baseline changed by owner") and marks any
+  pending proposal on it `superseded` (same note), so approving can never overwrite the owner's newer edit.
+  `approve` also re-checks the item against the file and supersedes the proposal if the owner changed it.
+* A won experiment whose proposal could not be written is picked up at the next learn (a sweep of `variant_won`
+  experiments that have no proposal row).
+* Cooldown: 20 published videos after an inconclusive experiment, a "Guideline won" or "Safety stop" result,
+  or a rejected proposal (ruling R11).
+* **Cover rules are not applied yet.** No stage of the pipeline reads `cover`-stage rules (there is no cover
+  generator), so an experiment on a cover rule is refused: "G-... is a cover rule, which the pipeline does not
+  apply yet".
+* The constitution screen on a variant matches whole words and phrases ("fabricate", "invent facts", "fake
+  quote", "make up", "clickbait", "unsourced", ...), so "inventions" or "debunk fake claims" pass.
+
+### When the guideline cannot be used as written
+
+* A locked setting that needs an ability this machine lacks is stored in the `guideline_unavailable` state;
+  `aimz status` lists it under `guideline_items_unavailable` with what to install or change.
+* If a settings-catalog change makes the stored guideline invalid, `load` falls back to the newest stored
+  version that still validates, or runs with no guideline, and says so in `guideline_error`; it never stops
+  the cycle.
 
 ### Enforcement order for a setting
 
@@ -99,7 +118,9 @@ and the attention list show "N guideline change(s) waiting"; a proposal waiting 
 
 Strategist `setting_changes` on a setting the guideline covers are refused with "covered by the guideline;
 propose an experiment instead". Runtime must sit inside `runtime_s`. The critic reports `broken_rules`, which
-become required revisions; code-only checks cover runtime, caption chunk size, banned openings and title length.
+become required revisions; code-only checks in the critic cover runtime, banned openings and title length. The
+critic accepts `broken_rules` IDs of script- and title-stage rules only. Caption chunk size is not a critic check:
+the renderer enforces the locked `caption_max_words` when it builds the captions.
 
 ### New channels
 
@@ -133,6 +154,8 @@ guideline or the constitution.
 * **R9.** Settings the guideline does not lock stay the AI's to open.
 * **R10.** `docs/CEO_BRIEF.md` and `docs/OWNER_TODO.md` are not edited by the build branch (the owner's
   uncommitted edits live in the main checkout). The controller updates them after merge.
+* **R11.** The 20-video cooldown also follows an experiment the guideline won or safety-stopped, not only an
+  inconclusive one or a rejected proposal.
 
 ## 4. Constitution wording awaiting owner approval
 
@@ -151,8 +174,6 @@ After approval: edit the two sections, then run `pytest` (tests that read the co
 ## 5. Known gaps (deferred, from reviews)
 
 * With a guideline the KPI is always the composite score; the guideline is loaded once per process.
-* A pending proposal's `before` goes stale if the owner edits that item directly; approving then overwrites the
-  owner's edit (superseding it in `sync_version` is the fix).
 * Dashboard POSTs have no CSRF protection (same as the existing controls).
 * The dry-run test relaxes the sample's 60-character title check to 100 in its temporary copy, because the
   fixture LLM writes long titles.
@@ -165,3 +186,4 @@ After approval: edit the two sections, then run `pytest` (tests that read the co
 |---|---|---|---|
 | 2026-10-07 | Rescope | Owner rescoped the project; research and design in `docs/VIDEO_QUALITY_RESEARCH.md` and the spec; owner approved the spec and scoped it to Backhouse Explainers. | Build part 1 |
 | 2026-10-07 | Part 1 | Built the guideline system in eight tasks on `feat/guideline-system`: loader and versions; locked-value enforcement; craft rules in prompts and critic; one-experiment engine; proposals and owner approval with CLI and dashboard; strategist under a guideline and switch-over; new-channel gate; these docs and the offline dry-run test. Every task was reviewed. | Merge; owner approves the constitution wording (section 4); then the part 2 spec |
+| 2026-10-07 | Part 1 | Final whole-branch review fixes: loader survives a stored version that stops validating; cover-rule experiments refused; unavailable locked items in `aimz status`; critic gates script/title rule IDs only; whole-word constitution screen; cooldown after Guideline won / Safety stop (R11); proposal sweep in learn; owner edit supersedes a pending proposal. | Merge |
