@@ -167,14 +167,16 @@ def test_download_interrupted_leaves_not_present(tmp_path: Path) -> None:
         download_model(tmp_path, http=_mock_http(fail_on=MODEL_FILES[1]))
     assert not model_present(tmp_path)
     assert not (tmp_path / MODEL_FILES[1]).exists()
+    assert not list(tmp_path.rglob("*.part"))
 
 
-def test_health_missing_model(tmp_path: Path) -> None:
+def test_health_missing_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from aimz.providers.image import relevance
 
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
     h = relevance.scorer_health(tmp_path)
     assert h.ok is False
-    assert "doctor --fix" in h.fix or "pip install" in h.fix
+    assert "doctor --fix" in h.fix
 
 
 def test_health_missing_model_with_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,14 +245,19 @@ def test_get_scorer_download_failure_returns_none(tmp_path: Path, monkeypatch: p
     from aimz.providers.image import relevance
 
     monkeypatch.setattr(relevance, "_SCORERS", {})
+    monkeypatch.setattr(relevance, "_FAILED", set())
     monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    attempts: list[Path] = []
 
     def boom(d: Path, http: Any = None) -> None:
+        attempts.append(d)
         raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(relevance, "download_model", boom)
     svc = SimpleNamespace(env=SimpleNamespace(siglip_model_dir=tmp_path, siglip_auto_download=True))
     assert relevance.get_scorer(svc) is None
+    assert relevance.get_scorer(svc) is None
+    assert len(attempts) == 1
 
 
 @pytest.mark.parametrize("present", [True, False])

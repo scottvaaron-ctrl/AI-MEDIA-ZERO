@@ -152,6 +152,7 @@ def scorer_health(model_dir: Path) -> HealthStatus:
 
 
 _SCORERS: dict[str, RelevanceScorer] = {}
+_FAILED: set[str] = set()  # model dirs whose download failed this process: do not retry
 
 
 def get_scorer(svc: Any) -> RelevanceScorer | None:
@@ -161,7 +162,7 @@ def get_scorer(svc: Any) -> RelevanceScorer | None:
     key = str(model_dir)
     if key in _SCORERS:
         return _SCORERS[key]
-    if not packages_importable():
+    if key in _FAILED or not packages_importable():
         return None
     if not model_present(model_dir):
         if not env.siglip_auto_download:
@@ -169,7 +170,8 @@ def get_scorer(svc: Any) -> RelevanceScorer | None:
         try:
             download_model(model_dir)
         except Exception as exc:
-            log.warning("SigLIP model download failed: %s", exc)
+            log.warning("SigLIP model download failed (not retrying this run): %s", exc)
+            _FAILED.add(key)
             return None
         if not model_present(model_dir):
             return None
