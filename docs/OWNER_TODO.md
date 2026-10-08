@@ -160,8 +160,15 @@ The wording to paste is drafted in `docs/PLAN_FULL_CONTROL.md` **section 8**:
     pipeline (watch `qa_failed` counts), and `youtube_retention` notes appear from 8 Oct.
   - Check new videos' rendered length still matches the timeline (captions in sync).
   - Check the first new video on a phone after the 30 Sep layout fix (docs/PLAN_FULL_CONTROL.md session log):
-    one copy of each sentence, nothing cut mid-word, subtitles and credits visible above YouTube's labels and
+    one copy of each sentence, nothing cut mid-word, subtitles visible above YouTube's labels and
     left of its buttons. The owner can simply send a screenshot.
+  - **Picture check (piece B), after the first live video once it is merged and the model is installed:**
+    that video's run note has a `relevance` entry for every beat; `py -m aimz status` shows no picture-check
+    warning (no "check unavailable" line); and the video's frames show no credit or AI-disclosure text (credit
+    and disclosure are in the description only). Spot-check that pictures fit their beats.
+  - **Revisit the picture-check floor after a few weeks of run notes** (it is deliberately low, 0.00005): look at
+    the text-card rate and the top scores per beat, and raise the floor if poor matches get through or lower it
+    if too many good pictures become text cards. The owner confirms any change.
 
 ---
 
