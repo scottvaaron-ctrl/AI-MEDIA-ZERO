@@ -138,8 +138,9 @@ file. Everything runs from a `work/` directory with relative paths to avoid Wind
   closes runs that never finished and re-queues their work.
 - The kill switch is a sentinel file **and** a DB flag; either engages it. While engaged a cycle runs
   no stage (only YouTube data retention) and agent CLI commands refuse (`core/killswitch.py`).
-- The posting switch (`system_state` key `posting`, default on; `core/posting.py`) pauses only the
-  publish stage; the kill switch overrides it.
+- The posting switch (`system_state` key `posting`, default on; `core/posting.py`; shown by
+  `aimz status` as `posting_switch`) pauses new posting only; uploads already sent are still polled.
+  The kill switch overrides it.
 - Structured JSON logs at `data/logs/aimz.jsonl`.
 
 ## Package layout

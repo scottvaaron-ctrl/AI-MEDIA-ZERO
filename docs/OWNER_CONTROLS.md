@@ -42,12 +42,15 @@ is recorded with who, when and the reason.
 
 While posting is off:
 
-- the publish stage does nothing: no upload, no package, no automatic retry of a failed upload.
+- nothing new is posted: no upload, no package, no automatic retry of a failed upload.
   Rendered videos stay `rendered`; no publication row is created and no retry attempt is used;
+- an upload already sent before you turned posting off is still polled to completion each cycle
+  (finishing it is not new posting), and is never turned into a failure while posting is off.
+  `aimz publish poll` likewise works while posting is off; only the kill switch stops it;
 - everything else runs as usual: research, ideas, writing, fact-check, review, rendering, metrics,
   comments and learning;
 - `aimz publish run` and `aimz publish retry` refuse and tell you to run `python -m aimz posting on`,
-  and the dashboard's one-tap TikTok post and Retry buttons do nothing.
+  and the dashboard's one-tap TikTok post and Retry buttons post nothing and show a "Not done" message.
 
 When you turn it back on, the waiting videos post through the normal publish stage under the usual
 posting limits (`publishing.limits`) and backlog rule. Posting also still needs the existing consent

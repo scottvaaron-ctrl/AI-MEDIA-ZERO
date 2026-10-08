@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if error %}<div class="card"><b>Not done:</b> {{ error }}</div>{% endif %}
 <div class="card">
   <h3>Publishing state <span class="muted">(YouTube mode: {{ env.youtube_mode }}, TikTok: package)</span></h3>
   <table>

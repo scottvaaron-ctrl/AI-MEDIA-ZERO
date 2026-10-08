@@ -181,7 +181,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
         rows = q(
             "SELECT p.*, v.title FROM publications p JOIN videos v ON v.id=p.video_id ORDER BY p.created_at DESC LIMIT 200"
         )
-        return render(request, "publishing.html", pubs=rows)
+        return render(request, "publishing.html", pubs=rows, error=request.query_params.get("error"))
 
     @app.get("/metrics", response_class=HTMLResponse)
     def metrics(request: Request) -> HTMLResponse:
@@ -311,9 +311,17 @@ def create_app(svc: Services | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="state must be 'on' or 'off'")
         return RedirectResponse("/controls", status_code=303)
 
-    def may_post() -> bool:
+    def blocked_post() -> RedirectResponse | None:
         """Owner one-tap posts follow the same switches as the cycle (the kill switch overrides all)."""
-        return svc.posting.is_on() and not svc.killswitch.is_engaged()
+        from urllib.parse import quote
+
+        if svc.killswitch.is_engaged():
+            why = "the kill switch is engaged; nothing was posted. Resume first."
+        elif not svc.posting.is_on():
+            why = "posting is off; nothing was posted. Turn it on under Controls or `python -m aimz posting on`."
+        else:
+            return None
+        return RedirectResponse(f"/publishing?error={quote(why)}", status_code=303)
 
     @app.post("/controls/budget")
     def set_budget(
@@ -504,8 +512,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
     @app.post("/publications/{pub_id}/tiktok")
     def tiktok_post(pub_id: str, privacy_level: str = Form(...), consent: str = Form("")) -> RedirectResponse:
         """One-tap TikTok post: the owner picks privacy from creator_info options and consents explicitly."""
+        blocked = blocked_post()
+        if blocked:
+            return blocked
         pub = svc.db.get("publications", pub_id)
-        if pub and consent == "yes" and may_post():
+        if pub and consent == "yes":
             if pub["status"] in {"packaged", "blocked", "failed"}:
                 svc.db.update("publications", pub_id, {"status": "pending", "updated_at": now_iso()})
             with svc.tracker.run("publish") as ctx:
@@ -521,8 +532,11 @@ def create_app(svc: Services | None = None) -> FastAPI:
     @app.post("/publications/{pub_id}/retry")
     def retry_publish(pub_id: str) -> RedirectResponse:
         """Owner explicitly re-queues a failed publication (the system never does this on its own)."""
+        blocked = blocked_post()
+        if blocked:
+            return blocked
         pub = svc.db.get("publications", pub_id)
-        if pub and pub["status"] in {"failed", "blocked"} and may_post():
+        if pub and pub["status"] in {"failed", "blocked"}:
             svc.db.update("publications", pub_id, {"status": "pending", "updated_at": now_iso()})
             with svc.tracker.run("publish") as ctx:
                 orch.publisher.publish(ctx, pub["video_id"], platforms=[pub["platform"]], owner_approved=True)

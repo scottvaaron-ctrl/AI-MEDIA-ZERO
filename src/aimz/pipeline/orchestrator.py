@@ -204,7 +204,10 @@ class Orchestrator:
             )
             out["videos"] += 1
         # An upload that no poll can finish. The post may or may not exist, so it goes to the checked retry.
-        for pub in db.query("SELECT * FROM publications WHERE status='uploading'"):
+        # Not while the owner's posting switch is off: the retry is held then, so the row stays 'uploading'
+        # (the publish stage keeps polling it) and is only judged once posting is back on.
+        posting_on = self.svc.posting.is_on()
+        for pub in db.query("SELECT * FROM publications WHERE status='uploading'") if posting_on else []:
             publisher = self.svc.publishers.get(pub["platform"])
             can_poll = publisher is not None and type(publisher).poll is not Publisher.poll
             if pub["updated_at"] < iso_ago(hours=24 if can_poll else 1):
@@ -404,12 +407,13 @@ class Orchestrator:
     def publish_rendered(self, run: RunContext) -> list[dict[str, Any]]:
         """Post what is waiting, oldest first, within the owner's posting limits (``pipeline/posting.py``).
 
-        With the owner's posting switch off (``core/posting.py``) nothing happens: no upload, no packaging,
-        no automatic retry. Rendered videos wait as ``rendered`` and post once the switch is back on."""
+        With the owner's posting switch off (``core/posting.py``) nothing new is posted: no upload, no
+        packaging, no automatic retry. Rendered videos wait as ``rendered`` and post once the switch is back
+        on. Uploads already sent are still polled to completion: finishing them is not new posting."""
+        self.publisher.poll_pending(run)
         if not self.svc.posting.is_on():
             run.note("publish", "posting switch off")
             return []
-        self.publisher.poll_pending(run)
         results: list[dict[str, Any]] = []
         with self.publisher.posting(run) as session:
             if not session.allowed:

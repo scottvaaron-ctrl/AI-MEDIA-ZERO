@@ -176,7 +176,7 @@ Set `FONT_FILE` in `.env` to a bold TTF (e.g. `/usr/share/fonts/truetype/dejavu/
 | `aimz metric add PUB_ID --views ...` | manual metrics |
 | `aimz strategy show\|learn\|review [daily\|weekly\|monthly]\|edit FILE` | strategy memory |
 | `aimz experiments` | experiment table |
-| `aimz status` | kill switch, posting switch, budget, counts, last run |
+| `aimz status` | kill switch, posting switch (`posting_switch`), budget, counts, last run |
 | `aimz kill [--reason ..]` / `aimz resume` | hard kill switch: the agent does nothing (only YouTube data clean-up runs) |
 | `aimz posting on\|off [--reason ..]` / `aimz posting status` | posting switch: pause posting only; everything else runs |
 | `aimz budget` | ledger view |

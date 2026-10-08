@@ -276,3 +276,99 @@ def test_dashboard_posting_toggle(svc) -> None:  # noqa: ANN001
     assert r.status_code == 303 and svc.posting.is_on()
     r = client.post("/controls/posting", data={"state": "maybe"}, follow_redirects=False)
     assert r.status_code == 400 and svc.posting.is_on()
+
+
+def _old_upload(svc, platform: str, publisher: str) -> tuple[str, str]:  # noqa: ANN001
+    """A publication sent before posting was turned off, still 'uploading' 30 hours later."""
+    from aimz.util import dumps, iso_ago
+
+    vid = _seed_video(svc)
+    old = iso_ago(hours=30)
+    svc.db.insert(
+        "publications",
+        {
+            "id": "pub_inflight",
+            "video_id": vid,
+            "platform": platform,
+            "publisher": publisher,
+            "mode": "direct",
+            "idempotency_key": "k-inflight",
+            "status": "uploading",
+            "metadata_json": dumps({"publish_id": "v_pub~1"}),
+            "created_at": old,
+            "updated_at": old,
+        },
+    )
+    return vid, "pub_inflight"
+
+
+def test_posting_off_polls_inflight_upload_to_completion(svc) -> None:  # noqa: ANN001
+    from aimz.domain.models import PublishResult
+
+    class Poller(RecordingPublisher):
+        platform = "tiktok"
+        mode = "direct"
+
+        def poll(self, ctx, publication):  # noqa: ANN001, ANN202
+            return PublishResult(status="published", platform_video_id="tt1", url="https://t/tt1")
+
+    svc.publishers = {"tiktok": Poller()}
+    vid, pid = _old_upload(svc, "tiktok", "Poller")
+    svc.posting.turn_off("owner", "")
+    summary = _orch(svc).cycle(["publish"])
+    assert summary["publish"] == "posting switch off"
+    pub = svc.db.get("publications", pid)
+    assert pub["status"] == "published" and pub["attempts"] == 0
+    assert svc.db.get("videos", vid)["status"] == "published"
+
+
+def test_posting_off_recover_does_not_fail_inflight_upload(svc) -> None:  # noqa: ANN001
+    """A publisher with no poll: recover() would call it uncertain after 1h, but not while posting is off."""
+    svc.publishers = {"youtube": RecordingPublisher()}
+    _vid, pid = _old_upload(svc, "youtube", "RecordingPublisher")
+    svc.posting.turn_off("owner", "")
+    _orch(svc).cycle(["publish"])
+    pub = svc.db.get("publications", pid)
+    assert pub["status"] == "uploading" and pub["attempts"] == 0 and not pub["last_error"]
+    # Back on: the normal recovery judges it again (unchanged behaviour).
+    svc.posting.turn_on("owner", "")
+    _orch(svc).cycle(["publish"])
+    assert svc.db.get("publications", pid)["status"] != "uploading"
+
+
+def test_dashboard_blocked_posts_show_a_message(svc) -> None:  # noqa: ANN001
+    from fastapi.testclient import TestClient
+
+    from aimz.dashboard.app import create_app
+
+    vid = _seed_video(svc)
+    svc.db.insert(
+        "publications",
+        {
+            "id": "pub_failed",
+            "video_id": vid,
+            "platform": "youtube",
+            "publisher": "RecordingPublisher",
+            "mode": "public",
+            "idempotency_key": "k-failed",
+            "status": "failed",
+            "created_at": "2026-10-01T00:00:00+00:00",
+            "updated_at": "2026-10-01T00:00:00+00:00",
+        },
+    )
+    client = TestClient(create_app(svc))
+    svc.posting.turn_off("owner", "")
+    r = client.post("/publications/pub_failed/retry", follow_redirects=False)
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    assert svc.db.get("publications", "pub_failed")["status"] == "failed"
+    page = client.get(r.headers["location"])
+    assert "Not done" in page.text and "posting is off" in page.text
+    svc.posting.turn_on("owner", "")
+    svc.killswitch.engage("test")
+    r = client.post(
+        "/publications/pub_failed/tiktok",
+        data={"privacy_level": "SELF_ONLY", "consent": "yes"},
+        follow_redirects=False,
+    )
+    assert "error=" in r.headers["location"] and "kill" in r.headers["location"]
+    assert svc.db.get("publications", "pub_failed")["status"] == "failed"
