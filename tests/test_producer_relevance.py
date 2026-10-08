@@ -212,6 +212,75 @@ def test_no_pass_any_query_gives_text_card(svc, monkeypatch: pytest.MonkeyPatch)
     assert prov.searched == queries
     assert prov.fetched == []
     assert scenes[0].asset_id is None and first_image is None and attributions == []
+    assert not svc.db.get_state("relevance_previews_failing")
+
+
+# ---- starvation guard: previews that cannot be loaded at all ------------------------------------------------
+
+
+def test_all_previews_unloadable_falls_back_and_flags(
+    svc,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,  # noqa: ANN001
+) -> None:
+    from aimz.core.attention import attention
+
+    prov = FakeProvider(
+        svc,
+        {
+            "Jupiter moon discovery": [_cand("one"), _cand("two")],
+            "Saturn ring system": [_cand("three")],
+        },
+        unscorable={"one", "two", "three"},
+    )
+    svc.assets = [prov]
+    scorer = FakeScorer({"one": 0.9, "two": 0.9, "three": 0.9})
+    _gate(svc, monkeypatch, scorer)
+    beats = [
+        Beat(
+            narration="Amalthea was found in 1892.",
+            visual_query="Jupiter moon discovery",
+            visual_type="image",
+        ),
+        Beat(narration="Saturn has bright rings.", visual_query="Saturn ring system", visual_type="image"),
+    ]
+    producer = _producer(svc)
+    with caplog.at_level(logging.WARNING):
+        scenes, *_ = _assemble(producer, svc, beats)
+    assert scorer.calls == []  # nothing could be scored
+    assert prov.fetched == ["one", "three"]  # first download wins instead of two text cards
+    assert scenes[0].asset_id is not None and scenes[0].asset_id.startswith("asset_one")
+    assert scenes[1].asset_id is not None and scenes[1].asset_id.startswith("asset_three")
+    warnings = [r for r in caplog.records if "no preview could be loaded" in r.getMessage()]
+    assert len(warnings) == 1  # once per run, not once per beat
+    assert svc.db.get_state("relevance_previews_failing")
+    items = attention(svc.db)["picture_check_previews_failing"]
+    assert items[0]["why"] == "picture-matching check: previews could not be loaded"
+    assert items[0]["fix"] == (
+        "check network access to the picture source; pictures are chosen without the check meanwhile"
+    )
+    note = producer.relevance_note()
+    assert note is not None and note["fallback"] == 2
+
+
+def test_scored_preview_clears_previews_failing(svc, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from aimz.core.attention import attention
+
+    svc.db.set_state("relevance_previews_failing", "no preview could be loaded")
+    prov = FakeProvider(svc, {"Jupiter moon discovery": [_cand("one"), _cand("two")]}, unscorable={"one"})
+    svc.assets = [prov]
+    _gate(svc, monkeypatch, FakeScorer({"two": 0.05}))  # scored, but below the threshold
+    beats = [
+        Beat(
+            narration="Amalthea was found in 1892.",
+            visual_query="Jupiter moon discovery",
+            visual_type="image",
+        )
+    ]
+    scenes, *_ = _assemble(_producer(svc), svc, beats)
+    assert not svc.db.get_state("relevance_previews_failing")
+    assert "picture_check_previews_failing" not in attention(svc.db)
+    assert prov.fetched == [] and scenes[0].asset_id is None  # still a text card: scored and failed
 
 
 def test_disabled_config_first_download_wins(svc, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001

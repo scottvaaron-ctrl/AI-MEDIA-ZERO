@@ -12,6 +12,7 @@ from typing import Any
 
 from aimz import guideline, identity
 from aimz.agents.base import Agent
+from aimz.core.attention import PREVIEWS_STATE, RELEVANCE_STATE  # picture-check states (aimz status)
 from aimz.core.runs import RunContext
 from aimz.domain.models import AssetCandidate, AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
@@ -36,9 +37,6 @@ def asset_queries(visual_query: str, title: str) -> list[str]:
         if len(words) >= 3:
             out.append(" ".join(words[:2]))
     return list(dict.fromkeys(q for q in out if q))
-
-
-RELEVANCE_STATE = "relevance_unavailable"  # why the picture-matching check is off (shown by ``aimz status``)
 
 
 def rank_candidates(
@@ -180,6 +178,8 @@ class ProducerAgent(Agent):
         self._guideline_loaded = False
         # Picture-matching check: (run id, reason) once it is unavailable for that run; per-beat records.
         self._gate_off: tuple[str | None, str] | None = None
+        # (run id,) once that run has warned that no preview could be loaded (a tuple so a None run id counts).
+        self._previews_warned: tuple[str | None] | None = None
         self._relevance_beats: list[dict[str, Any]] = []
         self._relevance_fallback = 0
         self._query_log: list[dict[str, Any]] | None = None
@@ -571,11 +571,18 @@ class ProducerAgent(Agent):
                 if asset is not None or self._gate_reason(ctx) is not None:
                     break
             tried, self._query_log = self._query_log, None
-            if self._gate_reason(ctx) is None:
+            starved = (
+                asset is None
+                and sum(q["candidates"] for q in tried) > 0
+                and all(q["top_score"] is None for q in tried)
+            )
+            if self._gate_reason(ctx) is None and not starved:
                 self._relevance_beats.append(
                     {"beat": idx, "queries": tried, "chosen": asset.id if asset is not None else "text_card"}
                 )
                 return asset
+            if starved:
+                self._previews_failing(ctx, sum(q["candidates"] for q in tried))
             self._relevance_fallback += 1
             if asset is not None:  # the scorer failed and _find_asset already fell back for that query
                 return asset
@@ -586,6 +593,16 @@ class ProducerAgent(Agent):
             if asset is not None:
                 return asset
         return None
+
+    def _previews_failing(self, ctx: Any, candidates: int) -> None:
+        """A beat found candidates but could load none of their previews: it falls back to first download
+        wins (not a text card); warn once per run and show it in ``aimz status`` until a preview scores."""
+        run_id = getattr(ctx, "run_id", None)
+        reason = f"{candidates} picture(s) found but no preview could be loaded"
+        if self._previews_warned != (run_id,):
+            self.log.warning("picture-matching check: %s; first download wins for such beats", reason)
+            self._previews_warned = (run_id,)
+        self.svc.db.set_state(PREVIEWS_STATE, reason[:500])
 
     def relevance_note(self) -> dict[str, Any] | None:
         """The last ``assemble`` call's picture-matching record, or None when the check was off."""
@@ -636,8 +653,9 @@ class ProducerAgent(Agent):
             finally:
                 for img in images:
                     img.close()
-            if self.svc.db.get_state(RELEVANCE_STATE):
-                self.svc.db.set_state(RELEVANCE_STATE, "")
+            for state in (RELEVANCE_STATE, PREVIEWS_STATE):  # a preview was loaded and scored
+                if self.svc.db.get_state(state):
+                    self.svc.db.set_state(state, "")
         if self._query_log is not None:
             self._query_log.append(
                 {"query": query, "candidates": found, "top_score": round(max(scores), 4) if scores else None}
