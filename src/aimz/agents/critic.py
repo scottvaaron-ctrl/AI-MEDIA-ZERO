@@ -103,6 +103,9 @@ ALLEGATION_TERMS = (
 )
 _NAME_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+")
 _SENTENCES = re.compile(r"(?<=[.!?])\s+")
+# "<up to 6 words> is/are/was/were a/an": the shape of a dictionary-style opening line.
+_DEFINITION_RE = re.compile(r"^(?:\S+\s+){0,6}?(?:is|are|was|were)\s+(?:a|an)\b", re.I)
+_QUOTES = "\"'“”‘’"
 # Guideline stages whose rules the critic is shown and may report as broken.
 GATED_STAGES = ("script", "title")
 
@@ -116,6 +119,39 @@ def allegation_sentences(text: str) -> list[str]:
         if _NAME_RE.search(sentence) and any(re.search(r"\b" + re.escape(t), low) for t in ALLEGATION_TERMS):
             out.append(sentence.strip())
     return out
+
+
+def hook_revisions(texts: list[str], checks: dict[str, Any]) -> list[str]:
+    """Guideline hook checks on the hook line and the first narration sentence.
+
+    Each distinct text is checked for banned openings, the word limit, a question and a definition;
+    identical messages are reported once."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in texts:
+        text = raw.strip().strip(_QUOTES).strip()
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        low = text.lower()
+        for opening in checks.get("banned_openings") or []:
+            if str(opening).strip() and low.startswith(str(opening).strip().lower()):
+                out.append(f"Opening '{opening}' is banned by the guideline")
+        words = text.split()
+        limit = checks.get("hook_max_words")
+        if limit is not None and len(words) > int(limit):
+            out.append(f"Hook is {len(words)} words; the guideline allows {int(limit)}")
+        if checks.get("hook_no_question") and "?" in text:
+            out.append("Hook asks a question; the guideline forbids it")
+        if (
+            checks.get("hook_no_definition")
+            and words[0].lower().strip(",.;:!?") not in ("there", "here")
+            and _DEFINITION_RE.match(text)
+        ):
+            out.append(
+                f'Hook opens with a definition ("{" ".join(words[:8])}..."); state the surprise instead'
+            )
+    return list(dict.fromkeys(out))
 
 
 class CriticAgent(Agent):
@@ -254,10 +290,8 @@ class CriticAgent(Agent):
         seconds = len(narration.split()) / WORDS_PER_SECOND
         if runtime_override is None and not g.runtime_min <= seconds <= g.runtime_max:
             out.append(f"Runtime {seconds:.0f}s is outside the guideline's {g.runtime_min}-{g.runtime_max}s")
-        first = _SENTENCES.split(narration.strip(), maxsplit=1)[0].lower()
-        for opening in g.checks.get("banned_openings") or []:
-            if str(opening).strip() and first.startswith(str(opening).strip().lower()):
-                out.append(f"Opening '{opening}' is banned by the guideline")
+        first = _SENTENCES.split(narration.strip(), maxsplit=1)[0]
+        out += hook_revisions([draft.hook_line, first], g.checks)
         limit = g.checks.get("title_max_chars")
         if limit is not None and len(draft.title) > int(limit):
             out.append(f"Title is {len(draft.title)} characters; the guideline allows {int(limit)}")

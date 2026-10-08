@@ -298,3 +298,60 @@ def test_critic_ignores_broken_rules_outside_script_and_title(g) -> None:  # noq
     r.broken_rules = ["G-hook"]
     out = _gate(_clean_draft(), g, r, replace={"G-hook": "Open on a question."})
     assert out.required_revisions == ["Breaks G-hook (Open on the surprise): Open on a question."]
+
+
+def _hook_out(g: guideline.Guideline, opening: str) -> list[str]:
+    return _gate(_draft(opening), g).required_revisions
+
+
+def test_hook_too_long(g) -> None:  # noqa: ANN001
+    opening = " ".join(["word"] * 20) + "."
+    out = _gate(_draft(opening), g)
+    assert "Hook is 20 words; the guideline allows 15" in out.required_revisions
+    assert out.passed is False
+
+
+def test_hook_question(g) -> None:  # noqa: ANN001
+    out = _hook_out(g, "Why did Amalthea hide for centuries?")
+    assert "Hook asks a question; the guideline forbids it" in out
+
+
+def test_hook_definition(g) -> None:  # noqa: ANN001
+    out = _hook_out(g, "The zodiacal light is a faint glow in the sky.")
+    expected = 'Hook opens with a definition ("The zodiacal light is a faint glow in...");'
+    assert any(x.startswith(expected) for x in out)
+
+
+def test_hook_definition_curly_quote(g) -> None:  # noqa: ANN001
+    out = _hook_out(g, "“The zodiacal light is a faint glow.”")
+    assert any(x.startswith("Hook opens with a definition") for x in out)
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "This town is the only place where clocks stop.",
+        "There is a village that sits inside another country.",
+        "Here is a border nobody can cross.",
+    ],
+)
+def test_hook_not_definition(g, opening: str) -> None:  # noqa: ANN001
+    assert not any(x.startswith("Hook opens with a definition") for x in _hook_out(g, opening))
+
+
+def test_banned_opening_in_hook_line(g) -> None:  # noqa: ANN001
+    draft = _clean_draft().model_copy(update={"hook_line": "Did you know this?"})
+    out = _gate(draft, g).required_revisions
+    assert out.count("Opening 'Did you know' is banned by the guideline") == 1
+
+
+def test_hook_same_text_reported_once(g) -> None:  # noqa: ANN001
+    opening = " ".join(["word"] * 20) + "."
+    out = _hook_out(g, opening)
+    assert out.count("Hook is 20 words; the guideline allows 15") == 1
+
+
+def test_hook_empty_texts(g) -> None:  # noqa: ANN001
+    from aimz.agents.critic import hook_revisions
+
+    assert hook_revisions(["", "   "], g.checks) == []
