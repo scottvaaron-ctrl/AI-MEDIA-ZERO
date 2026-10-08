@@ -26,9 +26,11 @@ YouTube projects (Breakdown, Monmouth County & Politics) are separate and owner-
 
 | Part | What | Status |
 |---|---|---|
-| 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done** (branch `feat/guideline-system`, 2026-10-07) |
+| 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done**, merged to `main` 2026-10-08 (`fb57dad`), 416 tests |
 | 2 | Production abilities the guideline needs: full-bleed default layout, SigLIP image-to-narration relevance gate, Kokoro TTS, attribution in the description, -14 LUFS mastering, stock-video providers | Not started |
-| 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started |
+| 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started (a test-only draft exists: `data/tests/2026-10-07-guideline-test/guideline-TEST-DRAFT.md`) |
+| Switches | Kill switch = the agent does nothing (only YouTube's required data deletion runs); new posting switch `python -m aimz posting on|off|status` pauses only posting | **Done**, merged 2026-10-08 (owner decision 2026-10-07) |
+| Constitution | Sections 1, 3, 4 and 8 rewritten (owner-approved 2026-10-07) | **Done** |
 
 Until part 3 exists there is no `config/guideline.md` on `main`, and the channel behaves exactly as before.
 Parts 2 and 3 each get their own spec.
@@ -172,17 +174,86 @@ Applied to `config/constitution.md` on 2026-10-07 after the owner approved it. T
 
 ## 5. Known gaps (deferred, from reviews)
 
-* With a guideline the KPI is always the composite score; the guideline is loaded once per process.
-* Dashboard POSTs have no CSRF protection (same as the existing controls).
-* The dry-run test relaxes the sample's 60-character title check to 100 in its temporary copy, because the
-  fixture LLM writes long titles.
-* See the build ledger (`.superpowers/sdd/2026-10-07-guideline-system/progress.md`) for the full list of
-  minor deferrals.
+All are minor; none blocks parts 2 or 3. The build ledger was deleted with the worktree, so this is the full list.
 
-## 6. Session log
+* **Loader:** `runtime_s` uses `int()`, so it truncates floats and accepts bools, and number settings accept a bool.
+  The YAML fence is matched anywhere in the file, not only at the top. The 10-180 s runtime limits are hard-coded
+  in `guideline.py`.
+* **Critic:** the old "Guideline runtime: N-Ms" suffix in the script prompt is redundant.
+  `guideline.for_services` runs twice when there is no guideline.
+* **Editor:** if the chosen idea breaks a topic rule, that slot is empty for the cycle, and this is undocumented.
+  The editor may pick an older unlabelled idea when the needed arm has no candidates; that idea runs outside the
+  experiment.
+* **Experiments:**
+  * With a guideline, the KPI is always the composite score (spec D5).
+  * The guideline is loaded once per process.
+  * `cooldown_left` compares second-precision timestamps with a strict `>`.
+  * While a topic-rule experiment runs, ideation makes 2 LLM calls per batch.
+* **Constitution screen:** the phrase list misses "fabricating", "fabrication", "made up" and "invent a quote", and
+  "make up" can false-positive. The critic and fact-check still gate every script.
+* **Proposals:**
+  * A column-0 YAML comment inside `locked:`, or a heading inside a variant, makes approve impossible. This fails
+    safe: nothing is written.
+  * The template rounds p to "100%" at p ≥ 0.995.
+  * `test_cli_reject_needs_note` is misnamed: notes are optional.
+  * The learn sweep could retry forever if a `variant_won` experiment's item already has a pending proposal. The
+    one-pending and one-running rules should prevent this.
+* **Dashboard:** POSTs have no CSRF protection, the same as the existing controls.
+* **Instances:** the `NOT APPROVED` marker is a substring match anywhere in the file.
+* **Tests:**
+  * The dry-run test relaxes the sample's 60-character title check to 100, because the fixture LLM writes long
+    titles.
+  * There is no second-cycle orchestrator test of migration idempotence (a unit test covers it).
+  * `test_identity` still has "starting_genres" in a test name.
+  * The suite prints a pre-existing Starlette deprecation warning.
+* **Polling:** if a poll call raises an error while posting is off, the row becomes an "uncertain" failure. Its
+  retry waits until posting is back on and uses no attempts. A pre-existing edge: after a kill longer than 24 h,
+  `recover()` runs before publish, so a pollable `uploading` row is marked uncertain instead of being polled.
+
+## 6. Handoff: open items (2026-10-08)
+
+Do these in order.
+
+1. **Owner: log in to YouTube again.** The login expired on 7 Oct, and live YouTube uploads have failed since then
+   (`invalid_grant`).
+   * Command: `.\.venv\Scripts\python.exe -m aimz youtube auth`.
+   * Also set the OAuth consent screen to "In production", so the login stops expiring every 7 days.
+   * Agents cannot do this: it is an interactive Google sign-in.
+2. **Then upload the test video unlisted and send the owner the link.** Steps are in
+   `data/tests/2026-10-07-guideline-test/README.md`. The owner asked for this link.
+3. **Part 2 (production abilities).** Write a spec with the brainstorming process, then a plan, then build. The
+   owner already approved the direction on 2026-10-07: the full list is in section 1. Add what the test video
+   showed:
+   * **Deterministic hook check.** The small critic model does not enforce craft rules reliably. The test opened
+     with "The zodiacal light is a faint glow..." and G-hook was not flagged. Add code checks for definition
+     openings ("<Name> is a/an/the ...") and for the guideline's banned openings.
+   * **Genre enforcement.** The test ignored the guideline's genre. Ideation and editor topic gating need to
+     enforce `guideline.genre`, not only show it.
+   * **SigLIP relevance gate.** One image did not match its beat.
+   * **Image credits moved into the description.** The CC licence allows it when nothing is credited on screen.
+     See `docs/VIDEO_QUALITY_RESEARCH.md`.
+   * **Kokoro-82M voice** (Apache-2.0, CPU). Add it as a voice option; the guideline then locks it.
+   * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
+4. **Part 3.** Draft Backhouse Explainers' `config/guideline.md` from the research and the test draft. The owner
+   approves it line by line before it goes in place. The channel's current identity is "maps and geography
+   oddities", voice `en_US-kristin-medium`. Writing this file activates the guideline: the first cycle retires
+   the running experiment and hands the locked settings to the guideline.
+5. **Owner items outside this plan:**
+   * Google's compliance screencast, due Thu 15 Oct (`docs/OWNER_TODO.md` A0).
+   * The constitution section 5 media sentence for stock media (A3).
+6. **Uncommitted files on `main`.** As of 2026-10-08 these are not committed:
+   * `config/strategy.md`: written by the AI each cycle, which is normal.
+   * `docs/CEO_BRIEF.md` and `docs/OWNER_TODO.md`: edits from an earlier session about the compliance screencast,
+     plus this session's rescope and YouTube-login updates.
+
+   Commit them when the owner agrees, or leave them for the owner.
+
+## 7. Session log
 
 | Date | Part | What was done | Next |
 |---|---|---|---|
 | 2026-10-07 | Rescope | Owner rescoped the project; research and design in `docs/VIDEO_QUALITY_RESEARCH.md` and the spec; owner approved the spec and scoped it to Backhouse Explainers. | Build part 1 |
 | 2026-10-07 | Part 1 | Built the guideline system in eight tasks on `feat/guideline-system`: loader and versions; locked-value enforcement; craft rules in prompts and critic; one-experiment engine; proposals and owner approval with CLI and dashboard; strategist under a guideline and switch-over; new-channel gate; these docs and the offline dry-run test. Every task was reviewed. | Merge; owner approves the constitution wording (section 4); then the part 2 spec |
 | 2026-10-07 | Part 1 | Final whole-branch review fixes: loader survives a stored version that stops validating; cover-rule experiments refused; unavailable locked items in `aimz status`; critic gates script/title rule IDs only; whole-word constitution screen; cooldown after Guideline won / Safety stop (R11); proposal sweep in learn; owner edit supersedes a pending proposal. | Merge |
+| 2026-10-07 | Part 1 | Owner lowered the proposal bar to 90% (guideline wins and the safety stop now at P <= 0.10). | Test video |
+| 2026-10-07/08 | Test + switches | Rendered a 31 s test video in an isolated copy with a test-only guideline (`data/tests/2026-10-07-guideline-test/`). The upload failed because the YouTube login expired. Owner decided: auto-posting under guardrails, kill switch = do nothing, new posting switch; built and reviewed. Constitution sections 1/3/4/8 applied. Merged to `main` (`fb57dad`), 416 tests; live `aimz status` checked. | Section 6 (handoff) |

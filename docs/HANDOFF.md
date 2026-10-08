@@ -210,13 +210,27 @@ Do **not** use any hosting that meters bandwidth or has a paid tier that could b
 - `docs/DRY_RUN.md` documents 4B-vs-8B model calibration; re-run one cycle after any prompt
   change and check `aimz analytics` before committing.
 
-## 8a. Guideline system (2026-10-07)
+## 8a. Guideline system and owner switches (2026-10-07, merged 2026-10-08)
 
-Each channel can follow an owner-approved guideline (`config/guideline.md`) and test one change at a time; a
-winning change becomes a proposal the owner approves (`python -m aimz guideline proposals|approve|reject`).
-Where it lives, how experiments and proposals work, and the build rulings are in `docs/PLAN_GUIDELINE.md`.
-Parts 2 (production abilities) and 3 (the Backhouse Explainers guideline text) are not started. A channel with
-no guideline file behaves as before.
+**Start here:** read `docs/PLAN_GUIDELINE.md`. Section 6 lists the open items in order.
+
+**The guideline system:**
+- Each channel can follow an owner-approved guideline (`config/guideline.md`) and test one change at a time.
+- A change that wins (≥90% confidence, ≥10 videos per arm) becomes a proposal the owner approves:
+  `python -m aimz guideline proposals|approve|reject`.
+- Part 1 (the system) is merged and live. A channel with no guideline file behaves as before, and `main` has none
+  yet.
+- Next are part 2 (production abilities) and part 3 (the Backhouse Explainers guideline text).
+
+**Owner controls (changed 2026-10-07):**
+- **Kill switch:** the agent does nothing; only YouTube's required data deletion runs.
+- **Posting switch:** `python -m aimz posting on|off|status`, also on the dashboard and shown as `posting_switch`
+  in `aimz status`. It pauses only posting. Videos that pass every guardrail post automatically while it is on.
+- The constitution sections 1, 3, 4 and 8 say this.
+
+**Blocker as of 2026-10-08:** the YouTube login expired on 7 Oct, and uploads fail until the owner runs
+`aimz youtube auth`. After that, upload the test video in `data/tests/2026-10-07-guideline-test/` (unlisted)
+and send the owner the link.
 
 ## 9. Commands the next agent will use
 

@@ -11,8 +11,9 @@ extend it, don't replace it.
 4. `docs/ARCHITECTURE.md`, `docs/COMPLIANCE.md` — design; verified platform rules.
 5. `docs/CEO_BRIEF.md` — what the owner has been told; keep it current (see below).
 6. `docs/PLAN_GUIDELINE.md` — owner-approved plan (2026-10-07 rescope): each channel follows an owner-approved
-   guideline and the AI tests one change at a time. Start at the first part not marked Done, and update its
-   status table and session log. (`docs/PLAN_FULL_CONTROL.md` is superseded; it is history.)
+   guideline and the AI tests one change at a time. Work through its section 6 (open items, in order), then
+   the first part not marked Done. Update its status table and session log. (`docs/PLAN_FULL_CONTROL.md` is
+   superseded; it is history.)
 7. `docs/OWNER_TODO.md` — the owner's remaining steps (A) and the checks an agent runs after them (B).
 
 Launch through the interpreter (`python -m aimz ...`); Windows Smart App Control
