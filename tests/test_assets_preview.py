@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 
 import httpx
+import pytest
 from PIL import Image
 
 from aimz.domain.models import AssetCandidate
@@ -37,10 +38,43 @@ def _wiki(handler) -> WikimediaAssetProvider:  # noqa: ANN001
 
 
 def test_wikimedia_preview_url() -> None:
-    assert preview_url_for(THUMB) == THUMB.replace("1280px-", "320px-")
-    assert preview_url_for(THUMB, 200).endswith("/200px-X.jpg")
+    # 320 is not a width the thumbnail server serves (HTTP 400); it snaps up to 330.
+    assert preview_url_for(THUMB) == THUMB.replace("1280px-", "330px-")
+    assert preview_url_for(THUMB, 200).endswith("/250px-X.jpg")
     plain = "https://upload.wikimedia.org/wikipedia/commons/a/ab/X.jpg"
     assert preview_url_for(plain) == plain
+
+
+@pytest.mark.parametrize(
+    ("requested", "served"),
+    [
+        (1, 20),
+        (20, 20),
+        (21, 40),
+        (100, 120),
+        (250, 250),
+        (320, 330),
+        (330, 330),
+        (331, 500),
+        (960, 960),
+        (1280, 1280),
+        (1281, 1920),
+        (3840, 3840),
+        (4000, 3840),
+    ],
+)
+def test_wikimedia_standard_width(requested: int, served: int) -> None:
+    from aimz.providers.assets.wikimedia import standard_width
+
+    assert standard_width(requested) == served
+
+
+def test_wikimedia_preview_url_keeps_query_string() -> None:
+    url = (
+        "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/X.jpg/1280px-X.jpg"
+        "?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    )
+    assert preview_url_for(url, 320) == url.replace("/1280px-", "/330px-")
 
 
 def test_wikimedia_search_sets_preview_url(svc) -> None:  # noqa: ANN001
@@ -67,7 +101,7 @@ def test_wikimedia_search_sets_preview_url(svc) -> None:  # noqa: ANN001
     prov = _wiki(lambda req: httpx.Response(200, json=payload))
     found = prov.search(svc.ctx(), "x")
     assert found[0].file_url == THUMB
-    assert found[0].preview_url == THUMB.replace("1280px-", "320px-")
+    assert found[0].preview_url == THUMB.replace("1280px-", "330px-")
 
 
 def test_pexels_preview_url_small(svc) -> None:  # noqa: ANN001
@@ -116,7 +150,7 @@ def test_preview_returns_image(svc) -> None:  # noqa: ANN001
 
     img = _wiki(handler).preview(svc.ctx(), _cand(THUMB), width=320)
     assert isinstance(img, Image.Image) and img.size == (8, 6)
-    assert seen == [THUMB.replace("1280px-", "320px-")]
+    assert seen == [THUMB.replace("1280px-", "330px-")]  # 320 snaps to a served width
     img.getpixel((0, 0))  # fully loaded: usable with no open file
 
     pex = PexelsAssetProvider("KEY", "ua", _client(lambda req: httpx.Response(200, content=_png_bytes())))

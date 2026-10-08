@@ -30,10 +30,20 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 _THUMB_WIDTH_RE = re.compile(r"/\d+px-")
 
+# The only widths Wikimedia's thumbnail server serves; any other width is refused (HTTP 400, checked live
+# 2026-10-08: 320 -> 400, 330 -> 200).
+STANDARD_WIDTHS = (20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840)
+
+
+def standard_width(width: int) -> int:
+    """The smallest served width at or above ``width`` (capped at the largest)."""
+    return next((w for w in STANDARD_WIDTHS if w >= int(width)), STANDARD_WIDTHS[-1])
+
 
 def preview_url_for(file_url: str, width: int = 320) -> str:
-    """The thumb URL with its width segment (``/1280px-``) replaced by ``/<width>px-``; unchanged if absent."""
-    return _THUMB_WIDTH_RE.sub(f"/{int(width)}px-", file_url, count=1)
+    """The thumb URL with its width segment (``/1280px-``) replaced by the served width at or above ``width``
+    (``/330px-`` for 320); any query string is kept. Unchanged if the URL has no width segment."""
+    return _THUMB_WIDTH_RE.sub(f"/{standard_width(width)}px-", file_url, count=1)
 
 
 def _strip_html(s: str) -> str:
