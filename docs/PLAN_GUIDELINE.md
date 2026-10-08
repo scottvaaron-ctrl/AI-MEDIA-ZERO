@@ -247,6 +247,8 @@ Do these in order.
      plus this session's rescope and YouTube-login updates.
 
    Commit them when the owner agrees, or leave them for the owner.
+7. **Not pushed:** local `main` is ahead of `origin/main` (GitHub) by this work, about 23 commits. Pushing is the
+   owner's call: ask before `git push`. CI then runs on GitHub.
 
 ## 7. Session log
 
