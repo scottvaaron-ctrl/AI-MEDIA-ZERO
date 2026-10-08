@@ -81,7 +81,7 @@ Our current template (same layout, same voice, same Ken Burns, Wikipedia-style r
   - For us, a SigLIP 2 model (Apache-2.0, CPU) can score each candidate image against a concrete visual query and reject the off-topic ones.
   - Thresholds must be calibrated on about 50 of our own hand-labelled pairs.
   - CLIP is weak on dates and named people, so keep the metadata check for those.
-- **Calibration (2026-10-08).** SigLIP 2 base, 8-bit ONNX, scoring a 320 px preview against the beat.
+- **Calibration (2026-10-08).** SigLIP 2 base, 8-bit ONNX, scoring a 330 px preview (Wikimedia's served size) against the beat.
   - Data: 50 distinct picture/narration pairs from 48 past videos (`scripts/calibrate_relevance.py build`), labelled
     by Claude: 34 match, 16 mismatch, no synthetic mismatches. Rule: "match" if the picture shows the kind of thing
     the sentence is about; a wrong named person or date still counts as a match, because this model cannot judge
@@ -92,7 +92,8 @@ Our current template (same layout, same voice, same Ken Burns, Wikipedia-style r
     ones (a pop concert for a NASA "Mars" story, a statue for a nebula) sit at the bottom.
   - The balanced-accuracy pass mark (0.0012) rejected 13 of 34 good pictures, which would turn many beats into text
     cards. **Chosen instead: a floor of 0.00005** (keeps 31/34 good, rejects 6/16 bad outright). The main gain is
-    ranking: the best-scoring of up to 24 candidates per beat is used instead of the first download.
+    ranking: the best-scoring candidate of the first search that has one above the floor (up to 6 per source) is
+    used instead of the first download.
   - Revisit after a few weeks of run notes (`relevance` entries: top scores, text-card rate).
 
 ### Attribution

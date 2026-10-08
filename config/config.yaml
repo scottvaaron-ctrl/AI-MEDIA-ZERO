@@ -154,7 +154,9 @@ assets:
     max_results: 6
   # Picture-matching check (SigLIP 2): a candidate is used only if its preview matches the beat, else a
   # text card. Calibrated 2026-10-08 on 50 hand-labelled pairs (docs/VIDEO_QUALITY_RESEARCH.md): the threshold is
-  # a low floor that rejects only clearly unrelated pictures; ranking the candidates does most of the work.
+  # a low floor that rejects only clearly unrelated pictures; ranking does most of the work: the beat gets the
+  # best-scoring candidate of the first search that has one above the floor (up to 6 per source).
+  # preview_width is snapped up to a width Wikimedia serves (320 -> 330).
   relevance:
     enabled: true
     text: narration       # narration | visual_query | max

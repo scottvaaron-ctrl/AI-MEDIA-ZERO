@@ -165,7 +165,9 @@ The wording to paste is drafted in `docs/PLAN_FULL_CONTROL.md` **section 8**:
   - **Picture check (piece B), after the first live video once it is merged and the model is installed:**
     that video's run note has a `relevance` entry for every beat; `py -m aimz status` shows no picture-check
     warning (no "check unavailable" line); and the video's frames show no credit or AI-disclosure text (credit
-    and disclosure are in the description only). Spot-check that pictures fit their beats.
+    and disclosure are off the frames: credits are in the YouTube description, the TikTok caption and a Bluesky
+    reply under the post; disclosure is in the description and the platform labels). Spot-check that
+    pictures fit their beats and that the Bluesky post has its "Image credits:" reply.
   - **Revisit the picture-check floor after a few weeks of run notes** (it is deliberately low, 0.00005): look at
     the text-card rate and the top scores per beat, and raise the floor if poor matches get through or lower it
     if too many good pictures become text cards. The owner confirms any change.
