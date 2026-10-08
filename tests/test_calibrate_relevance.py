@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import pytest
 from PIL import Image
 from scripts import calibrate_relevance as cal
 
@@ -128,28 +129,86 @@ def _rows(
     return rows
 
 
-def test_fit_picks_signal_and_threshold() -> None:
-    rows = _rows([0.3, 0.5, 0.9], [0.05, 0.1, 0.2], [0.1, 0.9, 0.05], [0.5, 0.05, 0.9])
+def test_fit_picks_signal_and_threshold_in_plateau_middle() -> None:
+    rows = _rows([0.3, 0.5, 0.9], [0.05, 0.08, 0.1], [0.1, 0.9, 0.05], [0.5, 0.05, 0.9])
     res = cal.fit(rows)
     assert res["signal"] == "narration"
-    assert res["threshold"] == 0.3
+    assert res["plateau_low"] == 0.1 and res["plateau_high"] == 0.3
+    assert res["threshold"] == pytest.approx(0.2)
     assert res["balanced_accuracy"] == 1.0
     assert (res["tp"], res["fn"], res["tn"], res["fp"]) == (3, 0, 3, 0)
     assert res["n_match"] == 3 and res["n_mismatch"] == 3
 
 
-def test_fit_threshold_is_observed_score_separating_at_point_two() -> None:
-    # matches >= 0.2, mismatches < 0.2: threshold on an observed score means 0.2 (lowest match)
-    rows = _rows([0.2, 0.6], [0.1, 0.15], [0.5, 0.1], [0.4, 0.3])
+def test_fit_wider_plateau_wins_between_signals() -> None:
+    # both signals separate perfectly; visual_query has the wider gap (0.2..0.8) than narration (0.4..0.5)
+    rows = _rows([0.5, 0.6], [0.1, 0.4], [0.8, 0.9], [0.1, 0.2])
     res = cal.fit(rows)
-    assert res["signal"] == "narration" and res["threshold"] == 0.2 and res["balanced_accuracy"] == 1.0
+    assert res["signal"] == "visual_query" and res["threshold"] == pytest.approx(0.5)
 
 
-def test_fit_tie_prefers_higher_threshold() -> None:
-    # every observed threshold from 0.2 to 0.5 separates perfectly; higher one wins
+def test_fit_threshold_midpoint_not_edge() -> None:
     rows = _rows([0.5, 0.6], [0.1, 0.2], [0.5, 0.6], [0.1, 0.2])
     res = cal.fit(rows)
-    assert res["balanced_accuracy"] == 1.0 and res["threshold"] == 0.5
+    assert res["balanced_accuracy"] == 1.0 and res["threshold"] == pytest.approx(0.35)
+
+
+def test_fit_reports_real_vs_synthetic_mismatches() -> None:
+    rows = _rows([0.9, 0.8], [0.1, 0.3], [0.9, 0.8], [0.1, 0.3])
+    rows[3]["synthetic"] = True  # the 0.3 mismatch is synthetic
+    # add a real mismatch scoring high so the real-only accuracy differs from the total
+    rows.append({"label": "mismatch", "scores": {"narration": 0.85, "visual_query": 0.85, "max": 0.85}})
+    res = cal.fit(rows)
+    assert res["n_mismatch"] == 3 and res["n_mismatch_real"] == 2 and res["n_mismatch_synthetic"] == 1
+    assert 0.0 <= res["balanced_accuracy_real"] <= 1.0
+    assert res["balanced_accuracy_real"] != res["balanced_accuracy"]
+
+
+def test_score_rows_marks_synthetic_and_downscales(tmp_path: Path) -> None:
+    Image.new("RGB", (1000, 500), "red").save(tmp_path / "big.png")
+    seen: list[tuple[int, int]] = []
+
+    class Fake:
+        def score_many(self, images: list[Image.Image], text: str) -> list[float]:
+            seen.append(images[0].size)
+            return [0.5]
+
+    pairs = [
+        {
+            "pair_id": "p001",
+            "narration": "n",
+            "visual_query": "",
+            "image_path": str(tmp_path / "big.png"),
+            "label": "match",
+        },
+        {
+            "pair_id": "x001",
+            "narration": "n",
+            "visual_query": "q",
+            "image_path": str(tmp_path / "big.png"),
+            "label": "mismatch",
+        },
+    ]
+    rows = cal.score_rows(pairs, Fake(), 320)
+    assert [r["synthetic"] for r in rows] == [False, True]
+    assert rows[0]["scores"]["visual_query"] is None and rows[1]["scores"]["max"] == 0.5
+    assert all(sz == (320, 160) for sz in seen)
+
+
+def test_build_refuses_to_overwrite_labelled_csv(tmp_path: Path) -> None:
+    db = _make_db(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    cal.write_pairs_csv([{"pair_id": "p001", "label": "match"}], out / "pairs.csv")
+    assert cal.main(["build", "--db", str(db), "--out", str(out)]) == 1
+    assert "match" in (out / "pairs.csv").read_text(encoding="utf-8")
+    assert cal.main(["build", "--db", str(db), "--out", str(out), "--force"]) == 0
+    with open(out / "pairs.csv", newline="", encoding="utf-8") as fh:
+        assert all(r["label"] == "" for r in csv.DictReader(fh))
+
+
+def test_fit_cli_missing_csv_exits_1(tmp_path: Path) -> None:
+    assert cal.main(["fit", "--dir", str(tmp_path)]) == 1
 
 
 def test_fit_skips_signal_with_missing_visual_query() -> None:

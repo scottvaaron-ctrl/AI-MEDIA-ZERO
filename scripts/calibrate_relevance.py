@@ -137,36 +137,60 @@ def fit(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if n_match == 0 or n_mis == 0:
         raise ValueError(f"need both match and mismatch labels (got {n_match} match, {n_mis} mismatch)")
 
+    def counts(sc: list[float], t: float, rows_: list[dict[str, Any]]) -> tuple[int, int, int, int]:
+        tp = sum(1 for r, s in zip(rows_, sc, strict=True) if r["label"] == "match" and s >= t)
+        fp = sum(1 for r, s in zip(rows_, sc, strict=True) if r["label"] == "mismatch" and s >= t)
+        nm = sum(1 for r in rows_ if r["label"] == "match")
+        return tp, fp, nm - tp, len(rows_) - nm - fp
+
+    def bal(tp: int, fp: int, fn: int, tn: int) -> float | None:
+        if tp + fn == 0 or tn + fp == 0:
+            return None
+        return (tp / (tp + fn) + tn / (tn + fp)) / 2
+
     best: dict[str, Any] | None = None
     for signal in SIGNALS:
         scores = [r["scores"].get(signal) for r in labelled]
         if any(s is None for s in scores):
             continue  # signal unavailable for some rows: skip it entirely
-        for t in sorted({float(s) for s in scores}):
-            tp = sum(1 for r, s in zip(labelled, scores, strict=True) if r["label"] == "match" and s >= t)
-            fp = sum(1 for r, s in zip(labelled, scores, strict=True) if r["label"] == "mismatch" and s >= t)
-            fn, tn = n_match - tp, n_mis - fp
-            ba = (tp / n_match + tn / n_mis) / 2
-            better = (
-                best is None
-                or ba > best["balanced_accuracy"]
-                or (ba == best["balanced_accuracy"] and signal == best["signal"] and t > best["threshold"])
-            )
-            if better:
-                best = {
-                    "signal": signal,
-                    "threshold": t,
-                    "balanced_accuracy": ba,
-                    "tp": tp,
-                    "fp": fp,
-                    "tn": tn,
-                    "fn": fn,
-                    "n_match": n_match,
-                    "n_mismatch": n_mis,
-                    "skipped_unlabelled": skipped,
-                }
+        observed = sorted({float(s) for s in scores})
+        cands = []
+        for i, edge in enumerate(observed):
+            tp, fp, fn, tn = counts(scores, edge, labelled)
+            low = observed[i - 1] if i else edge
+            cands.append((bal(tp, fp, fn, tn) or 0.0, edge - low, edge, low))
+        ba, width, edge, low = max(cands, key=lambda c: (c[0], c[1], c[2]))
+        # a signal wins on balanced accuracy, then widest plateau; SIGNALS order breaks the rest
+        if best is not None and (ba, width) <= (best["balanced_accuracy"], best["plateau_width"]):
+            continue
+        thr = (low + edge) / 2
+        tp, fp, fn, tn = counts(scores, thr, labelled)
+        real_idx = [i for i, r in enumerate(labelled) if not r.get("synthetic")]
+        real_rows = [labelled[i] for i in real_idx]
+        real_sc = [scores[i] for i in real_idx]
+        ba_real = bal(*counts(real_sc, thr, real_rows))
+        n_syn = sum(1 for r in labelled if r["label"] == "mismatch" and r.get("synthetic"))
+        best = {
+            "signal": signal,
+            "threshold": thr,
+            "plateau_low": low,
+            "plateau_high": edge,
+            "plateau_width": width,
+            "balanced_accuracy": ba,
+            "balanced_accuracy_real": ba_real,
+            "tp": tp,
+            "fp": fp,
+            "tn": tn,
+            "fn": fn,
+            "n_match": n_match,
+            "n_mismatch": n_mis,
+            "n_mismatch_real": n_mis - n_syn,
+            "n_mismatch_synthetic": n_syn,
+            "skipped_unlabelled": skipped,
+        }
     if best is None:
         raise ValueError("no signal could be scored on every row")
+    del best["plateau_width"]
     return best
 
 
@@ -235,18 +259,28 @@ def _read_pairs(path: Path) -> list[dict[str, Any]]:
         return [{k: (row.get(k) or "") for k in FIELDS} for row in csv.DictReader(fh)]
 
 
-def score_rows(pairs: list[dict[str, Any]], scorer: Any) -> list[dict[str, Any]]:
+def _downscale(image: Any, width: int) -> Any:
+    """Same preview the producer scores: width ``width`` px, aspect kept (never enlarged)."""
+    if width <= 0 or image.width <= width:
+        return image
+    from PIL import Image
+
+    return image.resize((width, max(1, round(image.height * width / image.width))), Image.Resampling.BILINEAR)
+
+
+def score_rows(pairs: list[dict[str, Any]], scorer: Any, preview_width: int = 320) -> list[dict[str, Any]]:
     from PIL import Image
 
     rows: list[dict[str, Any]] = []
     for p in pairs:
         with Image.open(p["image_path"]) as im:
-            image = im.convert("RGB")
+            image = _downscale(im.convert("RGB"), preview_width)
         n = scorer.score_many([image], p["narration"])[0]
         v = scorer.score_many([image], p["visual_query"])[0] if p["visual_query"] else None
         rows.append(
             {
                 "label": p["label"].strip().lower(),
+                "synthetic": str(p["pair_id"]).startswith("x"),
                 "scores": {"narration": n, "visual_query": v, "max": max(n, v) if v is not None else None},
             }
         )
@@ -259,8 +293,12 @@ def cmd_build(args: argparse.Namespace) -> int:
         from aimz.settings import load_env_settings
 
         db = load_env_settings().db_path
-    pairs = build_pairs(db, args.n)
     out = Path(args.out)
+    existing = out / "pairs.csv"
+    if existing.is_file() and not args.force and any(p["label"].strip() for p in _read_pairs(existing)):
+        print(f"{existing} already has labels; rerun with --force to overwrite", file=sys.stderr)
+        return 1
+    pairs = build_pairs(db, args.n)
     write_outputs(pairs, out)
     print(f"{len(pairs)} pairs -> {out / 'pairs.csv'} and {out / 'contact-sheet.png'}")
     print("Fill the label column with match / mismatch, then run: fit")
@@ -268,10 +306,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
-    from aimz.providers.image.relevance import RelevanceScorer, model_present
-    from aimz.settings import load_env_settings
+    try:
+        return _fit_cli(Path(args.dir))
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"fit failed: {exc}", file=sys.stderr)
+        return 1
 
-    d = Path(args.dir)
+
+def _fit_cli(d: Path) -> int:
+    from aimz.providers.image.relevance import RelevanceScorer, model_present
+    from aimz.settings import load_app_config, load_env_settings
+
     all_pairs = _read_pairs(d / "pairs.csv")
     pairs = [p for p in all_pairs if p["label"].strip().lower() in ("match", "mismatch")]
     skipped = len(all_pairs) - len(pairs)
@@ -283,11 +328,15 @@ def cmd_fit(args: argparse.Namespace) -> int:
         extra = add_mismatches([p for p in pairs if p["label"] == "match"], MIN_MISMATCHES - have)
         synthetic = len(extra)
         pairs += extra
-    model_dir = load_env_settings().siglip_model_dir
-    if not model_present(model_dir):
-        print(f"SigLIP model files missing in {model_dir}; run: python -m aimz doctor --fix", file=sys.stderr)
+    env = load_env_settings()
+    if not model_present(env.siglip_model_dir):
+        print(
+            f"SigLIP model files missing in {env.siglip_model_dir}; run: python -m aimz doctor --fix",
+            file=sys.stderr,
+        )
         return 1
-    result = fit(score_rows(pairs, RelevanceScorer(model_dir)))
+    width = int(load_app_config(env.config_dir).get("assets.relevance.preview_width", 320) or 320)
+    result = fit(score_rows(pairs, RelevanceScorer(env.siglip_model_dir), width))
     result["skipped_unlabelled"] = skipped
     result["synthetic_mismatches"] = synthetic
     (d / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -301,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("build", help="select pairs, write pairs.csv and contact-sheet.png")
     b.add_argument("--n", type=int, default=50)
     b.add_argument("--out", default=str(DEFAULT_DIR))
+    b.add_argument("--force", action="store_true", help="overwrite an existing labelled pairs.csv")
     b.add_argument("--db", default="", help="database to read (read-only); default: the live one")
     f = sub.add_parser("fit", help="score labelled pairs, choose signal and threshold")
     f.add_argument("--dir", default=str(DEFAULT_DIR))
