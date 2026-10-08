@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import numpy as np
 import pytest
 from PIL import Image
@@ -79,3 +80,195 @@ def test_session_receives_batch() -> None:
 def test_score_many_empty() -> None:
     scorer = RelevanceScorer(Path("unused"), session=FakeSession([]), tokenizer=FakeTokenizer())
     assert scorer.score_many([], "x") == []
+
+
+# ---- task 2: text lowercasing, overflow-safe sigmoid ----------------------------------------------------
+
+
+def test_encode_text_lowercases() -> None:
+    seen: list[str] = []
+
+    class Recording:
+        def encode(self, text: str) -> Any:
+            seen.append(text)
+            return SimpleNamespace(ids=[1, 2])
+
+    encode_text(Recording(), "A Red BARN")
+    assert seen == ["a red barn"]
+
+
+def test_sigmoid_overflow_safe() -> None:
+    from aimz.providers.image import relevance
+
+    assert relevance._sigmoid(-1000.0) == 0.0
+    assert relevance._sigmoid(1000.0) == 1.0
+    assert relevance._sigmoid(0.0) == 0.5
+
+
+# ---- task 2: model files, download, health, capability ---------------------------------------------------
+
+
+def _mock_http(fail_on: str | None = None) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if fail_on and request.url.path.endswith(fail_on):
+            raise httpx.ConnectError("boom", request=request)
+        return httpx.Response(200, content=b"data:" + request.url.path.encode())
+
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+def test_model_present_requires_all_files(tmp_path: Path) -> None:
+    from aimz.providers.image.relevance import MODEL_FILES, model_present
+
+    assert not model_present(tmp_path)
+    for name in MODEL_FILES[:2]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
+    assert not model_present(tmp_path)
+    last = tmp_path / MODEL_FILES[2]
+    last.parent.mkdir(parents=True, exist_ok=True)
+    last.write_bytes(b"x")
+    assert model_present(tmp_path)
+
+
+def test_model_present_ignores_part_file(tmp_path: Path) -> None:
+    from aimz.providers.image.relevance import MODEL_FILES, model_present
+
+    for name in MODEL_FILES[:2]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
+    part = tmp_path / (MODEL_FILES[2] + ".part")
+    part.write_bytes(b"x")
+    assert not model_present(tmp_path)
+
+
+def test_download_model_writes_all_files(tmp_path: Path) -> None:
+    from aimz.providers.image.relevance import HF_REPO, MODEL_FILES, download_model, model_present
+
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, content=b"abc")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    download_model(tmp_path, http=client)
+    assert model_present(tmp_path)
+    assert sorted(requested) == sorted(
+        f"https://huggingface.co/{HF_REPO}/resolve/main/{n}" for n in MODEL_FILES
+    )
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_download_interrupted_leaves_not_present(tmp_path: Path) -> None:
+    from aimz.providers.image.relevance import MODEL_FILES, download_model, model_present
+
+    with pytest.raises(httpx.HTTPError):
+        download_model(tmp_path, http=_mock_http(fail_on=MODEL_FILES[1]))
+    assert not model_present(tmp_path)
+    assert not (tmp_path / MODEL_FILES[1]).exists()
+
+
+def test_health_missing_model(tmp_path: Path) -> None:
+    from aimz.providers.image import relevance
+
+    h = relevance.scorer_health(tmp_path)
+    assert h.ok is False
+    assert "doctor --fix" in h.fix or "pip install" in h.fix
+
+
+def test_health_missing_model_with_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    h = relevance.scorer_health(tmp_path)
+    assert h.ok is False
+    assert "doctor --fix" in h.fix
+
+
+def test_health_missing_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "packages_importable", lambda: False)
+    h = relevance.scorer_health(tmp_path)
+    assert h.ok is False
+    assert ".[vision]" in h.fix
+
+
+def test_health_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    monkeypatch.setattr(relevance, "model_present", lambda d: True)
+    assert relevance.scorer_health(tmp_path).ok is True
+
+
+def test_get_scorer_returns_none_when_unhealthy_without_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "_SCORERS", {})
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    called: list[Path] = []
+    monkeypatch.setattr(relevance, "download_model", lambda d, http=None: called.append(d))
+    svc = SimpleNamespace(env=SimpleNamespace(siglip_model_dir=tmp_path, siglip_auto_download=False))
+    assert relevance.get_scorer(svc) is None
+    assert called == []
+
+
+def test_get_scorer_downloads_and_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "_SCORERS", {})
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    present = {"v": False}
+    monkeypatch.setattr(relevance, "model_present", lambda d: present["v"])
+    calls: list[Path] = []
+
+    def fake_download(d: Path, http: Any = None) -> None:
+        calls.append(d)
+        present["v"] = True
+
+    monkeypatch.setattr(relevance, "download_model", fake_download)
+    svc = SimpleNamespace(env=SimpleNamespace(siglip_model_dir=tmp_path, siglip_auto_download=True))
+    s1 = relevance.get_scorer(svc)
+    s2 = relevance.get_scorer(svc)
+    assert isinstance(s1, RelevanceScorer)
+    assert s1 is s2
+    assert len(calls) == 1
+
+
+def test_get_scorer_download_failure_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "_SCORERS", {})
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+
+    def boom(d: Path, http: Any = None) -> None:
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(relevance, "download_model", boom)
+    svc = SimpleNamespace(env=SimpleNamespace(siglip_model_dir=tmp_path, siglip_auto_download=True))
+    assert relevance.get_scorer(svc) is None
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_capability_relevance_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, present: bool) -> None:
+    from aimz.experiments import settings as exp_settings
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "model_present", lambda d: present)
+    monkeypatch.setattr(relevance, "packages_importable", lambda: True)
+    svc = SimpleNamespace(assets=[], env=SimpleNamespace(siglip_model_dir=tmp_path))
+    assert ("relevance_gate" in exp_settings.capabilities(svc)) is present
+
+
+def test_capability_relevance_gate_needs_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.experiments import settings as exp_settings
+    from aimz.providers.image import relevance
+
+    monkeypatch.setattr(relevance, "model_present", lambda d: True)
+    monkeypatch.setattr(relevance, "packages_importable", lambda: False)
+    svc = SimpleNamespace(assets=[], env=SimpleNamespace(siglip_model_dir=tmp_path))
+    assert "relevance_gate" not in exp_settings.capabilities(svc)

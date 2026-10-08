@@ -151,6 +151,7 @@ def create(name: str, channel_name: str, main_root: Path = REPO_ROOT) -> Path:
         f"AIMZ_CONSTITUTION_FILE={(main_root / 'config' / 'constitution.md').as_posix()}",
         f"AIMZ_BASE_CONFIG={(main_root / 'config' / 'config.yaml').as_posix()}",
         f"PIPER_VOICES_DIR={(main_root / 'data' / 'voices').as_posix()}",
+        f"SIGLIP_MODEL_DIR={(main_root / 'data' / 'models' / 'siglip2').as_posix()}",
         f"YOUTUBE_CLIENT_SECRET_FILE={(main_root / 'secrets' / 'client_secret.json').as_posix()}",
         f"DASHBOARD_PORT={port}",
         *(f"{k}={main_env[k]}" for k in SHARED_ENV_KEYS if k in main_env),

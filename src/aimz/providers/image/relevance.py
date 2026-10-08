@@ -7,12 +7,21 @@ and tests inject fake sessions/tokenizers.
 
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 from PIL import Image
+
+from aimz.providers.base import HealthStatus
+
+log = logging.getLogger("aimz.relevance")
+
+HF_REPO = "onnx-community/siglip2-base-patch16-224-ONNX"
+MODEL_FILES: tuple[str, ...] = ("onnx/model_quantized.onnx", "tokenizer.json", "preprocessor_config.json")
 
 IMAGE_SIZE = 224
 TEXT_LENGTH = 64
@@ -29,13 +38,17 @@ def preprocess_image(img: Image.Image) -> np.ndarray:
 
 def encode_text(tokenizer: Any, text: str) -> np.ndarray:
     """Token ids padded/truncated to 64 (SigLIP is trained with max-length padding). int64, shape (64,)."""
-    ids = list(tokenizer.encode(text).ids)[:TEXT_LENGTH]
+    # SigLIP 2 was trained on lowercased text
+    ids = list(tokenizer.encode(text.lower()).ids)[:TEXT_LENGTH]
     ids += [PAD_ID] * (TEXT_LENGTH - len(ids))
     return np.asarray(ids, dtype=np.int64)
 
 
 def _sigmoid(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    e = math.exp(x) if x > -700 else 0.0  # overflow-safe for large negative logits
+    return e / (1.0 + e)
 
 
 class RelevanceScorer:
@@ -78,3 +91,88 @@ class RelevanceScorer:
 
     def score(self, image: Image.Image, text: str) -> float:
         return self.score_many([image], text)[0]
+
+
+# ---- model files, health, shared scorer ------------------------------------------------------------------
+
+
+def model_present(model_dir: Path) -> bool:
+    """True only when every model file exists and is non-empty (a leftover ``.part`` never counts)."""
+    d = Path(model_dir)
+    return all((d / n).is_file() and (d / n).stat().st_size > 0 for n in MODEL_FILES)
+
+
+def download_model(model_dir: Path, http: httpx.Client | None = None) -> None:
+    """Fetch the model files from Hugging Face. Each goes to ``<name>.part`` first, then is renamed."""
+    d = Path(model_dir)
+    owns = http is None
+    headers = {"User-Agent": "AIMediaZero/0.1"}
+    client = http or httpx.Client(follow_redirects=True, timeout=300, headers=headers)
+    try:
+        for name in MODEL_FILES:
+            dest = d / name
+            if dest.is_file() and dest.stat().st_size > 0:
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + ".part")
+            log.info("downloading SigLIP model file %s", name)
+            try:
+                with client.stream("GET", f"https://huggingface.co/{HF_REPO}/resolve/main/{name}") as r:
+                    r.raise_for_status()
+                    with open(tmp, "wb") as fh:
+                        for chunk in r.iter_bytes(1 << 16):
+                            fh.write(chunk)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            tmp.replace(dest)
+    finally:
+        if owns:
+            client.close()
+
+
+def packages_importable() -> bool:
+    """True when the optional ``vision`` extra (onnxruntime, tokenizers) imports."""
+    try:
+        import onnxruntime  # noqa: F401
+        import tokenizers  # noqa: F401
+    except Exception:  # ImportError or DLL load failure
+        return False
+    return True
+
+
+def scorer_health(model_dir: Path) -> HealthStatus:
+    if not packages_importable():
+        return HealthStatus(False, "onnxruntime / tokenizers not importable", "pip install -e .[vision]")
+    if not model_present(model_dir):
+        return HealthStatus(
+            False, f"SigLIP model files missing in {model_dir}", "python -m aimz doctor --fix"
+        )
+    return HealthStatus(True, f"SigLIP 2 model ready ({model_dir})")
+
+
+_SCORERS: dict[str, RelevanceScorer] = {}
+
+
+def get_scorer(svc: Any) -> RelevanceScorer | None:
+    """The process-wide healthy scorer, auto-downloading the model if allowed; None if unavailable."""
+    env = svc.env
+    model_dir = Path(env.siglip_model_dir)
+    key = str(model_dir)
+    if key in _SCORERS:
+        return _SCORERS[key]
+    if not packages_importable():
+        return None
+    if not model_present(model_dir):
+        if not env.siglip_auto_download:
+            return None
+        try:
+            download_model(model_dir)
+        except Exception as exc:
+            log.warning("SigLIP model download failed: %s", exc)
+            return None
+        if not model_present(model_dir):
+            return None
+    scorer = RelevanceScorer(model_dir)
+    _SCORERS[key] = scorer
+    return scorer

@@ -109,6 +109,18 @@ def run_checks(svc: Services, fix: bool = False) -> list[Check]:
             Check("Piper TTS", h.ok, h.detail, h.fix or "pip install piper-tts ; aimz doctor --fix")
         )
 
+    # SigLIP picture-relevance model (optional; only used when assets.relevance.enabled)
+    from aimz.providers.image import relevance
+
+    h = relevance.scorer_health(env.siglip_model_dir)
+    if not h.ok and fix and relevance.packages_importable():
+        try:
+            relevance.download_model(env.siglip_model_dir)
+            h = relevance.scorer_health(env.siglip_model_dir)
+        except Exception as exc:
+            h.detail += f" (auto-download failed: {exc})"
+    checks.append(Check("SigLIP picture model", h.ok, h.detail, h.fix, required=False))
+
     # Fonts / Pillow
     h = svc.cards.health()
     checks.append(
@@ -213,6 +225,7 @@ def ensure_dirs(root: Path) -> None:
         "data/videos",
         "data/packages",
         "data/voices",
+        "data/models",
         "data/assets",
         "data/logs",
         "data/reports",
