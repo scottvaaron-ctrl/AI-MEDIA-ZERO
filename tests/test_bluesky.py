@@ -14,11 +14,14 @@ import pytest
 from aimz.core.errors import KillSwitchEngaged, OwnerApprovalRequired, PublishError
 from aimz.domain.models import MetricsSnapshot
 from aimz.providers.analytics.bluesky import BlueskyAnalyticsProvider
+from aimz.providers.publishers.captions import grapheme_len
 from aimz.providers.publishers.bluesky import (
     BlueskyClient,
     BlueskyPublisher,
     BlueskySession,
     aspect_ratio,
+    MAX_POST_GRAPHEMES,
+    build_credit_replies,
     build_post_text,
     build_sources_reply,
     facets_for,
@@ -635,3 +638,114 @@ def test_comments_come_back_as_fetched_comments(svc, tmp_path: Path) -> None:  #
     assert len(comments) == 1  # the blank reply is dropped
     assert comments[0].author == "reader.bsky.social"
     assert comments[0].text == "Where is the beetle from?"
+
+
+# --------------------------------------------------------------------------------------
+# image credits reply thread (constitution section 5: attribution wherever shared)
+# --------------------------------------------------------------------------------------
+CREDITS = [
+    "Huhu beetle by A. Person, CC BY-SA 4.0 (https://commons.wikimedia.org/wiki/File:Huhu.jpg)",
+    "Photo by B. Shooter on Pexels (https://www.pexels.com/photo/123)",
+]
+CREDITS_POST = "Image credits:\n" + "\n".join(CREDITS)
+
+
+def _many_credits(n: int = 12) -> list[str]:
+    return [f"Picture {i} by Someone, CC BY 4.0 (https://example.org/{'p' * 40}/{i})" for i in range(n)]
+
+
+def test_credit_replies_chunk_at_the_grapheme_limit() -> None:
+    assert build_credit_replies([]) == []
+    assert build_credit_replies(["", "  "]) == []
+    assert build_credit_replies(CREDITS) == [CREDITS_POST]
+
+    many = _many_credits()
+    posts = build_credit_replies(many + [many[0]])  # duplicates are listed once
+    assert len(posts) > 1
+    assert all(grapheme_len(p) <= MAX_POST_GRAPHEMES for p in posts)
+    assert posts[0].startswith("Image credits:\n")
+    assert all(p.startswith("Image credits (continued):\n") for p in posts[1:])
+    listed = [line for p in posts for line in p.split("\n")[1:]]
+    assert listed == many  # every credit, in order, whole
+
+
+def test_a_single_credit_over_the_limit_is_trimmed_with_an_ellipsis() -> None:
+    long_credit = "Picture by " + "N" * 400
+    posts = build_credit_replies([long_credit, "Short credit"])
+    assert all(grapheme_len(p) <= MAX_POST_GRAPHEMES for p in posts)
+    first_line = posts[0].split("\n")[1]
+    assert first_line.endswith("…") and long_credit.startswith(first_line[:-1])
+    assert "Short credit" in "\n".join(posts)
+
+
+def test_credits_are_posted_as_replies_in_order_under_the_post(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    fake = FakeBluesky()
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    meta["attributions"] = _many_credits()
+    package = svc.env.data_dir / "pkg"
+    res = pub.publish(svc.ctx(), video, script, meta, package)
+    assert res.status == "published" and "failed" not in res.message
+
+    expected = build_credit_replies(meta["attributions"])
+    _post, sources, *credit_posts = fake.records
+    assert "https://example.org/huhu" in sources["text"]
+    assert len(expected) > 1 and [r["text"] for r in credit_posts] == expected
+    # one thread: every reply has the video post as root and the previous post as parent
+    uris = [POST_URI] + [POST_URI + f"-reply{i}" for i in range(2, len(fake.records) + 1)]
+    for i, reply in enumerate([sources, *credit_posts], start=1):
+        assert reply["reply"]["root"]["uri"] == POST_URI
+        assert reply["reply"]["parent"]["uri"] == uris[i - 1]
+        assert "embed" not in reply
+    saved = json.loads((package / "bluesky_request.json").read_text(encoding="utf-8"))
+    assert saved["credits_replies"] == expected
+
+
+def test_no_credits_means_no_extra_reply(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    fake = FakeBluesky()
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    assert meta["attributions"] == []
+    pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    assert len(fake.records) == 2 and fake.records[1]["text"].startswith("Sources:")
+
+
+def test_credits_are_posted_even_with_the_sources_reply_off(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    fake = FakeBluesky()
+    pub = BlueskyPublisher(_client(tmp_path, fake), sources_reply=False)
+    video, script, meta = _video(svc)
+    meta["attributions"] = CREDITS
+    pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    assert len(fake.records) == 2
+    assert fake.records[1]["text"] == CREDITS_POST
+    assert fake.records[1]["reply"]["parent"]["uri"] == POST_URI
+
+
+def test_failed_credits_reply_does_not_lose_the_post(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    class CreditsFail(FakeBluesky):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("com.atproto.repo.createRecord") and len(self.records) >= 2:
+                raise httpx.ReadTimeout("reply timed out", request=request)
+            return super().handler(request)
+
+    fake = CreditsFail()
+    pub = BlueskyPublisher(_client(tmp_path, fake))
+    video, script, meta = _video(svc)
+    meta["attributions"] = CREDITS
+    res = pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    assert res.status == "published" and res.platform_video_id == POST_URI
+    assert "image credits reply failed" in res.message and "sources reply failed" not in res.message
+    assert len(fake.records) == 2
+
+
+def test_poll_posts_the_saved_credits_replies(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    fake = FakeBluesky(states=["JOB_STATE_COMPLETED"])
+    pub = BlueskyPublisher(_client(tmp_path, fake), poll_seconds=0)
+    video, script, meta = _video(svc)
+    meta["attributions"] = CREDITS
+    package = svc.env.data_dir / "pkg"
+    assert pub.publish(svc.ctx(), video, script, meta, package).status == "uploading"
+    done = pub.poll(svc.ctx(), {"package_dir": str(package), "metadata_json": "{}"})
+    assert done is not None and done.status == "published"
+    assert fake.records[-1]["text"] == CREDITS_POST
+
