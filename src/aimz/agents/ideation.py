@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aimz import identity, instances
+from aimz import guideline, identity, instances
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import IdeaBatch, IdeaDraft, SourceItemView
@@ -138,7 +138,7 @@ class IdeationAgent(Agent):
         def prompt(n: int, gtext: str, leads: list[SourceItemView]) -> str:
             return (
                 f"{self.strategy.prompt_summary(strategy_state)}\n\n"
-                f"{identity.genre_line(self.svc.db)}"
+                f"{identity.genre_line(self.svc.db, guideline.for_services(self.svc))}"
                 f"Generate {n} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
                 "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
                 "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "

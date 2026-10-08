@@ -355,3 +355,44 @@ def test_hook_empty_texts(g) -> None:  # noqa: ANN001
     from aimz.agents.critic import hook_revisions
 
     assert hook_revisions(["", "   "], g.checks) == []
+
+
+def test_genre_line_prefers_guideline(svc: Any) -> None:
+    from aimz import identity
+
+    g = _activate(svc)
+    assert "'explainer' (owner guideline v" in identity.genre_line(svc.db, g)
+
+
+def test_genre_line_without_guideline_unchanged(svc: Any) -> None:
+    from aimz import identity
+
+    assert identity.genre_line(svc.db) == ""
+    assert identity.propose(svc.db, "main", {"genre": "Maps and borders"}) is None
+    assert (
+        identity.genre_line(svc.db) == "This channel's genre is 'Maps and borders'. Every idea must fit it.\n"
+    )
+    assert identity.genre_line(svc.db, None) == identity.genre_line(svc.db)
+
+
+def test_ideation_prompt_uses_guideline_genre(svc: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_reliability import _orch
+
+    from aimz import identity
+    from aimz.domain.models import SourceItemView
+
+    _activate(svc)
+    assert identity.propose(svc.db, "main", {"genre": "Maps and borders"}) is None
+    orch = _orch(svc)
+    seen: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, *a: Any, **kw: Any) -> Any:
+        seen.append(user)
+        raise _Stop
+
+    monkeypatch.setattr(orch.ideation, "ask", fake_ask)
+    leads = [SourceItemView(id="si_0", source_name="s", url="https://e.x/0", title="t0")]
+    with svc.tracker.run("test") as run, pytest.raises(_Stop):
+        orch.ideation.run(run, orch.strategy.current(), n_ideas=2, leads=leads)
+    assert "owner guideline v" in seen[0]
+    assert "Maps and borders" not in seen[0]

@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aimz import instances
 from aimz.db import Database
 from aimz.util import now_iso
+
+if TYPE_CHECKING:
+    from aimz.guideline import Guideline
 
 IDENTITY_KEY = "channel_identity"
 REJECTED_KEY = "last_rejected_identity"
@@ -154,7 +157,12 @@ def prompt_text(db: Database, name: str, starting_genres: list[str]) -> str:
     return "\n".join(lines)
 
 
-def genre_line(db: Database) -> str:
+def genre_line(db: Database, g: Guideline | None = None) -> str:
+    """The genre sentence for the ideation prompt: the owner guideline's genre wins over the AI-chosen one."""
+    if g is not None and g.genre:
+        return (
+            f"This channel's genre is '{g.genre}' (owner guideline v{g.version}). Every idea must fit it.\n"
+        )
     ident = load(db)
     if not ident.get("genre"):
         return ""
