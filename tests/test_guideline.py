@@ -209,3 +209,9 @@ _CHECK_LINES = {
 def test_checks_wrong_type_rejected(key: str, value: str):
     with pytest.raises(GuidelineError, match=key):
         parse(_with(_CHECK_LINES[key], f"{key}: {value}"), CATALOG, CAPS)
+
+
+@pytest.mark.parametrize("genre_line", ["  genre:", "  genre: ", "  genre: '  '"])
+def test_blank_genre_parses_to_empty(genre_line: str):
+    g = parse(_with("  genre: explainer", genre_line), CATALOG, CAPS)
+    assert g.genre == ""

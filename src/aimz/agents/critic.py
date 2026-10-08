@@ -145,12 +145,11 @@ def hook_revisions(texts: list[str], checks: dict[str, Any]) -> list[str]:
             out.append("Hook asks a question; the guideline forbids it")
         if (
             checks.get("hook_no_definition")
-            and words[0].lower().strip(",.;:!?") not in ("there", "here")
+            and words[0].lower().strip(_QUOTES + ",.;:!?") not in ("there", "here")
             and _DEFINITION_RE.match(text)
         ):
-            out.append(
-                f'Hook opens with a definition ("{" ".join(words[:8])}..."); state the surprise instead'
-            )
+            quoted = " ".join(words[:8]).rstrip(".,;:!?")
+            out.append(f'Hook opens with a definition ("{quoted}..."); state the surprise instead')
     return list(dict.fromkeys(out))
 
 

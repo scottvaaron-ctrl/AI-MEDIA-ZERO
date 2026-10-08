@@ -107,11 +107,17 @@ class EditorInChief(Agent):
         used: set[str] = set()
         # Genre judge calls left in this select() call (spec 2026-10-08 section 4.2).
         budget = [GENRE_JUDGE_CAP]
+        gate_rejected: set[str] = set()
+        gate_skipped: set[str] = set()
+        gate_ran = [False]
 
         def shortlist(ideas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            if g is None:
+            if g is None or not g.genre.strip():
                 return ideas[:SHORTLIST_SIZE]
+            gate_ran[0] = True
             passing = self._genre_gate(run, g, ideas, budget)
+            gate_rejected.update(c["id"] for c in ideas if c.get("status") == "rejected")
+            gate_skipped.update(c["id"] for c in ideas if c.get("genre_skipped"))
             # Off-genre ideas are rejected and unreadable answers skipped: neither is offered again this call.
             used.update(c["id"] for c in ideas if c.get("status") == "rejected" or c.get("genre_skipped"))
             return passing
@@ -191,7 +197,14 @@ class EditorInChief(Agent):
                     with contextlib.suppress(ValueError):
                         updates["suggested_runtime_s"] = int(value)
             self.svc.db.update("ideas", choice["id"], updates)
-        run.note("selection", {"selected": len(selected), "slots": [f"{s.mode}:{s.family}" for s in slots]})
+        note: dict[str, Any] = {"selected": len(selected), "slots": [f"{s.mode}:{s.family}" for s in slots]}
+        if gate_ran[0]:
+            note["genre"] = {
+                "judged": GENRE_JUDGE_CAP - budget[0],
+                "rejected": len(gate_rejected),
+                "skipped": len(gate_skipped),
+            }
+        run.note("selection", note)
         return selected
 
     def in_flight(self, perf_rows: list[dict[str, Any]]) -> dict[str, int]:

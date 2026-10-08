@@ -25,6 +25,23 @@ def _clip_words(text: str, limit: int) -> str:
 class ScriptAgent(Agent):
     name = "script"
 
+    @staticmethod
+    def _hook_limits_line(g: guideline.Guideline | None) -> str:
+        """One prompt line naming the guideline's code-checked hook limits; empty when none are set."""
+        if g is None:
+            return ""
+        parts: list[str] = []
+        limit = g.checks.get("hook_max_words")
+        if limit is not None:
+            parts.append(f"at most {int(limit)} words")
+        if g.checks.get("hook_no_question"):
+            parts.append("no question")
+        if g.checks.get("hook_no_definition"):
+            parts.append('no definition opening such as "X is a ..."')
+        if not parts:
+            return ""
+        return "Hook limits (checked in code): " + "; ".join(parts) + ".\n\n"
+
     def write(
         self,
         run: RunContext,
@@ -89,6 +106,7 @@ class ScriptAgent(Agent):
             "List every factual claim (dates, numbers, names, events) in `claims` with the beat index and the source ids that support it. "
             "Only use facts present in the sources below; if the sources do not say it, do not say it.\n\n"
             + self.guideline_text(("script", "title"), guideline.variant_for(idea, self.svc.db), g)
+            + self._hook_limits_line(g)
             + f"Sources:\n{self.sources_block(sources, text_budget=5000)}\n\n"
             f"Channel strategy memory (your own notes on what has worked):\n{self.strategy.prompt_summary(strategy_state, 1500)}\n"
         )

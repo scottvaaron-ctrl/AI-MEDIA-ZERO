@@ -592,3 +592,93 @@ def test_fixture_llm_answers_genre_fit() -> None:
 
     payload = FixtureLLMProvider()._gen_GenreFit("Genre: maps\nTitle: x")
     assert GenreFit.model_validate(payload).fits is True
+
+
+def test_script_prompt_has_hook_limits_line(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea
+
+    _activate(svc)
+    prompt = _script_prompt(svc, monkeypatch, _idea(svc, status="selected"))
+    assert (
+        'Hook limits (checked in code): at most 15 words; no question; no definition opening such as "X is a ...".'
+        in prompt
+    )
+
+
+def test_script_prompt_hook_limits_only_set_keys(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea
+
+    text = SAMPLE.read_text(encoding="utf-8")
+    for line in ("hook_no_question: true", "hook_no_definition: true"):
+        assert line in text
+        text = text.replace(line, "")
+    (svc.env.config_dir / "guideline.md").write_text(text, encoding="utf-8")
+    prompt = _script_prompt(svc, monkeypatch, _idea(svc, status="selected"))
+    assert "Hook limits (checked in code): at most 15 words.\n" in prompt
+    assert "no question" not in prompt
+
+
+def test_definition_message_has_no_double_period(g) -> None:  # noqa: ANN001
+    out = _hook_out(g, "The zodiacal light is a faint glow.")
+    assert 'Hook opens with a definition ("The zodiacal light is a faint glow...");' in " ".join(out)
+    assert ".." not in " ".join(x for x in out if x.startswith("Hook opens with a definition")).replace(
+        "...", ""
+    )
+
+
+def test_there_exemption_ignores_quotes(g) -> None:  # noqa: ANN001
+    out = _hook_out(g, "“There is a village that sits inside another country.”")
+    assert not any(x.startswith("Hook opens with a definition") for x in out)
+
+
+def test_select_blank_genre_never_judges(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    text = SAMPLE.read_text(encoding="utf-8").replace("genre: explainer", "genre:")
+    (svc.env.config_dir / "guideline.md").write_text(text, encoding="utf-8")
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    schemas: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a_: Any, **kw: Any) -> Any:
+        schemas.append(schema.__name__)
+        return schema.model_validate({"selected_idea_ids": [a]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    with svc.tracker.run("test") as run:
+        assert orch.editor.select(run, orch.strategy.current(), [], k=1) == [a]
+    assert schemas and "GenreFit" not in schemas
+
+
+def test_select_note_has_genre_counts(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    b = _idea(svc, family="f", title="on genre idea", opportunity_score=10)
+    _idea(svc, family="f", title="off genre idea", opportunity_score=90)
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a_: Any, **kw: Any) -> Any:
+        if schema.__name__ == "GenreFit":
+            return schema.model_validate({"fits": "on genre idea" in user, "reason": "r"})
+        return schema.model_validate({"selected_idea_ids": [b]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    with svc.tracker.run("test") as run:
+        orch.editor.select(run, orch.strategy.current(), [], k=1)
+    assert run.summary["selection"]["genre"] == {"judged": 2, "rejected": 1, "skipped": 0}
+
+
+def test_select_note_unchanged_without_gate(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    monkeypatch.setattr(
+        orch.editor,
+        "ask",
+        lambda ctx, role, user, schema, *a_, **kw: schema.model_validate({"selected_idea_ids": [a]}),
+    )
+    with svc.tracker.run("test") as run:
+        orch.editor.select(run, orch.strategy.current(), [], k=1)
+    assert "genre" not in run.summary["selection"]

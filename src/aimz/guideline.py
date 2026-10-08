@@ -152,7 +152,7 @@ def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guidelin
     return Guideline(
         version=0,
         channel=str(head.get("channel", "")),
-        genre=str(head.get("genre", "")),
+        genre=str(head.get("genre") or "").strip(),
         locked=locked,
         runtime_min=rmin,
         runtime_max=rmax,
