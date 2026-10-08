@@ -220,8 +220,8 @@ Do these in order.
    plan and build.
    * **Piece A (script checks): built on branch `feat/script-checks`, not yet merged.** The deterministic hook
      check and genre enforcement are done:
-     * New guideline `checks:` keys `hook_max_words`, `hook_no_question`, `hook_no_definition`; unknown keys are
-       rejected.
+     * New guideline `checks:` keys `hook_max_words`, `hook_no_question`, `hook_no_definition`; a wrong-typed
+       value for these keys is rejected; unknown keys are still allowed.
      * The critic checks the hook (the hook line and the first narration sentence) in code: word limit, question,
        and definition opening ("X is a/an ..."; "there is" / "here is" and "is the only" pass). Banned openings
        now apply to the hook line too. Failures go to the required revisions and the rewrite loop.
@@ -249,6 +249,7 @@ Do these in order.
    oddities", voice `en_US-kristin-medium`. Writing this file activates the guideline: the first cycle retires
    the running experiment and hands the locked settings to the guideline.
 5. **Owner items outside this plan:**
+   * Set the Google OAuth consent screen to "In production", so the YouTube login stops expiring every 7 days.
    * Google's compliance screencast, due Thu 15 Oct (`docs/OWNER_TODO.md` A0).
    * The constitution section 5 media sentence for stock media (A3).
 6. **Uncommitted files on `main`.** As of 2026-10-08 these are not committed:
