@@ -384,3 +384,16 @@ def test_display_api_metrics_and_follower_delta(svc, tmp_path: Path) -> None:  #
     snap2 = prov.fetch_metrics(svc.ctx(), publication)
     assert snap2.followers_gained == 0  # same follower count as the stored snapshot
     assert svc.db.count("metrics") == 1
+
+
+def test_direct_post_caption_carries_every_image_credit(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    """Credits are no longer drawn on the frames, so the caption must carry them (constitution section 5)."""
+    fake = FakeTikTok()
+    pub = TikTokDirectPostPublisher(_client(tmp_path, fake), privacy_level="SELF_ONLY", poll_seconds=30)
+    video, script, meta = _video(svc)
+    meta["attributions"] = ["Huhu by A. Person, CC BY-SA 4.0 (https://example.org/huhu)", "Photo by B on Pexels"]
+    pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
+    title = fake.init_body["post_info"]["title"]
+    assert "Image credits:" in title
+    for credit in meta["attributions"]:
+        assert credit in title
