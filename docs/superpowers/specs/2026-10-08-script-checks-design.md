@@ -86,7 +86,10 @@ active, before each `_choose` call:
   `eic_notes="off genre: <reason>"`. It is never offered again.
 - `fits = true`: the idea's new column `genre_checked_version` is set to `g.version`. It is not asked again
   until the guideline version changes (an approved proposal or a new owner edit).
-- Unreadable output after one retry: the idea is skipped this cycle, neither rejected nor marked.
+- Unreadable output (the LLM layer's `complete_model` already retries twice with the error fed back; any
+  exception from `ask` counts): the idea is skipped this cycle, neither rejected nor marked.
+- The fixture LLM (`providers/llm/fixture.py`) answers `GenreFit` with `fits: true`, so offline and dry runs
+  behave as before.
 - Stop once 4 passing ideas are collected (the `_choose` shortlist size) or after judging 12 ideas in one
   `select()` call, to bound local-model time. The shortlist given to `_choose` holds only passing ideas.
 - The judge call goes through the usual tracker span (`self.svc.tracker.agent(...)`) so it appears in the
