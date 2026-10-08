@@ -295,3 +295,13 @@ def test_get_scorer_in_test_env_never_downloads(svc: Any, monkeypatch: pytest.Mo
     assert svc.env.siglip_auto_download is False
     assert not rel.model_present(Path(svc.env.siglip_model_dir))
     assert rel.get_scorer(svc) is None
+
+
+def test_tests_never_point_at_the_live_model_dir(svc, tmp_path: Path) -> None:  # noqa: ANN001
+    """conftest points SIGLIP_MODEL_DIR at an empty per-test folder, never the checkout's data/models."""
+    import os
+
+    assert Path(os.environ["SIGLIP_MODEL_DIR"]).resolve().is_relative_to(tmp_path.resolve())
+    model_dir = Path(svc.env.siglip_model_dir).resolve()
+    assert model_dir.is_relative_to(tmp_path.resolve())
+    assert not model_dir.exists()

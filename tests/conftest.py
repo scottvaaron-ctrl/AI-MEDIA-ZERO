@@ -12,9 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
-def _never_download_siglip(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests must never fetch the picture-matching model (378 MB) or touch the network."""
+def _never_download_siglip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Tests must never fetch the picture-matching model (378 MB), touch the network, or load the real
+    model from the live checkout: the model dir is an empty per-test folder (tests needing a model build
+    their own and pass it explicitly)."""
     monkeypatch.setenv("SIGLIP_AUTO_DOWNLOAD", "false")
+    monkeypatch.setenv("SIGLIP_MODEL_DIR", str(tmp_path / "no-model"))
 
 
 @pytest.fixture()
