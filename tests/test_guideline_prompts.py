@@ -396,3 +396,199 @@ def test_ideation_prompt_uses_guideline_genre(svc: Any, monkeypatch: pytest.Monk
         orch.ideation.run(run, orch.strategy.current(), n_ideas=2, leads=leads)
     assert "owner guideline v" in seen[0]
     assert "Maps and borders" not in seen[0]
+
+
+# -- genre gate (spec 4.2) ----------------------------------------------------------------
+
+
+def _genre_judge(orch: Any, monkeypatch: pytest.MonkeyPatch, fits: Any, reason: str = "r") -> list[str]:
+    """Patch the editor's ask: GenreFit answers come from ``fits`` (a bool, or an exception to raise);
+    any other schema fails the test. Returns the GenreFit prompts seen."""
+    calls: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a_: Any, **kw: Any) -> Any:
+        if schema.__name__ != "GenreFit":
+            raise AssertionError(f"unexpected schema {schema.__name__}")
+        calls.append(user)
+        if isinstance(fits, Exception):
+            raise fits
+        return schema.model_validate({"fits": fits, "reason": reason})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    return calls
+
+
+def _rows(svc: Any, ids: list[str]) -> list[dict[str, Any]]:
+    return [dict(svc.db.get("ideas", i)) for i in ids]
+
+
+def test_genre_gate_rejects_off_genre(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    calls = _genre_judge(orch, monkeypatch, False, "about cooking")
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+    assert out == [] and len(calls) == 1
+    assert gv.genre in calls[0]
+    row = svc.db.get("ideas", a)
+    assert row["status"] == "rejected"
+    assert json.loads(row["guideline_breaks"]) == ["genre"]
+    assert row["eic_notes"] == "off genre: about cooking"
+
+
+def test_genre_gate_merges_breaks(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f", guideline_breaks='["G-topic"]')
+    _genre_judge(orch, monkeypatch, False, "x")
+    with svc.tracker.run("test") as run:
+        orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+    assert json.loads(svc.db.get("ideas", a)["guideline_breaks"]) == ["G-topic", "genre"]
+
+
+def test_genre_gate_marks_and_skips_rechecks(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    calls = _genre_judge(orch, monkeypatch, True)
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+        assert [c["id"] for c in out] == [a]
+        row = svc.db.get("ideas", a)
+        assert row["genre_checked_version"] == gv.version and row["status"] == "candidate"
+        out = orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+    assert [c["id"] for c in out] == [a]
+    assert len(calls) == 1
+
+
+def test_genre_gate_rechecks_after_version_change(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f", genre_checked_version=gv.version - 1)
+    calls = _genre_judge(orch, monkeypatch, True)
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+    assert len(calls) == 1 and [c["id"] for c in out] == [a]
+    assert svc.db.get("ideas", a)["genre_checked_version"] == gv.version
+
+
+def test_genre_gate_unreadable_skips(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    from aimz.core.errors import ValidationError
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    calls = _genre_judge(orch, monkeypatch, ValidationError("unreadable"))
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, [a]), [12])
+    assert out == [] and len(calls) == 1
+    row = svc.db.get("ideas", a)
+    assert row["status"] == "candidate" and row["genre_checked_version"] is None
+    assert row["guideline_breaks"] is None
+
+
+def test_genre_gate_cap(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    ids = [_idea(svc, family="f") for _ in range(15)]
+    calls = _genre_judge(orch, monkeypatch, False)
+    budget = [12]
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, ids), budget)
+    assert out == [] and len(calls) == 12 and budget == [0]
+    statuses = [svc.db.get("ideas", i)["status"] for i in ids]
+    assert statuses.count("candidate") == 3 and statuses.count("rejected") == 12
+
+
+def test_genre_gate_stops_at_four(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    gv = _activate(svc)
+    orch = _orch(svc)
+    ids = [_idea(svc, family="f") for _ in range(6)]
+    calls = _genre_judge(orch, monkeypatch, True)
+    with svc.tracker.run("test") as run:
+        out = orch.editor._genre_gate(run, gv, _rows(svc, ids), [12])
+    assert len(calls) == 4 and [c["id"] for c in out] == ids[:4]
+
+
+def test_select_all_off_genre_selects_nothing(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    a, b = _idea(svc, family="f"), _idea(svc, family="f")
+    calls = _genre_judge(orch, monkeypatch, False)
+    shortlists: list[list[Any]] = []
+    real_choose = orch.editor._choose
+
+    def spy_choose(run: Any, st: Any, shortlist: list[Any], *a_: Any, **kw: Any) -> Any:
+        shortlists.append(shortlist)
+        return real_choose(run, st, shortlist, *a_, **kw)
+
+    monkeypatch.setattr(orch.editor, "_choose", spy_choose)
+    with svc.tracker.run("test") as run:
+        assert orch.editor.select(run, orch.strategy.current(), [], k=2) == []
+    assert shortlists == [] and len(calls) == 2
+    assert {svc.db.get("ideas", i)["status"] for i in (a, b)} == {"rejected"}
+
+
+def test_select_gates_shortlist_and_chooses_on_genre(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    a = _idea(svc, family="f", title="off genre idea", opportunity_score=90)
+    b = _idea(svc, family="f", title="on genre idea", opportunity_score=10)
+    calls: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a_: Any, **kw: Any) -> Any:
+        if schema.__name__ == "GenreFit":
+            calls.append(user)
+            return schema.model_validate({"fits": "on genre idea" in user, "reason": "r"})
+        assert a not in user  # the off-genre idea never reaches the editor's shortlist
+        return schema.model_validate({"selected_idea_ids": [b]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    with svc.tracker.run("test") as run:
+        assert orch.editor.select(run, orch.strategy.current(), [], k=1) == [b]
+    assert len(calls) == 2
+    assert svc.db.get("ideas", a)["status"] == "rejected"
+
+
+def test_select_without_guideline_never_judges(svc, monkeypatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    orch = _orch(svc)
+    a = _idea(svc, family="f")
+    schemas: list[str] = []
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a_: Any, **kw: Any) -> Any:
+        schemas.append(schema.__name__)
+        return schema.model_validate({"selected_idea_ids": [a]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    with svc.tracker.run("test") as run:
+        assert orch.editor.select(run, orch.strategy.current(), [], k=1) == [a]
+    assert schemas and "GenreFit" not in schemas
+
+
+def test_fixture_llm_answers_genre_fit() -> None:
+    from aimz.domain.models import GenreFit
+    from aimz.providers.llm.fixture import FixtureLLMProvider
+
+    payload = FixtureLLMProvider()._gen_GenreFit("Genre: maps\nTitle: x")
+    assert GenreFit.model_validate(payload).fits is True

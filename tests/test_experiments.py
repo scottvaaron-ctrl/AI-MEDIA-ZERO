@@ -421,6 +421,8 @@ def test_topic_arm_alternates(svc) -> None:  # noqa: ANN001
 
 
 def _pick_first(ctx: Any, role: str, user: str, schema: Any, *a: Any, **kw: Any) -> Any:
+    if schema.__name__ == "GenreFit":  # the genre judge runs first under a guideline; every idea fits
+        return schema.model_validate({"fits": True})
     first = user.split("Shortlist:\n- ")[1].split(" |")[0]
     return schema.model_validate({"selected_idea_ids": [first]})
 
