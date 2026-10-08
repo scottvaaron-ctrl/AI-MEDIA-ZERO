@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -18,10 +19,21 @@ from aimz.domain.models import AssetCandidate, AssetRecord
 from aimz.providers.base import AssetProvider, HealthStatus, ProviderContext
 from aimz.util import new_id, sha256_file, slugify
 
+if TYPE_CHECKING:
+    from PIL import Image
+
 log = logging.getLogger("aimz.assets.wikimedia")
 
 API = "https://commons.wikimedia.org/w/api.php"
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+_THUMB_WIDTH_RE = re.compile(r"/\d+px-")
+
+
+def preview_url_for(file_url: str, width: int = 320) -> str:
+    """The thumb URL with its width segment (``/1280px-``) replaced by ``/<width>px-``; unchanged if absent."""
+    return _THUMB_WIDTH_RE.sub(f"/{int(width)}px-", file_url, count=1)
 
 
 def _strip_html(s: str) -> str:
@@ -116,12 +128,14 @@ class WikimediaAssetProvider(AssetProvider):
             attribution = (
                 f"{title} — {author or credit or 'Wikimedia Commons'} — {lic} — via Wikimedia Commons"
             )
+            file_url = info.get("thumburl") or info.get("url", "")
             out.append(
                 AssetCandidate(
                     provider=self.name,
                     title=title,
                     page_url=info.get("descriptionurl", ""),
-                    file_url=info.get("thumburl") or info.get("url", ""),
+                    file_url=file_url,
+                    preview_url=preview_url_for(file_url),
                     license=lic,
                     license_url=_strip_html((meta.get("LicenseUrl", {}) or {}).get("value", "")),
                     author=author,
@@ -134,6 +148,11 @@ class WikimediaAssetProvider(AssetProvider):
             if len(out) >= max_results:
                 break
         return out
+
+    def preview(
+        self, ctx: ProviderContext, candidate: AssetCandidate, width: int = 320
+    ) -> Image.Image | None:
+        return self._http_preview(ctx, self._client, preview_url_for(candidate.file_url, width))
 
     def fetch(self, ctx: ProviderContext, candidate: AssetCandidate, dest_dir: Path) -> AssetRecord | None:
         dest_dir.mkdir(parents=True, exist_ok=True)

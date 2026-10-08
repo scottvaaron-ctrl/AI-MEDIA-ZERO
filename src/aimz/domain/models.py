@@ -322,6 +322,7 @@ class AssetCandidate(BaseModel):
     width: int = 0
     height: int = 0
     mime: str = ""
+    preview_url: str = ""  # small (about 320 px) version used to score relevance before downloading
 
 
 class AssetRecord(BaseModel):

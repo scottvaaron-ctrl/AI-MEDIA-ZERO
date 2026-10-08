@@ -21,13 +21,16 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from aimz.domain.models import AssetCandidate, AssetRecord
 from aimz.providers.base import AssetProvider, HealthStatus, ProviderContext
 from aimz.util import new_id, now_iso, sha256_file, slugify
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 log = logging.getLogger("aimz.assets.stock")
 
@@ -93,6 +96,13 @@ class StockAssetProvider(AssetProvider):
 
     def search_videos(self, ctx: ProviderContext, query: str, max_results: int = 3) -> list[AssetCandidate]:
         return self._search(ctx, query, "video", max_results)
+
+    def preview(
+        self, ctx: ProviderContext, candidate: AssetCandidate, width: int = 320
+    ) -> Image.Image | None:
+        if candidate.mime.startswith("video/"):
+            return None
+        return self._http_preview(ctx, self._client, candidate.preview_url or candidate.file_url)
 
     # -- download ---------------------------------------------------------------------------------
     def fetch(self, ctx: ProviderContext, candidate: AssetCandidate, dest_dir: Path) -> AssetRecord | None:
@@ -202,6 +212,7 @@ class PexelsAssetProvider(StockAssetProvider):
                     title=str(p.get("alt") or f"Pexels photo {p.get('id')}")[:120],
                     page_url=str(p.get("url") or ""),
                     file_url=str(src.get("large2x") or src.get("portrait") or src.get("original") or ""),
+                    preview_url=str(src.get("small") or ""),
                     license=self.license_name,
                     license_url=self.license_url,
                     author=author,
@@ -266,6 +277,7 @@ class PixabayAssetProvider(StockAssetProvider):
                     title=str(h.get("tags") or f"Pixabay image {h.get('id')}")[:120],
                     page_url=str(h.get("pageURL") or ""),
                     file_url=str(h.get("largeImageURL") or h.get("webformatURL") or ""),
+                    preview_url=str(h.get("webformatURL") or h.get("previewURL") or ""),
                     license=self.license_name,
                     license_url=self.license_url,
                     author=author,
