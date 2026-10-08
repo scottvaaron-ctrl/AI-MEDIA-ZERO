@@ -11,13 +11,47 @@ aimz resume
 ```
 
 Engaged by either the sentinel file `data\KILL` or the `kill_switch` flag in the database
-(both are set by `aimz kill`; either alone is enough). While engaged:
+(both are set by `aimz kill`; either alone is enough). While engaged, **the agent does nothing**
+(owner decision 2026-10-07):
 
-- no publishing, no platform API writes, no scheduling, no paid providers;
-- research, ideation, scripting, QA and local rendering still work (nothing leaves the machine);
-- packages are still written locally so review can continue.
+- a scheduled or manual `aimz run` starts, records the run as skipped ("kill switch engaged: <reason>")
+  and exits 0, so the scheduled task does not look broken. No stage runs: no research, ideas,
+  writing, rendering, publishing, metrics, comments or learning, and no LLM, TTS or network call;
+- the one exception is YouTube's required data clean-up (the 30-day limits in the YouTube
+  Developer Policies), which keeps running each cycle however long the switch stays on;
+- commands that do agent work refuse with a message: `produce`, `research`, `ideas --generate/--select`,
+  `publish run`, `publish retry`, `publish poll`, `strategy learn` and `analytics --collect`;
+- owner commands still work: `status`, `kill`, `resume`, `doctor`, `approve`, `requeue`, `posting ...`,
+  `guideline ...`, `youtube auth/whoami/revoke`, `instance ...`, `schedule ...` and `dashboard`.
+
+The kill switch overrides the posting switch below. To stop only posting, use the posting switch.
 
 Emergency without Python: create an empty file named `KILL` inside `data\`.
+
+## Posting switch
+
+```powershell
+python -m aimz posting off --reason "reviewing the last uploads"
+python -m aimz posting status
+python -m aimz posting on
+```
+
+Or Dashboard → Controls → Posting switch (the home page shows its state next to the kill switch,
+and `aimz status` shows it as `posting_switch`). It is **on** unless you turn it off, and each change
+is recorded with who, when and the reason.
+
+While posting is off:
+
+- the publish stage does nothing: no upload, no package, no automatic retry of a failed upload.
+  Rendered videos stay `rendered`; no publication row is created and no retry attempt is used;
+- everything else runs as usual: research, ideas, writing, fact-check, review, rendering, metrics,
+  comments and learning;
+- `aimz publish run` and `aimz publish retry` refuse and tell you to run `python -m aimz posting on`,
+  and the dashboard's one-tap TikTok post and Retry buttons do nothing.
+
+When you turn it back on, the waiting videos post through the normal publish stage under the usual
+posting limits (`publishing.limits`) and backlog rule. Posting also still needs the existing consent
+and approval gates (`AUTOPUBLISH_CONSENT` or `aimz approve video`); the switch does not replace them.
 
 ## Budget
 

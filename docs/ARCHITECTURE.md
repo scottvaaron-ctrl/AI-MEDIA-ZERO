@@ -136,7 +136,10 @@ file. Everything runs from a `work/` directory with relative paths to avoid Wind
 - A technical failure (model outage, timeout) is `TechnicalFailure`, never an editorial verdict:
   the idea goes back to the queue. A cycle holds a file lock; at its start `Orchestrator.recover()`
   closes runs that never finished and re-queues their work.
-- The kill switch is a sentinel file **and** a DB flag; either engages it.
+- The kill switch is a sentinel file **and** a DB flag; either engages it. While engaged a cycle runs
+  no stage (only YouTube data retention) and agent CLI commands refuse (`core/killswitch.py`).
+- The posting switch (`system_state` key `posting`, default on; `core/posting.py`) pauses only the
+  publish stage; the kill switch overrides it.
 - Structured JSON logs at `data/logs/aimz.jsonl`.
 
 ## Package layout

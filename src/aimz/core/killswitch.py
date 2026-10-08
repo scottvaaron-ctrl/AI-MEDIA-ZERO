@@ -1,4 +1,4 @@
-"""Hard kill switch.
+"""Hard kill switch: when engaged, the agent does nothing (owner decision 2026-10-07).
 
 Two independent signals, either of which engages the switch:
 
@@ -6,11 +6,24 @@ Two independent signals, either of which engages the switch:
    and can be created by hand: ``echo stop > data\\KILL``).
 2. The ``kill_switch`` key in ``system_state``.
 
-``aimz kill`` sets both; ``aimz resume`` clears both. Every outbound action (publishing,
-platform API writes, scheduled writes, paid providers) calls :meth:`KillSwitch.guard`
-before doing anything. The agents never receive a handle to this object that can clear it:
-the only clearing path is the owner CLI/dashboard, which writes the file system and DB
-directly.
+``aimz kill`` sets both; ``aimz resume`` clears both.
+
+While engaged:
+
+* A cycle (``Orchestrator.cycle``) checks the switch once at the start and runs no stage at all:
+  no recovery, guideline sync, research, ideas, writing, rendering, publishing, metrics, comments or
+  learning, so no LLM, TTS, render or network call. It records the run as skipped. The one exception
+  is YouTube's policy-required data retention (``youtube_data.enforce``), which keeps running because
+  its 30-day limits apply however long the switch stays on.
+* Owner-run CLI commands that do agent work (``produce``, ``research``, ``publish run`` ...) refuse.
+  Owner control commands (``status``, ``kill``/``resume``, ``posting``, ``guideline`` ...) still work.
+* Every outbound action (publishing, platform API writes, paid providers) still calls
+  :meth:`KillSwitch.guard` as defence in depth.
+
+To pause only posting while the rest of the work continues, use the posting switch
+(``aimz/core/posting.py``); the kill switch overrides it. The agents never receive a handle to this
+object that can clear it: the only clearing path is the owner CLI/dashboard, which writes the file
+system and DB directly.
 """
 
 from __future__ import annotations

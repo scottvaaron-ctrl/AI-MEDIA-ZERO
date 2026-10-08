@@ -26,7 +26,7 @@ erDiagram
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `system_state` | key/value flags (kill switch, last reviews) | `key`, `value` |
+| `system_state` | key/value flags (kill switch, posting switch, last reviews) | `key`, `value` |
 | `runs` | one row per CLI/cycle invocation | `kind`, `status`, `summary_json` |
 | `agent_runs` | per-agent operation spans | `agent`, `operation`, `status`, `duration_ms`, `input_refs_json`, `output_refs_json`, `estimated_cost_usd`, `actual_cost_usd` |
 | `provider_usage` | every provider call | `provider`, `action`, `content_id`, `tokens_in/out`, `estimated/actual_cost_usd`, `status` |

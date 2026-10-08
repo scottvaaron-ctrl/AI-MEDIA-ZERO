@@ -109,8 +109,10 @@ class AnalystAgent(Agent):
         self.enforce_youtube_retention(run)
         return n
 
-    def enforce_youtube_retention(self, run: RunContext) -> None:
-        """30-day limits and deletion after lost authorization (YouTube Developer Policies; youtube_data.py)."""
+    def enforce_youtube_retention(self, run: RunContext) -> bool:
+        """30-day limits and deletion after lost authorization (YouTube Developer Policies; youtube_data.py).
+
+        Returns False if the check failed (recorded as an error; it runs again next cycle)."""
         from aimz import youtube_data
 
         env = self.svc.env
@@ -122,7 +124,7 @@ class AnalystAgent(Agent):
         except Exception as exc:  # never lose a cycle over this; it runs again next cycle
             self.log.warning("YouTube data retention check failed: %s", exc)
             self.svc.tracker.record_error(run.id, self.name, "youtube_retention", exc)
-            return
+            return False
         if any(result.get(k) for k in ("comments_deleted", "responses_minimised", "purged")):
             run.note("youtube_retention", result)
         if result.get("purged"):
@@ -132,6 +134,7 @@ class AnalystAgent(Agent):
                 "youtube_retention",
                 RuntimeError(f"YouTube data purged: {result['purge_reason']}"),
             )
+        return True
 
     def collect_channel_stats(self, run: RunContext) -> None:
         """Subscriber count and total views, for Partner Program progress (plan stage 6)."""

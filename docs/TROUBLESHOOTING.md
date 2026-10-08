@@ -27,7 +27,9 @@ Run `aimz doctor` first; it names the missing piece and the fix. Logs: `data/log
 | Video status `failed` with ffmpeg error | Open `data/videos/<id>/work/` – the scene PNG/WAV pairs are there. Common cause: a corrupt Wikimedia download (already guarded) or a font issue. Set `FONT_FILE` to a valid TTF |
 | Captions not burned | The bundled ffmpeg must have libass (both winget Gyan builds and imageio-ffmpeg do). `doctor` prints `libass ok` |
 | Very slow cycle | First model call loads the model (~10 s on GPU). CPU-only inference for a 4B model is 5–20x slower; reduce `pipeline.ideas_per_cycle` and `selections_per_cycle`, or set `OLLAMA_NUM_CTX=4096` |
-| `KillSwitchEngaged` in logs | Intended: `aimz resume` when ready |
+| `KillSwitchEngaged` in logs, or a run summary with `"skipped": "kill switch engaged: ..."` | Intended: while the kill switch is on the agent does nothing. `aimz resume` when ready |
+| A command says `refused: the kill switch is engaged` | Intended: agent commands do not run while killed. `aimz resume` first |
+| Videos stay `rendered` and the run notes `"publish": "posting switch off"` | Intended: posting is paused. `python -m aimz posting on` when ready |
 | `BudgetDenied` in logs | Intended: a provider estimated a non-zero cost against a $0 budget. Nothing was spent |
 | Wikimedia returns no images | Queries are too specific; the producer falls back to generated cards automatically. Network blocks also degrade gracefully |
 | YouTube upload `403 / quotaExceeded` | Default is 100 uploads/day; more requires an audit. Wait or reduce cadence |

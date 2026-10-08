@@ -5,9 +5,16 @@
   <div class="card">
     <h3>Kill switch</h3>
     <p>Status: <b class="{{ 'status-failed' if kill.engaged else 'status-ok' }}">{{ 'ENGAGED' if kill.engaged else 'off' }}</b> {% if kill.since %}<span class="muted">since {{ kill.since }}</span>{% endif %}</p>
-    <p class="help">Blocks publishing, platform API writes, scheduled writes, and paid providers. Also creatable by hand: <span class="mono">data\KILL</span>.</p>
+    <p class="help">The agent does nothing: no research, writing, rendering, posting, metrics or learning, and no paid provider. Only YouTube's required data clean-up keeps running. Also creatable by hand: <span class="mono">data\KILL</span>.</p>
     {% if kill.engaged %}<form method="post" action="/controls/resume"><button>Resume</button></form>
     {% else %}<form method="post" action="/controls/kill" class="row"><input name="reason" placeholder="reason"><button class="danger">Engage kill switch</button></form>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Posting switch</h3>
+    <p>Status: <b class="{{ 'status-ok' if posting.on else 'status-failed' }}">{{ 'on' if posting.on else 'off' }}</b> {% if posting.since %}<span class="muted">since {{ posting.since }}</span>{% endif %}{% if posting.reason %} <span class="muted">· {{ posting.reason }}</span>{% endif %}</p>
+    <p class="help">Off pauses posting only: research, writing, rendering, metrics and learning carry on, and rendered videos wait. On: they post under the usual posting limits, consent and approval. The kill switch overrides this.</p>
+    {% if posting.on %}<form method="post" action="/controls/posting" class="row"><input type="hidden" name="state" value="off"><input name="reason" placeholder="reason"><button class="danger">Turn posting off</button></form>
+    {% else %}<form method="post" action="/controls/posting" class="row"><input type="hidden" name="state" value="on"><input name="reason" placeholder="reason"><button>Turn posting on</button></form>{% endif %}
   </div>
   <div class="card">
     <h3>Budget (owner-only)</h3>

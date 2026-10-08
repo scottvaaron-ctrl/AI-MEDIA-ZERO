@@ -5,6 +5,7 @@
     <h3>System status</h3>
     <div class="kpis">
       <div class="kpi"><b>{{ 'ENGAGED' if kill.engaged else 'off' }}</b><span>kill switch{% if kill.reason %} · {{ kill.reason }}{% endif %}</span></div>
+      <div class="kpi"><b>{{ 'on' if posting.on else 'off' }}</b><span>posting {{ 'on' if posting.on else 'off' }}{% if not posting.on and posting.reason %} · {{ posting.reason }}{% endif %}{% if not posting.on and posting.since %} · since {{ posting.since[:16] }}{% endif %}</span></div>
       <div class="kpi"><b>${{ '%.2f'|format(budget.budget_usd) }}</b><span>monthly budget</span></div>
       <div class="kpi"><b>${{ '%.4f'|format(budget.spent_usd) }}</b><span>spent {{ budget.month }}</span></div>
       <div class="kpi"><b>{{ budget.denied_count }}</b><span>denied calls</span></div>

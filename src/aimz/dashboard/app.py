@@ -2,7 +2,7 @@
 
 Read views: status, budget, runs, feeds, ideas, scripts, QA, production queue, videos, publishing,
 metrics, experiments, strategy, provider health, errors.
-Owner controls (POST): kill/resume, budget, publishing mode, credentials paths, constitution and
+Owner controls (POST): kill/resume, posting on/off, budget, publishing mode, credentials paths, constitution and
 strategy edits, feeds add/remove, approve/reject, mark-posted, manual metrics.
 
 The dashboard binds to 127.0.0.1 by default and has no auth; it is the owner's local console.
@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -45,6 +45,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
             "request": request,
             "title": svc.config.get("dashboard.title", svc.config.get("project.name", "AI Media Zero")),
             "kill": ks,
+            "posting": svc.posting.status(),
             "budget": snap,
             "env": svc.env,
         }
@@ -299,6 +300,21 @@ def create_app(svc: Services | None = None) -> FastAPI:
         svc.killswitch.release()
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/controls/posting")
+    def posting(state: str = Form(...), reason: str = Form("")) -> RedirectResponse:
+        """The owner's posting switch: off pauses posting only; every other stage keeps running."""
+        if state == "on":
+            svc.posting.turn_on("owner", reason)
+        elif state == "off":
+            svc.posting.turn_off("owner", reason)
+        else:
+            raise HTTPException(status_code=400, detail="state must be 'on' or 'off'")
+        return RedirectResponse("/controls", status_code=303)
+
+    def may_post() -> bool:
+        """Owner one-tap posts follow the same switches as the cycle (the kill switch overrides all)."""
+        return svc.posting.is_on() and not svc.killswitch.is_engaged()
+
     @app.post("/controls/budget")
     def set_budget(
         monthly_budget_usd: float = Form(...), allow_paid_providers: str = Form("false")
@@ -489,7 +505,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def tiktok_post(pub_id: str, privacy_level: str = Form(...), consent: str = Form("")) -> RedirectResponse:
         """One-tap TikTok post: the owner picks privacy from creator_info options and consents explicitly."""
         pub = svc.db.get("publications", pub_id)
-        if pub and consent == "yes":
+        if pub and consent == "yes" and may_post():
             if pub["status"] in {"packaged", "blocked", "failed"}:
                 svc.db.update("publications", pub_id, {"status": "pending", "updated_at": now_iso()})
             with svc.tracker.run("publish") as ctx:
@@ -506,7 +522,7 @@ def create_app(svc: Services | None = None) -> FastAPI:
     def retry_publish(pub_id: str) -> RedirectResponse:
         """Owner explicitly re-queues a failed publication (the system never does this on its own)."""
         pub = svc.db.get("publications", pub_id)
-        if pub and pub["status"] in {"failed", "blocked"}:
+        if pub and pub["status"] in {"failed", "blocked"} and may_post():
             svc.db.update("publications", pub_id, {"status": "pending", "updated_at": now_iso()})
             with svc.tracker.run("publish") as ctx:
                 orch.publisher.publish(ctx, pub["video_id"], platforms=[pub["platform"]], owner_approved=True)

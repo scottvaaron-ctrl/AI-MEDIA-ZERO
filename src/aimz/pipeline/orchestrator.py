@@ -1,7 +1,9 @@
 """Orchestrator: one autonomous cycle = research -> ideas -> select -> write/QA -> produce -> publish -> metrics -> comments -> learn.
 
 Each stage is individually runnable from the CLI. The orchestrator never bypasses the
-budget manager or the kill switch: it only calls agents, which only call providers.
+budget manager or the kill switch: it only calls agents, which only call providers. With the kill
+switch engaged a cycle runs no stage at all (only YouTube data retention); with the posting switch
+off the publish stage does nothing and every other stage runs.
 """
 
 from __future__ import annotations
@@ -79,6 +81,10 @@ class Orchestrator:
     def _cycle(self, stages: list[str], produce_limit: int | None) -> dict[str, Any]:
         with self.svc.tracker.run("cycle") as run:
             run.note("run_id", run.id)
+            # Kill switch = the agent does nothing (owner decision 2026-10-07). Checked once, here.
+            ks = self.svc.killswitch.status()
+            if ks.engaged:
+                return self._killed_cycle(run, ks.reason or "no reason given")
             # Holding the lock means no other cycle is alive, so anything a dead one left half-done is
             # finished or set back before this cycle starts on new work.
             self._safe(run, "recover", lambda: self.recover(run))
@@ -124,6 +130,16 @@ class Orchestrator:
                 self._safe(run, "learn", lambda: self.analyst.learn(run, self.strategy.current()))
             run.note("finished_at", now_iso())
             return dict(run.summary)
+
+    def _killed_cycle(self, run: RunContext, reason: str) -> dict[str, Any]:
+        """No stage runs: no LLM, TTS, render or network call. Only YouTube's policy-required data
+        retention runs, because its 30-day limits apply however long the switch stays on."""
+        log.warning("kill switch engaged (%s): cycle skipped", reason)
+        run.note("skipped", f"kill switch engaged: {reason}")
+        ran = self._safe(run, "youtube_retention", lambda: self.analyst.enforce_youtube_retention(run))
+        run.note("youtube_retention_checked", bool(ran))
+        run.note("finished_at", now_iso())
+        return dict(run.summary)
 
     # -- recovery -------------------------------------------------------------------------
     def recover(self, run: RunContext) -> dict[str, int]:
@@ -386,7 +402,13 @@ class Orchestrator:
         return out
 
     def publish_rendered(self, run: RunContext) -> list[dict[str, Any]]:
-        """Post what is waiting, oldest first, within the owner's posting limits (``pipeline/posting.py``)."""
+        """Post what is waiting, oldest first, within the owner's posting limits (``pipeline/posting.py``).
+
+        With the owner's posting switch off (``core/posting.py``) nothing happens: no upload, no packaging,
+        no automatic retry. Rendered videos wait as ``rendered`` and post once the switch is back on."""
+        if not self.svc.posting.is_on():
+            run.note("publish", "posting switch off")
+            return []
         self.publisher.poll_pending(run)
         results: list[dict[str, Any]] = []
         with self.publisher.posting(run) as session:

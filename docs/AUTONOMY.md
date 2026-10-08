@@ -22,7 +22,8 @@
 | Control | Where |
 |---|---|
 | Budget and paid-provider switch | `.env` (`MONTHLY_BUDGET_USD`, `ALLOW_PAID_PROVIDERS`) |
-| Kill switch | `aimz kill/resume`, dashboard, `data/KILL` |
+| Kill switch (the agent does nothing; only YouTube data clean-up runs) | `aimz kill/resume`, dashboard, `data/KILL` |
+| Posting switch (pause posting only; everything else runs) | `aimz posting on/off/status`, dashboard |
 | Credentials, OAuth consent | `secrets/`, `aimz youtube auth` |
 | Publishing mode | `.env` (`YOUTUBE_MODE`, `YOUTUBE_ENABLED`) |
 | Approval of each upload | dashboard / `aimz approve`, or standing consent `AUTOPUBLISH_CONSENT=true` in `.env` |
@@ -39,8 +40,11 @@
 
 - Spend money: every provider call passes `BudgetManager.authorize()` and the budget is read
   from `.env`, which no agent writes.
-- Bypass the kill switch: publishers and paid providers call `KillSwitch.guard()`; only the CLI
+- Bypass the kill switch: a cycle checks it first and runs no stage while it is engaged, agent
+  commands refuse, and publishers and paid providers still call `KillSwitch.guard()`; only the CLI
   and dashboard clear the sentinel and DB flag.
+- Post while the owner's posting switch is off: the publish stage and `publish run`/`retry` check it;
+  only the CLI and dashboard change it.
 - Publish without approval: `PublishStage` raises `OwnerApprovalRequired` for API writers.
 - Add feeds, change the constitution, or change publishing modes: those files are written only
   by owner-facing code paths.

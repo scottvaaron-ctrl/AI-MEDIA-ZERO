@@ -12,6 +12,7 @@ from pathlib import Path
 
 from aimz.core.budget import BudgetManager
 from aimz.core.killswitch import KillSwitch
+from aimz.core.posting import PostingSwitch
 from aimz.core.runs import AgentSpan, RunTracker
 from aimz.db import Database, connect
 from aimz.logging_setup import setup_logging
@@ -55,6 +56,7 @@ class Services:
     db: Database
     budget: BudgetManager
     killswitch: KillSwitch
+    posting: PostingSwitch
     tracker: RunTracker
     llm: LLMProvider
     tts: TTSProvider
@@ -223,6 +225,7 @@ def build_services(
         db=db,
         budget=budget,
         killswitch=killswitch,
+        posting=PostingSwitch(db),
         tracker=tracker,
         llm=llm,
         tts=tts,

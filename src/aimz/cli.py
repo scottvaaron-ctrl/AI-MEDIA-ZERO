@@ -31,6 +31,10 @@ guideline_app = typer.Typer(
     help="The channel guideline: show it, its versions, and approve or reject proposed changes.",
     no_args_is_help=True,
 )
+posting_app = typer.Typer(
+    help="The posting switch: pause or resume posting only; every other stage keeps running.",
+    no_args_is_help=True,
+)
 app.add_typer(metric_app, name="metric")
 app.add_typer(publish_app, name="publish")
 app.add_typer(youtube_app, name="youtube")
@@ -40,6 +44,7 @@ app.add_typer(schedule_app, name="schedule")
 app.add_typer(strategy_app, name="strategy")
 app.add_typer(instance_app, name="instance")
 app.add_typer(guideline_app, name="guideline")
+app.add_typer(posting_app, name="posting")
 console = Console()
 
 
@@ -80,6 +85,32 @@ def _orch(svc):  # noqa: ANN001, ANN202
 
 def _print_json(obj: object) -> None:
     console.print_json(json.dumps(obj, default=str))
+
+
+def _refuse_if_killed(svc) -> None:  # noqa: ANN001
+    """Commands that do agent work refuse while the kill switch is engaged (the agent does nothing).
+
+    Owner control commands (status, kill/resume, posting, guideline, approve ...) never call this."""
+    ks = svc.killswitch.status()
+    if ks.engaged:
+        console.print(
+            f"[red]refused: the kill switch is engaged[/] ({ks.reason or 'no reason given'}). "
+            "The agent does no work until the owner runs `python -m aimz resume`.",
+            highlight=False,
+        )
+        raise typer.Exit(1)
+
+
+def _refuse_if_posting_off(svc) -> None:  # noqa: ANN001
+    """Posting commands refuse while the owner's posting switch is off (one source of truth)."""
+    st = svc.posting.status()
+    if not st.on:
+        console.print(
+            f"[yellow]refused: posting is {st.describe()}.[/] Nothing was posted or changed. "
+            "Turn posting back on with `python -m aimz posting on`.",
+            highlight=False,
+        )
+        raise typer.Exit(1)
 
 
 # --------------------------------------------------------------------------------------
@@ -162,6 +193,11 @@ def run(
     finally:
         svc.close()
     _print_json(summary)
+    if summary.get("skipped"):
+        # Exit 0: a killed cycle is the owner's choice, not a failure of the scheduled task.
+        console.print(
+            f"[yellow]cycle skipped[/]: {summary['skipped']}; nothing was done (resume: `python -m aimz resume`)"
+        )
     if mine and mine["status"] == "degraded":
         console.print(f"[yellow]run degraded[/]: {mine['error']}")
         # Exit 2 so the scheduler log and Task Scheduler's "last run result" show it.
@@ -173,6 +209,7 @@ def research() -> None:
     """Fetch feeds and store new leads."""
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
         orch = _orch(svc)
         with svc.tracker.run("research") as ctx:
             stats = orch.research.run(ctx)
@@ -192,6 +229,8 @@ def ideas(
     """List candidate ideas; optionally generate and/or select."""
     svc = _svc(quiet=not (generate or select))
     try:
+        if generate or select:
+            _refuse_if_killed(svc)
         orch = _orch(svc)
         if generate or select:
             with svc.tracker.run("ideas") as ctx:
@@ -228,6 +267,7 @@ def produce(
     """Write + QA selected ideas and render approved scripts to MP4."""
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
         orch = _orch(svc)
         with svc.tracker.run("produce") as ctx:
             if write:
@@ -250,6 +290,8 @@ def publish_run(
     """Package (and, if enabled, upload) rendered videos."""
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
+        _refuse_if_posting_off(svc)
         orch = _orch(svc)
         with svc.tracker.run("publish") as ctx:
             if video_id:
@@ -273,6 +315,8 @@ def publish_retry(
     """
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
+        _refuse_if_posting_off(svc)
         orch = _orch(svc)
         allowed, why = orch.publisher.gate().check()
         if not allowed:
@@ -396,6 +440,8 @@ def analytics(
     """Show latest performance per video; optionally collect from APIs."""
     svc = _svc(quiet=not collect)
     try:
+        if collect:
+            _refuse_if_killed(svc)
         orch = _orch(svc)
         if collect:
             with svc.tracker.run("analytics") as ctx:
@@ -510,6 +556,7 @@ def strategy_learn() -> None:
     """Run the learning step now (metrics -> experiments -> strategy update)."""
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
         orch = _orch(svc)
         with svc.tracker.run("learn") as ctx:
             out = orch.analyst.learn(ctx, orch.strategy.current())
@@ -646,6 +693,44 @@ def guideline_reject(
         svc.close()
 
 
+@posting_app.command("on")
+def posting_on(
+    reason: Annotated[str, typer.Option("--reason", help="Why (recorded with who and when)")] = "",
+) -> None:
+    """Turn posting on: queued rendered videos post under the usual limits, consent and approval gates."""
+    svc = _svc(quiet=True)
+    try:
+        st = svc.posting.turn_on("owner", reason)
+        console.print(f"posting [green]{st.describe()}[/]", highlight=False)
+        if svc.killswitch.is_engaged():
+            console.print("[yellow]note:[/] the kill switch is engaged, so nothing runs until `aimz resume`.")
+    finally:
+        svc.close()
+
+
+@posting_app.command("off")
+def posting_off(
+    reason: Annotated[str, typer.Option("--reason", help="Why (recorded with who and when)")] = "",
+) -> None:
+    """Turn posting off: nothing is posted; research, writing, rendering, metrics and learning carry on."""
+    svc = _svc(quiet=True)
+    try:
+        st = svc.posting.turn_off("owner", reason)
+        console.print(f"posting [yellow]{st.describe()}[/]", highlight=False)
+    finally:
+        svc.close()
+
+
+@posting_app.command("status")
+def posting_status() -> None:
+    """Show whether posting is on, since when and why."""
+    svc = _svc(quiet=True)
+    try:
+        console.print(f"posting {svc.posting.status().describe()}", markup=False, highlight=False)
+    finally:
+        svc.close()
+
+
 @app.command()
 def experiments() -> None:
     """List experiments and their current evaluation."""
@@ -725,6 +810,7 @@ def _status_one() -> None:
         info = {
             "kill_switch": "ENGAGED" if ks.engaged else "off",
             "kill_reason": ks.reason,
+            "posting_switch": svc.posting.status().describe(),
             "budget_month": snap.month,
             "budget_usd": snap.budget_usd,
             "spent_usd": snap.spent_usd,
@@ -768,7 +854,7 @@ def _status_one() -> None:
 
 @app.command()
 def kill(reason: str = "owner request") -> None:
-    """Engage the kill switch: blocks publishing, API writes, scheduling, and paid providers."""
+    """Engage the kill switch: the agent does nothing (only YouTube data retention keeps running)."""
     svc = _svc(quiet=True)
     try:
         st = svc.killswitch.engage(reason)
@@ -982,6 +1068,7 @@ def publish_poll() -> None:
     """Advance uploads the platform was still processing."""
     svc = _svc()
     try:
+        _refuse_if_killed(svc)
         with svc.tracker.run("publish") as ctx:
             n = _orch(svc).publisher.poll_pending(ctx)
         console.print(f"advanced {n} publication(s)")
