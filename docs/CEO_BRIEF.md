@@ -1,6 +1,20 @@
 # AI Media Zero: Brief for the CEO and the CEO's AI Agent
 
-_Updated 2026-10-02: pre-send recheck passed (live runs, uploads, privacy page); reply to YouTube ready to
+_Updated 2026-10-08: **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
+channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but
+changes nothing until the guideline is written. **8 Oct: owner logged in to YouTube again (uploads resume; the
+consent screen still needs "In production" so it stops expiring weekly). The 7 Oct test video is up unlisted:
+https://www.youtube.com/watch?v=fAO4zO8QbpY. Part 2 is split into four pieces (A script checks, B picture and layout,
+C sound, D stock video); piece A is merged:** hook rules (word limit, no question, no "X is a..." opening) are
+checked in code, and topics outside the guideline genre are rejected by a strict AI check. Like part 1, it only
+acts once the guideline exists. **Owner decision before part 3:** the "X is a..." check also catches some good
+hooks ("This tiny island is an entire country"); recommended: keep it and narrow it if rejections pile up.
+Kill switch now means "do nothing"; a new posting switch pauses only posting.
+Earlier (7 Oct): **YouTube compliance review: Google (6 Oct) says the 2 Oct written reply is not
+enough and asks for a screencast of the upload workflow, due Thu 15 Oct.** The recording script is in
+`data/audit/screencast-script.md`, and a Gmail draft reply is waiting for the video link. Owner action: record, upload
+unlisted, send. If this lapses, the quota increase is refused; uploads continue on the default quota.
+Earlier (2 Oct): pre-send recheck passed (live runs, uploads, privacy page); reply to YouTube ready to
 send. Earlier (1 Oct): compliance review still open, policy-audit findings and owner decisions
 (see "1 Oct: YouTube compliance"). Snapshot as of 2026-09-30 (evening); new that day: the 30 Sep upload check, the YouTube login item,
 the owner-approved plan for full AI control and 3–4 channels (`docs/PLAN_FULL_CONTROL.md`), and
@@ -36,7 +50,7 @@ Wikimedia and free video tools. The only outside services are the platforms' off
 ### Who controls what
 | The AI controls | The owner controls |
 |---|---|
-| Topics, scripts, titles, hooks, visuals, how often it tries new ideas, its strategy notes | Money, logins, legal authority, whether posting is allowed, the **kill switch** |
+| One experiment at a time per channel against the owner's guideline; anything the guideline leaves open | The **guideline** (and every change to it), money, logins, legal authority, the **posting switch**, the **kill switch** |
 
 The budget is hard-capped at **$0.00/month** below the AI. The AI cannot see or change that setting.
 Any call that would cost money is refused before it runs.
@@ -259,7 +273,32 @@ channels on 1 Oct (4 in total).
   "Google hasn't verified this app" warning is expected for your own app. Do it before about **7 Oct**,
   when the current login runs out. **Verify:** YouTube still uploads after 7 Oct.
 
+### 7-8 Oct: rescope to an owner guideline per channel (new)
+- **Why:** the owner judged the videos "AI slop". An audit found half-empty frames, pictures that did not match the
+  narration, a robotic voice, encyclopedia-style scripts and about 41% of each video watched. YouTube's July 2025
+  "inauthentic content" rule names this look. Research: `docs/VIDEO_QUALITY_RESEARCH.md`.
+- **Decision (owner, 7 Oct):** the AI no longer starts from zero. It follows a polished guideline per channel
+  (look, sound, length, hook, structure, tone, topics, titles), may test one change at a time per channel, and a
+  change that beats the guideline (90% confidence, at least 10 videos per side) becomes a proposal the owner
+  approves or rejects. Constitution sections 1, 3, 4 and 8 were rewritten with the owner's approval.
+- **Also decided:** videos that pass every guardrail post automatically while the new **posting switch** is on;
+  the **kill switch** now stops the AI completely.
+- **Status:** part 1 (the guideline system) is built, reviewed, merged and live (416 tests). It changes nothing
+  until `config/guideline.md` exists. Part 2 piece A (hook checks in code, strict genre check) merged 8 Oct
+  (all tests pass). Next: pieces B (picture-matching check, full-screen layout, credits in the description),
+  C (new voice, loudness), D (stock video), then part 3 (writing Backhouse Explainers' guideline for owner
+  approval). Plan: `docs/PLAN_GUIDELINE.md`. A 7 Oct test video showed the system works but the look needs parts
+  2 and 3.
+- **Scope:** only Backhouse Explainers. The owner's Breakdown and Monmouth County & Politics channels are
+  separate and owner-run.
+
 ### Decisions for the CEO
+- **Now: set the OAuth consent screen to "In production"** (Google Cloud Console) so the YouTube login stops
+   expiring weekly. The login itself was renewed 8 Oct.
+- **Before part 3:** keep the broad "X is a..." hook check (recommended) or narrow it now.
+- **Record in the vault Decision Log:** the 7 Oct rescope (owner guideline per channel, one experiment,
+   owner-approved changes at 90%/10 videos), automatic posting under the posting switch, and kill switch = full
+   stop. This supersedes the 30 Sep "full AI control" plan (B) and the 23 Sep "AI owns creative" rule.
 0. **Now:** the 19 Sep Borneo video never reached YouTube (checked on the channel). The topic was
    covered by a different video on 23 Sep (154 views), so the recommendation is to **let it go**.
    Uploads that failed before 28 Sep are not retried automatically; one command re-sends it if you
@@ -272,8 +311,8 @@ channels on 1 Oct (4 in total).
 4. **TikTok:** approve the time to film the demo video TikTok's app review requires.
 5. **Record the 30 Sep decisions in the vault:** plan B+D (full control + 3–4 channels, $0);
    mission adds ad revenue but keeps learning and no bulk posting; free-to-reuse media allowed.
-6. **Edit the constitution** (owner-only file): draft wording for the mission, media licences and
-   creative autonomy is in `docs/PLAN_FULL_CONTROL.md` section 8.
+6. **Constitution:** sections 1, 3, 4 and 8 updated 7 Oct (owner-approved). Still open: the media-licence
+   sentence in section 5 for stock media (`docs/PLAN_FULL_CONTROL.md` section 8).
 7. **Posting limits:** 2 per platform per run, 2.5 h apart, **2 runs a day** (changed 1 Oct) and in force; held on 1-2 Oct.
 8. **Channels:** decided 30 Sep (3 more, 4 in total). **On hold (owner, 1 Oct) until the reply to YouTube
    is sent**; then add them (`docs/AUTONOMOUS_SETUP.md` Part F) and send Google their links first.
@@ -304,7 +343,12 @@ channels on 1 Oct (4 in total).
 3. Every provider call goes through `Provider.authorized()` (budget check, usage row; the kill switch
    for paid providers). Every platform write also checks the kill switch, including retries and
    finishing a post that was still encoding.
-4. API writes need owner consent: per-video approval or `AUTOPUBLISH_CONSENT=true` (currently on).
+4. API writes need owner consent (per-video approval or `AUTOPUBLISH_CONSENT=true`, currently on) **and** the
+   owner's posting switch on (`aimz posting on|off|status`, default on). The kill switch stops all agent work
+   (only YouTube's required data deletion still runs).
+4a. **Owner guideline (7 Oct):** when `config/guideline.md` exists, every video follows it. The AI may run one
+   experiment per channel on one guideline item; a win at >=90% / >=10 videos per arm becomes a proposal
+   (`aimz guideline proposals|approve|reject`). Agents never edit the guideline. See `docs/PLAN_GUIDELINE.md`.
 5. **Failed uploads are never retried blindly** (owner decision 2026-09-28, replacing "never
    retried"). A retry first asks the platform whether the earlier attempt posted
    (`Publisher.find_existing`, verified live on YouTube and Bluesky 2026-09-28); at most

@@ -11,11 +11,20 @@ Commands run from `C:\Users\scott\Documents\Agentic_Youtube` in PowerShell. `py`
 
 ## A. Your steps, in order
 
-### A0. Answer Google's YouTube API compliance review: **SENT 2 Oct**
-Reply sent in the Gmail thread on 2 Oct (channel link, step-by-step upload process, end result).
-**Now wait for Google's answer.** The reply promised: no new channel is connected until the review is
-complete, and Google gets each new channel's link before any upload to it. If Google asks for a screen
-recording, see the optional step below.
+### A0a. YouTube login: **renewed 8 Oct**; one step left
+- [x] Run `.\.venv\Scripts\python.exe -m aimz youtube auth` and pick **Backhouse Explainers** (done 8 Oct).
+- [ ] In Google Cloud Console → APIs & Services → OAuth consent screen, set the status to **In production** so
+      the login stops expiring every 7 days.
+- [x] The 7 Oct test video is up unlisted: https://www.youtube.com/watch?v=fAO4zO8QbpY (8 Oct).
+
+### A0. YouTube API compliance review: **record a screencast, reply by Thu 15 Oct**
+Google answered on 6 Oct: the written description sent 2 Oct is "insufficient"; they want a script
+or **screencast** of the complete upload workflow. Written text was already refused, so send a recording.
+- [ ] Record it, following `data/audit/screencast-script.md` (shot list, narration, pre-checks; 4-6 min).
+- [ ] Upload it as Unlisted on YouTube, or to Drive with "anyone with the link", and copy the link.
+- [ ] A Gmail draft reply is in the thread (created 7 Oct): paste the link at `[PASTE LINK]`, then send.
+The 2 Oct promise still holds: no new channel until the review is complete, and Google gets each new
+channel's link before any upload to it.
 
 _Original task, kept for reference:_
 Gmail thread "YouTube API Services: Thank you for your submission" (from youtube-disputes@google.com).
@@ -72,6 +81,9 @@ Notes:
   each `instances\<short-name>\.env` too. Channels created after the keys are in the main `.env` copy them.
 
 ### A3. Edit the constitution (owner-only file: `config\constitution.md`)
+_7 Oct: sections 1, 3, 4 and 8 were rewritten for the guideline rescope with your approval. The section 1
+ad-revenue line and the section 8 items below were part of the superseded 30 Sep plan; only the section 5
+media sentence (stock photos and video) is still open._
 The wording to paste is drafted in `docs/PLAN_FULL_CONTROL.md` **section 8**:
 - [ ] Replace §1 Mission: add "find a niche that earns passive ad revenue" and keep "learning first,
       never flood a platform".
