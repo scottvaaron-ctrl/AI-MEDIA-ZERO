@@ -14,13 +14,12 @@ import pytest
 from aimz.core.errors import KillSwitchEngaged, OwnerApprovalRequired, PublishError
 from aimz.domain.models import MetricsSnapshot
 from aimz.providers.analytics.bluesky import BlueskyAnalyticsProvider
-from aimz.providers.publishers.captions import grapheme_len
 from aimz.providers.publishers.bluesky import (
+    MAX_POST_GRAPHEMES,
     BlueskyClient,
     BlueskyPublisher,
     BlueskySession,
     aspect_ratio,
-    MAX_POST_GRAPHEMES,
     build_credit_replies,
     build_post_text,
     build_sources_reply,
@@ -28,6 +27,7 @@ from aimz.providers.publishers.bluesky import (
     post_url,
     srt_to_vtt,
 )
+from aimz.providers.publishers.captions import grapheme_len
 
 POST_URI = "at://did:plc:aimz/app.bsky.feed.post/3kabc123"
 
@@ -748,4 +748,3 @@ def test_poll_posts_the_saved_credits_replies(svc, tmp_path: Path) -> None:  # n
     done = pub.poll(svc.ctx(), {"package_dir": str(package), "metadata_json": "{}"})
     assert done is not None and done.status == "published"
     assert fake.records[-1]["text"] == CREDITS_POST
-

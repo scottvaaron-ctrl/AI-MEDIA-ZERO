@@ -390,7 +390,9 @@ def test_scorer_crash_after_unloadable_previews_is_not_a_previews_alarm(
     assert "onnx session exploded" in (svc.db.get_state("relevance_unavailable") or "")
     assert not svc.db.get_state("relevance_previews_failing")
     assert "picture_check_previews_failing" not in attention(svc.db)
-    assert scenes[0].asset_id is not None and scenes[0].asset_id.startswith("asset_one")  # first download wins
+    assert scenes[0].asset_id is not None and scenes[0].asset_id.startswith(
+        "asset_one"
+    )  # first download wins
 
 
 def test_scorer_raises_falls_back_for_rest_of_run(
@@ -561,5 +563,7 @@ def test_default_template_full_bleed(svc) -> None:  # noqa: ANN001
     chosen = producer.default_settings()
     chosen.pop("template")  # no guideline value: the fallback decides
     out = svc.env.data_dir / "out_tpl"
-    producer.assemble(svc.ctx("run_1"), [Beat(narration="One line of narration.")], chosen, out, "vid_1", "T", "AI")
+    producer.assemble(
+        svc.ctx("run_1"), [Beat(narration="One line of narration.")], chosen, out, "vid_1", "T", "AI"
+    )
     assert seen == ["full_bleed"]

@@ -391,7 +391,10 @@ def test_direct_post_caption_carries_every_image_credit(svc, tmp_path: Path) -> 
     fake = FakeTikTok()
     pub = TikTokDirectPostPublisher(_client(tmp_path, fake), privacy_level="SELF_ONLY", poll_seconds=30)
     video, script, meta = _video(svc)
-    meta["attributions"] = ["Huhu by A. Person, CC BY-SA 4.0 (https://example.org/huhu)", "Photo by B on Pexels"]
+    meta["attributions"] = [
+        "Huhu by A. Person, CC BY-SA 4.0 (https://example.org/huhu)",
+        "Photo by B on Pexels",
+    ]
     pub.publish(svc.ctx(), video, script, meta, svc.env.data_dir / "pkg")
     title = fake.init_body["post_info"]["title"]
     assert "Image credits:" in title

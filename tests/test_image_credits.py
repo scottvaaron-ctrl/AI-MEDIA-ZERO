@@ -51,7 +51,10 @@ def test_tiktok_long_title_is_trimmed_before_any_credit() -> None:
 def test_tiktok_credits_alone_over_the_limit_keep_full_lines_and_point_to_youtube(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    many = [f"Picture {i} by Someone Long-Named, CC BY-SA 4.0 (https://example.org/{'x' * 60}/{i})" for i in range(40)]
+    many = [
+        f"Picture {i} by Someone Long-Named, CC BY-SA 4.0 (https://example.org/{'x' * 60}/{i})"
+        for i in range(40)
+    ]
     with caplog.at_level(logging.WARNING):
         cap = build_caption("Huhu beetle", ["history"], credits=many)
     assert utf16_len(cap) <= TIKTOK_CAPTION_LIMIT
@@ -61,7 +64,9 @@ def test_tiktok_credits_alone_over_the_limit_keep_full_lines_and_point_to_youtub
     assert body and all(line in many for line in body)  # only whole credit lines, in order
     assert body == many[: len(body)]
     assert len(body) < len(many)
-    assert any("credits" in r.getMessage() and "YouTube description" in r.getMessage() for r in caplog.records)
+    assert any(
+        "credits" in r.getMessage() and "YouTube description" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_tiktok_limit_counts_utf16_units() -> None:
@@ -79,7 +84,13 @@ def test_tiktok_package_caption_carries_credits(svc) -> None:  # noqa: ANN001
     mp4 = svc.env.data_dir / "pkg.mp4"
     mp4.write_bytes(b"\x00" * 16)
     video = {"id": new_id("vid"), "title": "Huhu", "file_path": str(mp4), "created_at": now_iso()}
-    meta = {"title": "Huhu", "tags": ["history"], "sources": [], "attributions": CREDITS, "ai_disclosure": "AI"}
+    meta = {
+        "title": "Huhu",
+        "tags": ["history"],
+        "sources": [],
+        "attributions": CREDITS,
+        "ai_disclosure": "AI",
+    }
     pkg = svc.env.data_dir / "pkg"
     TikTokPackagePublisher().publish(svc.ctx(), video, {"id": new_id("scr")}, meta, pkg)
     caption = (pkg / "caption.txt").read_text(encoding="utf-8")
@@ -99,7 +110,9 @@ def _metadata(svc: Any, sources: list[dict[str, str]], attributions: list[str]) 
 
 
 def test_youtube_description_keeps_credits_when_sources_are_very_long(svc) -> None:  # noqa: ANN001
-    sources = [{"title": f"Source number {i} " + "w" * 80, "url": f"https://example.org/{i}"} for i in range(200)]
+    sources = [
+        {"title": f"Source number {i} " + "w" * 80, "url": f"https://example.org/{i}"} for i in range(200)
+    ]
     meta = _metadata(svc, sources, CREDITS)
     desc = meta["description"]
     assert len(desc) <= 4900
