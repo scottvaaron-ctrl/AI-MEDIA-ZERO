@@ -409,3 +409,23 @@ def test_text_signal_visual_query_and_max(svc, monkeypatch: pytest.MonkeyPatch) 
     assert sorted(t for _, t in scorer.calls) == sorted([beat.narration, "Jupiter moon discovery"])
     assert prov.fetched == ["two"]
     assert scenes[0].asset_id is not None and scenes[0].asset_id.startswith("asset_two")
+
+
+def test_default_template_full_bleed(svc) -> None:  # noqa: ANN001
+    producer = _producer(svc)
+    assert producer.default_settings()["template"] == "full_bleed"
+    seen: list[Any] = []
+    real = svc.cards.render_card
+
+    def spy(ctx: Any, spec: dict[str, Any], out: Path) -> Path:
+        seen.append(spec["template"])
+        return real(ctx, spec, out)
+
+    monkeypatched = svc.cards
+    monkeypatched.render_card = spy  # type: ignore[method-assign]
+    svc.assets = []
+    chosen = producer.default_settings()
+    chosen.pop("template")  # no guideline value: the fallback decides
+    out = svc.env.data_dir / "out_tpl"
+    producer.assemble(svc.ctx("run_1"), [Beat(narration="One line of narration.")], chosen, out, "vid_1", "T", "AI")
+    assert seen == ["full_bleed"]

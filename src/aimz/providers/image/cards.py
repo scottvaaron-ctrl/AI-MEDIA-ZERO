@@ -1,7 +1,7 @@
 """PillowCardProvider: renders 1080x1920 scene cards, stat/quote cards, and thumbnails. Cost: $0.
 
 Each scene card = background (deterministic gradient per video) + optional licensed photo
-(cover-fit, darkened) + headline caption + small attribution + AI disclosure line.
+(cover-fit, darkened) + headline caption. Credits and the AI disclosure are not drawn on screen.
 Narration subtitles are *not* baked in here; the renderer burns them from an ASS file so
 they are timed to the audio.
 """
@@ -11,7 +11,6 @@ from __future__ import annotations
 import colorsys
 import hashlib
 import logging
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -172,7 +171,7 @@ class PillowCardProvider(ImageProvider):
         (True: a transparent layer of text for a video-clip scene).
 
         Everything stays inside the platform's safe area (``providers/video/layout.py``): card text sits
-        in the upper half, credits just below it, and the band above the platform's bottom overlay is kept
+        in the upper half, and the band above the platform's bottom overlay is kept
         free for the burned narration captions.
         """
         template = str(spec.get("template") or "card")
@@ -193,11 +192,10 @@ class PillowCardProvider(ImageProvider):
             headline = (spec.get("headline") or "").strip()
             body = (spec.get("body") or "").strip()
             image_path = spec.get("image_path")
-            text_bottom = int(h * layout.CARD_TEXT_BOTTOM)  # captions and credits live below this
+            text_bottom = int(h * layout.CARD_TEXT_BOTTOM)  # captions live below this
 
             head_font = _font(self.font_file, 84 if len(headline) < 40 else 68)
             body_font = _font(self.font_file, 54)
-            small_font = _font(self.font_file, 30)
             label_font = _font(self.font_file, 36)
 
             has_image = False
@@ -292,33 +290,7 @@ class PillowCardProvider(ImageProvider):
                 draw.rounded_rectangle((80, ly, 80 + lw, ly + 64), radius=32, fill=accent)
                 draw.text((104, ly + 10), label, font=label_font, fill=(20, 20, 20))
 
-            # Credits sit between the card text and the captions: the platform's own description and
-            # comment bar cover the bottom of the frame, where they used to be.
-            y = int(h * layout.CREDITS_Y)
-            attribution = (spec.get("attribution") or "").strip()
-            if attribution:
-                for line in textwrap.wrap(attribution, width=56)[:2]:
-                    draw.text(
-                        (80, y),
-                        line,
-                        font=small_font,
-                        fill=(210, 210, 210),
-                        stroke_width=2,
-                        stroke_fill=(0, 0, 0),
-                    )
-                    y += 36
-            disclosure = (spec.get("disclosure") or "").strip()
-            if disclosure:
-                for line in textwrap.wrap(disclosure, width=56)[:2]:
-                    draw.text(
-                        (80, y),
-                        line,
-                        font=small_font,
-                        fill=(190, 190, 190),
-                        stroke_width=2,
-                        stroke_fill=(0, 0, 0),
-                    )
-                    y += 36
+            # Image credits and the AI disclosure are not drawn: they go in the description (docs/COMPLIANCE.md).
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
             canvas.save(out_path, "PNG", optimize=False)
@@ -342,7 +314,7 @@ class PillowCardProvider(ImageProvider):
         shade = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         sd = ImageDraw.Draw(shade)
         for y in range(h):
-            top = max(0.0, 1 - y / (h * 0.62)) * 0.70  # dark behind the headline and credits
+            top = max(0.0, 1 - y / (h * 0.62)) * 0.70  # dark behind the headline
             bottom = max(0.0, (y - h * 0.55) / (h * 0.45)) * 0.75  # dark behind the captions
             sd.line([(0, y), (w, y)], fill=(0, 0, 0, int(255 * max(top, bottom))))
         canvas = Image.alpha_composite(canvas, shade)
@@ -377,15 +349,6 @@ class PillowCardProvider(ImageProvider):
             ly = int(h * layout.LABEL_Y)
             draw.rounded_rectangle((w - 80 - cw, ly, w - 80, ly + 64), radius=32, fill=(20, 20, 20, 255))
             draw.text((w - 80 - cw + 24, ly + 10), str(counter), font=label_font, fill=accent)
-        small_font = _font(self.font_file, 30)
-        y = int(h * layout.CREDITS_Y)
-        for text, fill in (
-            (spec.get("attribution") or "", (220, 220, 220)),
-            (spec.get("disclosure") or "", (190, 190, 190)),
-        ):
-            for line in textwrap.wrap(str(text).strip(), width=56)[:2]:
-                draw.text((80, y), line, font=small_font, fill=fill, stroke_width=2, stroke_fill=(0, 0, 0))
-                y += 36
         out_path.parent.mkdir(parents=True, exist_ok=True)
         (canvas if photo is None else canvas.convert("RGB")).save(out_path, "PNG")
         return out_path

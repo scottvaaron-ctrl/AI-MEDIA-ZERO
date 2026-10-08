@@ -203,7 +203,7 @@ class ProducerAgent(Agent):
             "palette_hue": None,
             "headline_on_cards": "on",
             "progress_counter": "off",
-            "template": "card",
+            "template": "full_bleed",
             "clip_scenes": "off",
             "music": "off",
             "music_volume_db": -14.0,
@@ -266,7 +266,7 @@ class ProducerAgent(Agent):
         hue = chosen.get("palette_hue")
         show_headline = chosen.get("headline_on_cards") != "off"
         counter_on = chosen.get("progress_counter") == "on"
-        template = str(chosen.get("template") or "card")
+        template = str(chosen.get("template") or "full_bleed")
         clips_on = chosen.get("clip_scenes") == "on"
         scenes: list[Scene] = []
         attributions: list[str] = []

@@ -13,7 +13,6 @@ TOP_UI = 0.12  # nothing readable above this
 LABEL_Y = 0.13  # corner labels (sources label, beat counter)
 CARD_TEXT_TOP = 0.19
 CARD_TEXT_BOTTOM = 0.50
-CREDITS_Y = 0.505  # image credit and AI disclosure lines (up to four, 36 px each)
 CAPTION_TOP = 0.58  # burned captions never rise above this
 BOTTOM_UI = 0.22  # burned captions stay above the channel row, title and description
 SIDE_UI_PX = 170  # caption side margins at 1080 px wide: clear of the right-hand button column
