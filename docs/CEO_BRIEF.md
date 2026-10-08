@@ -5,10 +5,14 @@ channel instead of having full creative control** (see "7-8 Oct: rescope" below)
 changes nothing until the guideline is written. **8 Oct: owner logged in to YouTube again (uploads resume; the
 consent screen still needs "In production" so it stops expiring weekly). The 7 Oct test video is up unlisted:
 https://www.youtube.com/watch?v=fAO4zO8QbpY. Part 2 is split into four pieces (A script checks, B picture and layout,
-C sound, D stock video); piece A is merged:** hook rules (word limit, no question, no "X is a..." opening) are
-checked in code, and topics outside the guideline genre are rejected by a strict AI check. Like part 1, it only
-acts once the guideline exists. **Owner decision before part 3:** the "X is a..." check also catches some good
-hooks ("This tiny island is an entire country"); recommended: keep it and narrow it if rejections pile up.
+C sound, D stock video); pieces A and B are merged.** A: hook rules (word limit, no question, no "X is a..."
+opening) are checked in code, and topics outside the guideline genre are rejected by a strict AI check (acts
+once the guideline exists). **B is live now:** a local picture-matching model (SigLIP 2, free) picks the
+best-matching picture for each beat and uses a text card when nothing matches; no credits or AI line in the frame
+any more, and full picture credits now go with every platform (YouTube description, TikTok caption, Bluesky reply
+thread); full-screen layout is the default. **Owner decisions:** (1) the picture check's pass mark is a low floor
+(keeps 31/34 good pictures, rejects 6/16 bad outright); recommended: keep it and revisit after a few weeks;
+(2) before part 3, the "X is a..." check also catches some good hooks; recommended: keep it.
 Kill switch now means "do nothing"; a new posting switch pauses only posting.
 Earlier (7 Oct): **YouTube compliance review: Google (6 Oct) says the 2 Oct written reply is not
 enough and asks for a screencast of the upload workflow, due Thu 15 Oct.** The recording script is in
@@ -285,9 +289,9 @@ channels on 1 Oct (4 in total).
   the **kill switch** now stops the AI completely.
 - **Status:** part 1 (the guideline system) is built, reviewed, merged and live (416 tests). It changes nothing
   until `config/guideline.md` exists. Part 2 piece A (hook checks in code, strict genre check) merged 8 Oct
-  (all tests pass). Next: pieces B (picture-matching check, full-screen layout, credits in the description),
-  C (new voice, loudness), D (stock video), then part 3 (writing Backhouse Explainers' guideline for owner
-  approval). Plan: `docs/PLAN_GUIDELINE.md`. A 7 Oct test video showed the system works but the look needs parts
+  (all tests pass). Piece B (picture-matching check, credits off screen and on every platform, full-screen
+  default) merged and live 8 Oct (562 tests). Next: C (new voice, loudness), D (stock video), then part 3
+  (writing Backhouse Explainers' guideline for owner approval). Plan: `docs/PLAN_GUIDELINE.md`. A 7 Oct test video showed the system works but the look needs parts
   2 and 3.
 - **Scope:** only Backhouse Explainers. The owner's Breakdown and Monmouth County & Politics channels are
   separate and owner-run.
@@ -296,6 +300,9 @@ channels on 1 Oct (4 in total).
 - **Now: set the OAuth consent screen to "In production"** (Google Cloud Console) so the YouTube login stops
    expiring weekly. The login itself was renewed 8 Oct.
 - **Before part 3:** keep the broad "X is a..." hook check (recommended) or narrow it now.
+- **Picture check pass mark:** keep the low floor (recommended; revisit after a few weeks of run notes) or make it
+   stricter (more text cards, fewer loose pictures). Calibration: `docs/VIDEO_QUALITY_RESEARCH.md`.
+- **Check the next Bluesky post** has its "Image credits" reply under it (first live use of the credits thread).
 - **Record in the vault Decision Log:** the 7 Oct rescope (owner guideline per channel, one experiment,
    owner-approved changes at 90%/10 videos), automatic posting under the posting switch, and kill switch = full
    stop. This supersedes the 30 Sep "full AI control" plan (B) and the 23 Sep "AI owns creative" rule.

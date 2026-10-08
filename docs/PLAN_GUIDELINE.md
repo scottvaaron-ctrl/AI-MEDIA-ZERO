@@ -27,7 +27,7 @@ YouTube projects (Breakdown, Monmouth County & Politics) are separate and owner-
 | Part | What | Status |
 |---|---|---|
 | 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done**, merged to `main` 2026-10-08 (`fb57dad`), 416 tests |
-| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, credits and disclosure in the description, none on screen); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done** on branch `feat/script-checks` (2026-10-08, not yet merged), 448 tests. **B built** on branch `feat/picture-relevance` (2026-10-08, not yet merged): local picture-matching check, no credits or disclosure on screen, full-bleed default. C, D not started |
+| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, credits and disclosure in the description, none on screen); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done**, merged to `main` 2026-10-08. **B done**, merged to `main` 2026-10-08 (562 tests): local picture-matching check (live), no credits or disclosure on screen, credits on every platform, full-bleed default. C, D not started |
 | 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started (a test-only draft exists: `data/tests/2026-10-07-guideline-test/guideline-TEST-DRAFT.md`) |
 | Switches | Kill switch = the agent does nothing (only YouTube's required data deletion runs); new posting switch `python -m aimz posting on|off|status` pauses only posting | **Done**, merged 2026-10-08 (owner decision 2026-10-07) |
 | Constitution | Sections 1, 3, 4 and 8 rewritten (owner-approved 2026-10-07) | **Done** |
@@ -218,7 +218,7 @@ Do these in order.
 2. **Done 2026-10-08: test video uploaded unlisted.** Link: https://www.youtube.com/watch?v=fAO4zO8QbpY
 3. **Part 2 (production abilities), in pieces.** Piece A is built; B, C and D are next, each with its own spec,
    plan and build.
-   * **Piece A (script checks): built on branch `feat/script-checks`, not yet merged.** The deterministic hook
+   * **Piece A (script checks): merged to `main` 2026-10-08.** The deterministic hook
      check and genre enforcement are done:
      * New guideline `checks:` keys `hook_max_words`, `hook_no_question`, `hook_no_definition`; a wrong-typed
        value for these keys is rejected; unknown keys are still allowed.
@@ -232,7 +232,7 @@ Do these in order.
        is skipped, not fatal.
      * Spec: `docs/superpowers/specs/2026-10-08-script-checks-design.md`. Plan:
        `docs/superpowers/plans/2026-10-08-script-checks.md`.
-   * **Piece B (picture and layout): built on branch `feat/picture-relevance` (2026-10-08), not yet merged.**
+   * **Piece B (picture and layout): merged to `main` 2026-10-08 and live.**
      * A local SigLIP 2 picture-matching check (ONNX, 8-bit, files in `data/models/siglip2`, optional extra
        `vision`; `python -m aimz doctor --fix` downloads the model). For each beat it scores small previews of
        the search results against the narration, uses the best one above a low floor, downloads only the
