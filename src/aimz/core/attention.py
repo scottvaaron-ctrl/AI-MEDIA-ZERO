@@ -77,6 +77,14 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
                 "fix": "python -m aimz youtube auth",
             }
         ]
+    picture_check = db.get_state("relevance_unavailable")
+    if picture_check:
+        out["picture_check_unavailable"] = [
+            {
+                "why": f"picture-matching check unavailable: {picture_check}",
+                "fix": "python -m aimz doctor --fix",
+            }
+        ]
     # Local import: guideline_proposals imports the experiment settings, which this module does not need.
     from aimz.guideline_proposals import attention_entries
 

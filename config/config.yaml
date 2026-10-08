@@ -152,6 +152,14 @@ assets:
     enabled: true
     allowed_licenses: ["pd", "cc0", "cc-by", "cc-by-sa", "public domain"]
     max_results: 6
+  # Picture-matching check (SigLIP 2): a candidate is used only if its preview matches the beat, else a
+  # text card. enabled flips to true after calibration, which also sets text and threshold.
+  relevance:
+    enabled: false
+    text: narration       # narration | visual_query | max
+    threshold: 0.0
+    by_sa_penalty: 0.05
+    preview_width: 320
   # Pexels and Pixabay photos and video clips (plan stage 5). OWNER SWITCH: set enabled: true only after
   # amending the constitution's media rule (docs/PLAN_FULL_CONTROL.md section 8) and putting
   # PEXELS_API_KEY / PIXABAY_API_KEY in .env. Until then these providers are never registered.
