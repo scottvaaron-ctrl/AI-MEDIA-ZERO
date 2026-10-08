@@ -157,9 +157,9 @@ guideline or the constitution.
 * **R11.** The 20-video cooldown also follows an experiment the guideline won or safety-stopped, not only an
   inconclusive one or a rejected proposal.
 
-## 4. Constitution wording awaiting owner approval
+## 4. Constitution wording (approved by the owner 2026-10-07, applied)
 
-Not applied. `config/constitution.md` is owner-controlled; edit it only after the owner says yes in chat.
+Applied to `config/constitution.md` on 2026-10-07 after the owner approved it. The owner also changed section 3 (videos that pass every guardrail post automatically while the posting switch is on) and section 4 (kill switch = the AI does nothing, except platform-required data deletion).
 
 **Section 1, replace the first sentence with:**
 
@@ -169,7 +169,6 @@ Not applied. `config/constitution.md` is owner-controlled; edit it only after th
 
 > Each channel follows its owner-approved guideline (`config/guideline.md`), which sets topics, format, hooks, tone, length, look, sound, titles and covers. The AI may run one experiment per channel, changing one guideline item. A change that performs better becomes a proposal; it takes effect only when the owner approves it. Where the guideline is silent, the AI decides. The AI never edits the guideline.
 
-After approval: edit the two sections, then run `pytest` (tests that read the constitution must still pass).
 
 ## 5. Known gaps (deferred, from reviews)
 
