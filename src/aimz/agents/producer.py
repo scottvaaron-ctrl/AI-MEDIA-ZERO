@@ -12,7 +12,12 @@ from typing import Any
 
 from aimz import guideline, identity
 from aimz.agents.base import Agent
-from aimz.core.attention import PREVIEWS_STATE, RELEVANCE_STATE  # picture-check states (aimz status)
+from aimz.core.attention import (  # picture-check states (aimz status)
+    DEFAULT_RELEVANCE_FIX,
+    PREVIEWS_STATE,
+    RELEVANCE_FIX_STATE,
+    RELEVANCE_STATE,
+)
 from aimz.core.runs import RunContext
 from aimz.domain.models import AssetCandidate, AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
@@ -539,12 +544,14 @@ class ProducerAgent(Agent):
             return off[1]
         return None
 
-    def _gate_down(self, ctx: Any, reason: str) -> None:
-        """First download wins for the rest of this run; warn once and show it in ``aimz status``."""
+    def _gate_down(self, ctx: Any, reason: str, fix: str = "") -> None:
+        """First download wins for the rest of this run; warn once and show it, with the command that
+        fixes it, in ``aimz status``."""
         if self._gate_reason(ctx) is None:
             self.log.warning("picture-matching check unavailable, first download wins this run: %s", reason)
         self._gate_off = (getattr(ctx, "run_id", None), reason)
         self.svc.db.set_state(RELEVANCE_STATE, reason[:500])
+        self.svc.db.set_state(RELEVANCE_FIX_STATE, (fix or DEFAULT_RELEVANCE_FIX)[:200])
 
     def _gate_scorer(self, ctx: Any) -> Any | None:
         """The healthy relevance scorer, or None (recorded once per run as unavailable)."""
@@ -555,7 +562,10 @@ class ProducerAgent(Agent):
         scorer = relevance.get_scorer(self.svc)
         if scorer is None:
             health = relevance.scorer_health(Path(self.svc.env.siglip_model_dir))
-            self._gate_down(ctx, health.detail if not health.ok else "SigLIP model could not be downloaded")
+            if health.ok:  # files and packages are there, so the model itself failed to load or download
+                self._gate_down(ctx, "SigLIP model could not be downloaded", DEFAULT_RELEVANCE_FIX)
+            else:
+                self._gate_down(ctx, health.detail, health.fix)
         return scorer
 
     def _pick_asset(self, ctx: Any, beat: Beat, title: str, dest: Path, idx: int) -> AssetRecord | None:
@@ -571,8 +581,9 @@ class ProducerAgent(Agent):
                 if asset is not None or self._gate_reason(ctx) is not None:
                     break
             tried, self._query_log = self._query_log, None
-            starved = (
-                asset is None
+            starved = (  # only while the check is still up: a scorer crash is its own alarm
+                self._gate_reason(ctx) is None
+                and asset is None
                 and sum(q["candidates"] for q in tried) > 0
                 and all(q["top_score"] is None for q in tried)
             )
@@ -653,7 +664,7 @@ class ProducerAgent(Agent):
             finally:
                 for img in images:
                     img.close()
-            for state in (RELEVANCE_STATE, PREVIEWS_STATE):  # a preview was loaded and scored
+            for state in (RELEVANCE_STATE, RELEVANCE_FIX_STATE, PREVIEWS_STATE):  # a preview was scored
                 if self.svc.db.get_state(state):
                     self.svc.db.set_state(state, "")
         if self._query_log is not None:

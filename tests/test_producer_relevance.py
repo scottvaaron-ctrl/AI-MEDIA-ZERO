@@ -325,7 +325,72 @@ def test_scorer_missing_falls_back_and_flags(svc, monkeypatch: pytest.MonkeyPatc
     assert reason
     items = attention(svc.db)["picture_check_unavailable"]
     assert items[0]["why"] == f"picture-matching check unavailable: {reason}"
-    assert items[0]["fix"] == "python -m aimz doctor --fix"
+    from aimz.providers.image import relevance
+
+    assert items[0]["fix"] == relevance.scorer_health(Path(svc.env.siglip_model_dir)).fix
+
+
+@pytest.mark.parametrize(
+    ("health", "fix"),
+    [
+        (("onnxruntime / tokenizers not importable", "pip install -e .[vision]"), "pip install -e .[vision]"),
+        (("SigLIP model files missing in x", "python -m aimz doctor --fix"), "python -m aimz doctor --fix"),
+    ],
+)
+def test_unavailable_item_shows_the_real_fix(
+    svc,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    health: tuple[str, str],
+    fix: str,
+) -> None:
+    """The status item names the fix ``scorer_health`` reports, not always ``doctor --fix``."""
+    from aimz.core.attention import attention
+    from aimz.providers.base import HealthStatus
+    from aimz.providers.image import relevance
+
+    prov = FakeProvider(svc, {"Jupiter moon discovery": [_cand("one")]})
+    svc.assets = [prov]
+    _gate(svc, monkeypatch, None)
+    monkeypatch.setattr(relevance, "scorer_health", lambda _dir: HealthStatus(False, *health))
+    beats = [Beat(narration="Amalthea.", visual_query="Jupiter moon discovery", visual_type="image")]
+    _assemble(_producer(svc), svc, beats)
+    item = attention(svc.db)["picture_check_unavailable"][0]
+    assert item["why"] == f"picture-matching check unavailable: {health[0]}"
+    assert item["fix"] == fix
+
+
+def test_success_clears_the_stored_fix_too(svc, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from aimz.core.attention import attention
+
+    svc.db.set_state("relevance_unavailable", "packages missing")
+    svc.db.set_state("relevance_unavailable_fix", "pip install -e .[vision]")
+    prov = FakeProvider(svc, {"q": [_cand("one")]})
+    svc.assets = [prov]
+    _gate(svc, monkeypatch, FakeScorer({"one": 0.5}))
+    _producer(svc)._find_asset(svc.ctx("run_1"), "q", svc.env.data_dir / "a", text="t")
+    assert not svc.db.get_state("relevance_unavailable_fix")
+    assert "picture_check_unavailable" not in attention(svc.db)
+
+
+def test_scorer_crash_after_unloadable_previews_is_not_a_previews_alarm(
+    svc,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    """Query 1's previews cannot load, then the scorer crashes on query 2: the check is down (that is the
+    alarm), so the beat must not also raise a false "previews failing" alarm."""
+    from aimz.agents.producer import asset_queries
+    from aimz.core.attention import attention
+
+    q1, q2 = asset_queries("Jupiter moon discovery", "Title Words Here")[:2]
+    prov = FakeProvider(svc, {q1: [_cand("one")], q2: [_cand("two")]}, unscorable={"one"}, failing={"two"})
+    svc.assets = [prov]
+    _gate(svc, monkeypatch, FakeScorer({"two": 0.9}, raises=True))
+    beats = [Beat(narration="Amalthea.", visual_query="Jupiter moon discovery", visual_type="image")]
+    scenes, *_ = _assemble(_producer(svc), svc, beats)
+    assert "onnx session exploded" in (svc.db.get_state("relevance_unavailable") or "")
+    assert not svc.db.get_state("relevance_previews_failing")
+    assert "picture_check_previews_failing" not in attention(svc.db)
+    assert scenes[0].asset_id is not None and scenes[0].asset_id.startswith("asset_one")  # first download wins
 
 
 def test_scorer_raises_falls_back_for_rest_of_run(

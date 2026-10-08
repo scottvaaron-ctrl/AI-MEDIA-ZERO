@@ -14,6 +14,8 @@ from aimz.util import iso_ago
 # State keys the producer's picture-matching check writes (``ProducerAgent``) and ``attention`` reads.
 RELEVANCE_STATE = "relevance_unavailable"  # why the check is off (package/model missing, scorer raised)
 PREVIEWS_STATE = "relevance_previews_failing"  # candidates found but no preview could be loaded to score
+RELEVANCE_FIX_STATE = "relevance_unavailable_fix"  # the command that clears RELEVANCE_STATE (scorer_health's fix)
+DEFAULT_RELEVANCE_FIX = "python -m aimz doctor --fix"
 
 
 def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
@@ -86,7 +88,7 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
         out["picture_check_unavailable"] = [
             {
                 "why": f"picture-matching check unavailable: {picture_check}",
-                "fix": "python -m aimz doctor --fix",
+                "fix": db.get_state(RELEVANCE_FIX_STATE) or DEFAULT_RELEVANCE_FIX,
             }
         ]
     previews_failing = db.get_state(PREVIEWS_STATE)
