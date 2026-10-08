@@ -109,6 +109,13 @@ class SelectionDecisionWithBreaks(SelectionDecision):
     )
 
 
+class GenreFit(BaseModel):
+    """The editor's verdict on whether one idea fits the channel guideline's genre."""
+
+    fits: bool
+    reason: str = ""
+
+
 # --------------------------------------------------------------------------------------
 # Script
 # --------------------------------------------------------------------------------------

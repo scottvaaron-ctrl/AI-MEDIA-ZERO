@@ -117,6 +117,9 @@ class FixtureLLMProvider(LLMProvider):
             )
         return {"ideas": ideas}
 
+    def _gen_GenreFit(self, user: str) -> dict[str, Any]:  # noqa: N802
+        return {"fits": True, "reason": "fixture"}
+
     def _gen_SelectionDecisionWithBreaks(self, user: str) -> dict[str, Any]:  # noqa: N802
         return self._gen_SelectionDecision(user)
 

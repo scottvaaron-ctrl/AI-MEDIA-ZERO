@@ -14,17 +14,21 @@ from typing import Any
 
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
-from aimz.domain.models import SelectionDecision, SelectionDecisionWithBreaks
+from aimz.domain.models import GenreFit, SelectionDecision, SelectionDecisionWithBreaks
 from aimz.experiments import niches
 from aimz.experiments.allocation import AllocationSlot, plan_allocation
 from aimz.experiments.engine import ExperimentEngine
-from aimz.util import dumps, iso_ago, now_iso
+from aimz.guideline import Guideline
+from aimz.util import dumps, iso_ago, loads, now_iso
 
 GOALS = (
     "Optimization goals in priority order: 1) viewer retention, 2) shares per 1,000 views, 3) followers/subscribers gained per 1,000 views, "
     "4) returning viewers, 5) completion rate, 6) production efficiency, 7) long-term audience trust, 8) future monetization potential. "
     "Number of uploads is NOT a goal. Reject ideas that do not deserve a video."
 )
+# The genre judge asks at most this many ideas per select() call, to bound local-model time.
+GENRE_JUDGE_CAP = 12
+SHORTLIST_SIZE = 4
 
 
 class EditorInChief(Agent):
@@ -101,6 +105,23 @@ class EditorInChief(Agent):
 
         selected: list[str] = []
         used: set[str] = set()
+        # Genre judge calls left in this select() call (spec 2026-10-08 section 4.2).
+        budget = [GENRE_JUDGE_CAP]
+        gate_rejected: set[str] = set()
+        gate_skipped: set[str] = set()
+        gate_ran = [False]
+
+        def shortlist(ideas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if g is None or not g.genre.strip():
+                return ideas[:SHORTLIST_SIZE]
+            gate_ran[0] = True
+            passing = self._genre_gate(run, g, ideas, budget)
+            gate_rejected.update(c["id"] for c in ideas if c.get("status") == "rejected")
+            gate_skipped.update(c["id"] for c in ideas if c.get("genre_skipped"))
+            # Off-genre ideas are rejected and unreadable answers skipped: neither is offered again this call.
+            used.update(c["id"] for c in ideas if c.get("status") == "rejected" or c.get("genre_skipped"))
+            return passing
+
         for slot in slots:
             pool = [
                 c
@@ -128,15 +149,21 @@ class EditorInChief(Agent):
                 ]
                 pool = on_arm or pool
             mode, reason = slot.mode, slot.reason
-            choice, turned_down = self._choose(run, strategy_state, pool[:4], mode, reason)
-            used.update(turned_down)
+            choice: dict[str, Any] | None = None
+            short = shortlist(pool)
+            if short:  # an empty gated shortlist is no choice; the editor is not asked
+                choice, turned_down = self._choose(run, strategy_state, short, mode, reason)
+                used.update(turned_down)
             if choice is None:
                 # The editor judged no idea in this family worth a video. Offer the slot to the rest.
                 rest = [c for c in cands if c["id"] not in used and c["content_family"] != slot.family]
                 if not rest:
                     continue
                 mode, reason = "fallback", f"{slot.family} had no idea worth making; open shortlist"
-                choice, turned_down = self._choose(run, strategy_state, rest[:4], mode, reason)
+                short = shortlist(rest)
+                if not short:
+                    continue
+                choice, turned_down = self._choose(run, strategy_state, short, mode, reason)
                 used.update(turned_down)
                 if choice is None:
                     continue
@@ -170,7 +197,14 @@ class EditorInChief(Agent):
                     with contextlib.suppress(ValueError):
                         updates["suggested_runtime_s"] = int(value)
             self.svc.db.update("ideas", choice["id"], updates)
-        run.note("selection", {"selected": len(selected), "slots": [f"{s.mode}:{s.family}" for s in slots]})
+        note: dict[str, Any] = {"selected": len(selected), "slots": [f"{s.mode}:{s.family}" for s in slots]}
+        if gate_ran[0]:
+            note["genre"] = {
+                "judged": GENRE_JUDGE_CAP - budget[0],
+                "rejected": len(gate_rejected),
+                "skipped": len(gate_skipped),
+            }
+        run.note("selection", note)
         return selected
 
     def in_flight(self, perf_rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -190,6 +224,73 @@ class EditorInChief(Agent):
                 fam = str(niches.canonical(r["content_family"], amap))
                 out[fam] = out.get(fam, 0) + 1
         return out
+
+    def _genre_gate(
+        self, run: RunContext, g: Guideline, pool: list[dict[str, Any]], budget: list[int]
+    ) -> list[dict[str, Any]]:
+        """Up to SHORTLIST_SIZE ideas from ``pool``, in order, that fit the guideline genre.
+
+        Each idea not yet judged under ``g.version`` costs one judge call from ``budget`` (a one-element
+        counter shared across one select() call). Off-genre ideas are rejected for good; on-genre ideas are
+        marked with the version so they are not asked again until it changes; an unreadable answer skips the
+        idea this cycle. The pool's dicts are updated in place to match (spec 2026-10-08 section 4.2).
+        """
+        passing: list[dict[str, Any]] = []
+        for c in pool:
+            if len(passing) >= SHORTLIST_SIZE:
+                break
+            if c.get("status") == "rejected" or c.get("genre_skipped"):
+                continue
+            if c.get("genre_checked_version") == g.version:
+                passing.append(c)
+                continue
+            if budget[0] <= 0:
+                continue  # out of judge calls: only ideas already judged under this version can pass
+            budget[0] -= 1
+            user = (
+                f"Channel genre: {g.genre}\n\n"
+                f"Idea: {c['title']}\nPremise: {(c.get('premise') or '')[:300]}\nHook: {(c.get('hook') or '')[:200]}\n\n"
+                "Does this idea fit the channel genre? Answer fits true or false and a one-line reason."
+            )
+            with self.svc.tracker.agent(run, self.name, "genre_fit", {"idea": c["id"]}) as span:
+                try:
+                    verdict = self.ask(
+                        self.pctx(run, span=span),
+                        "Editor-in-Chief",
+                        user,
+                        GenreFit,
+                        "eic_genre_fit",
+                        temperature=0.0,
+                        max_tokens=200,
+                    )
+                except Exception as exc:  # the LLM layer already retried; skip the idea this cycle
+                    self.log.warning("genre judge unreadable for %s (%s); skipped this cycle", c["id"], exc)
+                    c["genre_skipped"] = True
+                    span.output_refs["fits"] = None
+                    continue
+                span.output_refs["fits"] = verdict.fits
+            if verdict.fits:
+                self.svc.db.update(
+                    "ideas", c["id"], {"genre_checked_version": g.version, "updated_at": now_iso()}
+                )
+                c["genre_checked_version"] = g.version
+                passing.append(c)
+                continue
+            prev = loads(c.get("guideline_breaks"), [])
+            breaks = [b for b in (prev if isinstance(prev, list) else []) if b != "genre"] + ["genre"]
+            notes = f"off genre: {verdict.reason}"[:300]
+            self.svc.db.update(
+                "ideas",
+                c["id"],
+                {
+                    "status": "rejected",
+                    "guideline_breaks": dumps(breaks),
+                    "eic_notes": notes,
+                    "updated_at": now_iso(),
+                },
+            )
+            c.update(status="rejected", guideline_breaks=dumps(breaks), eic_notes=notes)
+        return passing
 
     def _choose(
         self,

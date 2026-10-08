@@ -137,9 +137,17 @@ def test_dry_run_cycle_follows_guideline(svc, ffmpeg_available: bool) -> None:  
         pytest.skip("ffmpeg required for production")
     sample = Path(__file__).resolve().parent / "fixtures" / "guideline_sample.md"
     # The fixture LLM writes 80-character titles; the sample's 60-character check would fail nearly every
-    # script, so the temporary copy relaxes that one check. The locked settings stay as the sample has them.
-    text = sample.read_text(encoding="utf-8").replace("title_max_chars: 60", "title_max_chars: 100")
-    assert "title_max_chars: 100" in text
+    # script, so the temporary copy relaxes that one check. The fixture LLM's hooks are questions, so the
+    # hook question and length checks are relaxed too. The locked settings stay as the sample has them.
+    text = (
+        sample.read_text(encoding="utf-8")
+        .replace("title_max_chars: 60", "title_max_chars: 100")
+        .replace("hook_no_question: true", "hook_no_question: false")
+        .replace("hook_max_words: 15", "hook_max_words: 40")
+    )
+    assert (
+        "title_max_chars: 100" in text and "hook_no_question: false" in text and "hook_max_words: 40" in text
+    )
     (svc.env.config_dir / "guideline.md").write_text(text, encoding="utf-8")
     fp = FixtureFeedProvider()
     svc.research = {k: fp for k in fp.kinds}
@@ -153,8 +161,7 @@ def test_dry_run_cycle_follows_guideline(svc, ffmpeg_available: bool) -> None:  
     locked = {"caption_max_words": 3, "caption_size": 0.04, "music": "off"}
     for v in first:
         rows = {
-            r["variable"]: r
-            for r in svc.db.query("SELECT * FROM video_settings WHERE video_id=?", [v["id"]])
+            r["variable"]: r for r in svc.db.query("SELECT * FROM video_settings WHERE video_id=?", [v["id"]])
         }
         for key, value in locked.items():
             assert rows[key]["source"] == "guideline", key

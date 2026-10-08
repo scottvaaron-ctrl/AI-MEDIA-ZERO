@@ -147,11 +147,12 @@ def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guidelin
     checks = data.get("checks") or {}
     if not isinstance(checks, dict):
         raise GuidelineError("'checks' must be a mapping")
+    _validate_checks(checks)
 
     return Guideline(
         version=0,
         channel=str(head.get("channel", "")),
-        genre=str(head.get("genre", "")),
+        genre=str(head.get("genre") or "").strip(),
         locked=locked,
         runtime_min=rmin,
         runtime_max=rmax,
@@ -160,6 +161,26 @@ def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guidelin
         unavailable=unavailable,
         content=text,
     )
+
+
+_CHECK_POSITIVE_INTS = ("title_max_chars", "hook_max_words")
+_CHECK_BOOLS = ("hook_no_question", "hook_no_definition")
+
+
+def _validate_checks(checks: dict[str, Any]) -> None:
+    """Type-check the known `checks:` keys; unknown keys pass untouched."""
+    for key in _CHECK_POSITIVE_INTS:
+        if key in checks:
+            v = checks[key]
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                raise GuidelineError(f"checks: {key} must be a positive whole number")
+    for key in _CHECK_BOOLS:
+        if key in checks and not isinstance(checks[key], bool):
+            raise GuidelineError(f"checks: {key} must be true or false")
+    if "banned_openings" in checks:
+        v = checks["banned_openings"]
+        if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+            raise GuidelineError("checks: banned_openings must be a list of strings")
 
 
 def _parse_rules(body: str) -> dict[str, Rule]:

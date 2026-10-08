@@ -12,6 +12,9 @@ runtime_s:
 checks:
   banned_openings: ["Did you know", "In this video"]
   title_max_chars: 60
+  hook_max_words: 15
+  hook_no_question: true
+  hook_no_definition: true
 ```
 
 ### G-topic: One concrete subject

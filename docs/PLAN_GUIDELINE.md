@@ -27,7 +27,7 @@ YouTube projects (Breakdown, Monmouth County & Politics) are separate and owner-
 | Part | What | Status |
 |---|---|---|
 | 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done**, merged to `main` 2026-10-08 (`fb57dad`), 416 tests |
-| 2 | Production abilities the guideline needs: full-bleed default layout, SigLIP image-to-narration relevance gate, Kokoro TTS, attribution in the description, -14 LUFS mastering, stock-video providers | Not started |
+| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, image credits in the description); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done** on branch `feat/script-checks` (2026-10-08, not yet merged), 448 tests. B, C, D not started |
 | 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started (a test-only draft exists: `data/tests/2026-10-07-guideline-test/guideline-TEST-DRAFT.md`) |
 | Switches | Kill switch = the agent does nothing (only YouTube's required data deletion runs); new posting switch `python -m aimz posting on|off|status` pauses only posting | **Done**, merged 2026-10-08 (owner decision 2026-10-07) |
 | Constitution | Sections 1, 3, 4 and 8 rewritten (owner-approved 2026-10-07) | **Done** |
@@ -214,31 +214,42 @@ All are minor; none blocks parts 2 or 3. The build ledger was deleted with the w
 
 Do these in order.
 
-1. **Owner: log in to YouTube again.** The login expired on 7 Oct, and live YouTube uploads have failed since then
-   (`invalid_grant`).
-   * Command: `.\.venv\Scripts\python.exe -m aimz youtube auth`.
-   * Also set the OAuth consent screen to "In production", so the login stops expiring every 7 days.
-   * Agents cannot do this: it is an interactive Google sign-in.
-2. **Then upload the test video unlisted and send the owner the link.** Steps are in
-   `data/tests/2026-10-07-guideline-test/README.md`. The owner asked for this link.
-3. **Part 2 (production abilities).** Write a spec with the brainstorming process, then a plan, then build. The
-   owner already approved the direction on 2026-10-07: the full list is in section 1. Add what the test video
-   showed:
-   * **Deterministic hook check.** The small critic model does not enforce craft rules reliably. The test opened
-     with "The zodiacal light is a faint glow..." and G-hook was not flagged. Add code checks for definition
-     openings ("<Name> is a/an/the ...") and for the guideline's banned openings.
-   * **Genre enforcement.** The test ignored the guideline's genre. Ideation and editor topic gating need to
-     enforce `guideline.genre`, not only show it.
-   * **SigLIP relevance gate.** One image did not match its beat.
-   * **Image credits moved into the description.** The CC licence allows it when nothing is credited on screen.
-     See `docs/VIDEO_QUALITY_RESEARCH.md`.
-   * **Kokoro-82M voice** (Apache-2.0, CPU). Add it as a voice option; the guideline then locks it.
-   * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
+1. **Done 2026-10-08: owner logged in to YouTube again.** The login had expired on 7 Oct (`invalid_grant`).
+2. **Done 2026-10-08: test video uploaded unlisted.** Link: https://www.youtube.com/watch?v=fAO4zO8QbpY
+3. **Part 2 (production abilities), in pieces.** Piece A is built; B, C and D are next, each with its own spec,
+   plan and build.
+   * **Piece A (script checks): built on branch `feat/script-checks`, not yet merged.** The deterministic hook
+     check and genre enforcement are done:
+     * New guideline `checks:` keys `hook_max_words`, `hook_no_question`, `hook_no_definition`; a wrong-typed
+       value for these keys is rejected; unknown keys are still allowed.
+     * The critic checks the hook (the hook line and the first narration sentence) in code: word limit, question,
+       and definition opening ("X is a/an ..."; "there is" / "here is" and "is the only" pass). Banned openings
+       now apply to the hook line too. Failures go to the required revisions and the rewrite loop.
+     * `identity.genre_line` uses the guideline genre when a guideline is active.
+     * The editor has a genre gate (`EditorInChief._genre_gate`): an LLM judge per idea, off-genre ideas are
+       rejected with the guideline break "genre". Passing ideas are marked with `ideas.genre_checked_version`
+       (migration `0008`). Limits: 12 judge calls and 4 passing ideas per `select()`; an unreadable judge answer
+       is skipped, not fatal.
+     * Spec: `docs/superpowers/specs/2026-10-08-script-checks-design.md`. Plan:
+       `docs/superpowers/plans/2026-10-08-script-checks.md`.
+   * **Still to do:**
+     * **B, picture and layout:** SigLIP relevance gate (one image did not match its beat), full-bleed default
+       layout, image credits moved into the description (the CC licence allows it when nothing is credited on
+       screen; see `docs/VIDEO_QUALITY_RESEARCH.md`).
+     * **C, sound:** Kokoro-82M voice (Apache-2.0, CPU) as a voice option the guideline can lock; -14 LUFS
+       mastering.
+     * **D, stock video:** stock-video providers.
+     * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
+   * **After piece A is merged:** the live database gets migration `0008` automatically on the next run. Back up
+     `data/aimz.sqlite3` first (copy it into `data/backups/`).
+   * **For Part 3:** the Backhouse Explainers guideline should include the three hook keys (`hook_max_words`,
+     `hook_no_question`, `hook_no_definition`) in its `checks:`.
 4. **Part 3.** Draft Backhouse Explainers' `config/guideline.md` from the research and the test draft. The owner
    approves it line by line before it goes in place. The channel's current identity is "maps and geography
    oddities", voice `en_US-kristin-medium`. Writing this file activates the guideline: the first cycle retires
    the running experiment and hands the locked settings to the guideline.
 5. **Owner items outside this plan:**
+   * Set the Google OAuth consent screen to "In production", so the YouTube login stops expiring every 7 days.
    * Google's compliance screencast, due Thu 15 Oct (`docs/OWNER_TODO.md` A0).
    * The constitution section 5 media sentence for stock media (A3).
 6. **Uncommitted files on `main`.** As of 2026-10-08 these are not committed:
@@ -259,3 +270,4 @@ Do these in order.
 | 2026-10-07 | Part 1 | Final whole-branch review fixes: loader survives a stored version that stops validating; cover-rule experiments refused; unavailable locked items in `aimz status`; critic gates script/title rule IDs only; whole-word constitution screen; cooldown after Guideline won / Safety stop (R11); proposal sweep in learn; owner edit supersedes a pending proposal. | Merge |
 | 2026-10-07 | Part 1 | Owner lowered the proposal bar to 90% (guideline wins and the safety stop now at P <= 0.10). | Test video |
 | 2026-10-07/08 | Test + switches | Rendered a 31 s test video in an isolated copy with a test-only guideline (`data/tests/2026-10-07-guideline-test/`). The upload failed because the YouTube login expired. Owner decided: auto-posting under guardrails, kill switch = do nothing, new posting switch; built and reviewed. Constitution sections 1/3/4/8 applied. Merged to `main` (`fb57dad`), 416 tests; live `aimz status` checked. | Section 6 (handoff) |
+| 2026-10-08 | Part 2, piece A | Split part 2 into pieces A to D (order owner-approved). Owner logged in to YouTube; test video uploaded unlisted (https://www.youtube.com/watch?v=fAO4zO8QbpY). Built piece A on `feat/script-checks`: guideline hook check keys, critic code checks for the hook, guideline genre in `identity.genre_line`, editor genre gate with `ideas.genre_checked_version` (migration `0008`). 448 tests pass; ruff and mypy clean. Not merged; live database not migrated yet. | Merge piece A (back up the database first); then spec for piece B |

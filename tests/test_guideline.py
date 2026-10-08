@@ -176,3 +176,42 @@ def test_load_records_unavailable_items(svc):
     # Once the capability is there, the warning clears.
     load(svc.db, svc.env.config_dir, CATALOG, {"stock_video"})
     assert not svc.db.get_state("guideline_unavailable")
+
+
+def test_checks_hook_keys_accepted():
+    g = parse(SAMPLE, CATALOG, CAPS)
+    assert g.checks["hook_max_words"] == 15
+    assert g.checks["hook_no_question"] is True
+    assert g.checks["hook_no_definition"] is True
+
+
+_CHECK_LINES = {
+    "hook_max_words": "hook_max_words: 15",
+    "hook_no_question": "hook_no_question: true",
+    "hook_no_definition": "hook_no_definition: true",
+    "banned_openings": 'banned_openings: ["Did you know", "In this video"]',
+    "title_max_chars": "title_max_chars: 60",
+}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("hook_max_words", '"fifteen"'),
+        ("hook_max_words", "0"),
+        ("hook_max_words", "true"),
+        ("hook_no_question", '"yes"'),
+        ("hook_no_definition", "1"),
+        ("banned_openings", '"Did you know"'),
+        ("title_max_chars", "-5"),
+    ],
+)
+def test_checks_wrong_type_rejected(key: str, value: str):
+    with pytest.raises(GuidelineError, match=key):
+        parse(_with(_CHECK_LINES[key], f"{key}: {value}"), CATALOG, CAPS)
+
+
+@pytest.mark.parametrize("genre_line", ["  genre:", "  genre: ", "  genre: '  '"])
+def test_blank_genre_parses_to_empty(genre_line: str):
+    g = parse(_with("  genre: explainer", genre_line), CATALOG, CAPS)
+    assert g.genre == ""
