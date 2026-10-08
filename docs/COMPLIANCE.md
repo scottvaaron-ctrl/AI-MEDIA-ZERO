@@ -59,7 +59,18 @@ approval, plus the kill switch).
 - `WikimediaAssetProvider` accepts only `Public domain`, `PD-*`, `CC0`, `CC BY x`, `CC BY-SA x`
   license short-names; `NC`, `ND`, fair-use, GFDL-only and unlabeled files are rejected in code
   (`license_allowed`). Attribution (`title — author — license — via Wikimedia Commons`) is stored
-  per asset, baked onto the scene card, listed in the video description and in `attributions.txt`.
+  per asset and travels with every platform the video is shared on: the YouTube description
+  (`Image credits:`, placed before the sources so the length cut never trims it), the TikTok caption
+  (`Image credits:`; if the credits alone exceed TikTok's 2200 characters, whole lines are kept and the
+  caption points to the YouTube description) and the Bluesky reply thread (`Image credits:` self-replies
+  under the post), plus `attributions.txt` in the package. Credits are **not drawn on screen**
+  (2026-10-08): CC BY 4.0 allows attribution "in any reasonable manner" and a credit next to the post
+  is one; CC BY-SA 3.0 asks for credit "at least as prominent" as other
+  credits, which holds because nothing else is credited on screen.
+- Picture-relevance model (optional, `assets.relevance`): `onnx-community/siglip2-base-patch16-224-ONNX`,
+  the ONNX conversion of `google/siglip2-base-patch16-224`, Apache-2.0. It runs locally on CPU, scores
+  stock-photo previews against the narration. It downloads no pictures for scoring beyond small
+  previews; the model itself downloads once if missing.
 - A descriptive `User-Agent` (`AIMZ_USER_AGENT`) is sent to Wikimedia, per its API etiquette.
 - Owner-library images are the owner's responsibility (`assets/owner/credits.txt` for attribution).
 - **Music and sound effects (2026-09-30).** Off unless the AI opens the `music` / `sfx` settings. The
@@ -99,8 +110,10 @@ approval, plus the kill switch).
 - Topics in `safety.elevated_review_topics` (real people, altered events, medical, legal,
   financial, political, emergencies, allegations) route the script to `needs_owner_review`; it
   cannot be produced until the owner approves.
-- AI disclosure text is included on the first scene card, in the description, in
-  `ai_disclosure.txt`, and via `containsSyntheticMedia` / `is_aigc` where the platform supports it.
+- AI disclosure text is included in the description, in `ai_disclosure.txt`, in the platform labels
+  (YouTube `containsSyntheticMedia`, TikTok `is_aigc`) and in the Bluesky post text. It is not drawn on
+  screen (2026-10-08); image credits travel with every platform: YouTube description, TikTok caption,
+  Bluesky reply thread (see Media licensing).
 
 ## Human-required actions (V0)
 

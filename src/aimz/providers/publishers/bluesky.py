@@ -130,6 +130,40 @@ def build_post_text(title: str, tags: list[str], note: str, max_tags: int = 3) -
     return text
 
 
+CREDITS_HEADING = "Image credits:"
+CREDITS_CONTINUED = "Image credits (continued):"
+
+
+def _fits(text: str) -> bool:
+    return grapheme_len(text) <= MAX_POST_GRAPHEMES and len(text.encode("utf-8")) <= MAX_POST_BYTES
+
+
+def build_credit_replies(attributions: list[str]) -> list[str]:
+    """Self-replies listing every image credit, one per line, each post within Bluesky's limits.
+
+    Credits are no longer drawn on the frames, so the thread is where a Bluesky viewer finds them
+    (constitution section 5). A single credit too long for one post is trimmed with an ellipsis."""
+    credits = list(dict.fromkeys(a.strip() for a in attributions if a and a.strip()))
+    room = MAX_POST_GRAPHEMES - grapheme_len(CREDITS_CONTINUED) - 1
+    lines: list[str] = []
+    for credit in credits:
+        line = credit if grapheme_len(credit) <= room else trim_graphemes(credit, room - 1).rstrip() + "…"
+        while not _fits(f"{CREDITS_CONTINUED}\n{line}"):  # graphemes fit but bytes do not
+            line = trim_graphemes(line, grapheme_len(line) - 2).rstrip() + "…"
+        lines.append(line)
+    posts: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        heading = CREDITS_HEADING if not posts else CREDITS_CONTINUED
+        if current and not _fits("\n".join([heading, *current, line])):
+            posts.append("\n".join([heading, *current]))
+            current = []
+        current.append(line)
+    if current:
+        posts.append("\n".join([CREDITS_HEADING if not posts else CREDITS_CONTINUED, *current]))
+    return posts
+
+
 def build_sources_reply(sources: list[dict[str, Any]], limit: int = 2) -> str:
     """A self-reply carrying the source links, so the claims in the video stay checkable."""
     seen: list[str] = []
@@ -522,32 +556,52 @@ class BlueskyPublisher(Publisher):
             record["facets"] = facets
         return record
 
+    def _reply(self, text: str, root: dict[str, str], parent: dict[str, str]) -> dict[str, str]:
+        created = self.client.create_post(
+            {
+                "$type": POST_COLLECTION,
+                "text": text,
+                "createdAt": now_iso(),
+                "langs": [self.lang],
+                "facets": facets_for(text),
+                "reply": {"root": root, "parent": parent},
+            }
+        )
+        uri = str(created.get("uri") or "")
+        # The next reply hangs under this one; without a uri it hangs under the same parent instead.
+        return {"uri": uri, "cid": str(created.get("cid") or "")} if uri else parent
+
     def _finish(
-        self, record: dict[str, Any], blob: dict[str, Any], reply_text: str
+        self,
+        record: dict[str, Any],
+        blob: dict[str, Any],
+        reply_text: str,
+        credit_replies: list[str] | None = None,
     ) -> tuple[dict[str, Any], str]:
-        """Attach the finished video blob, create the post, then best-effort add the sources reply."""
+        """Attach the finished video blob, create the post, then best-effort add the reply thread: the
+        sources reply, then the image credits (each reply under the previous one)."""
         record = {**record, "embed": {**record["embed"], "video": blob}}
         created = self.client.create_post(record)
         uri, cid = str(created.get("uri") or ""), str(created.get("cid") or "")
         if not uri:
             raise PublishError(f"Bluesky createRecord returned no uri: {created}")
         note = ""
+        root = {"uri": uri, "cid": cid}
+        parent = root
         if reply_text and self.sources_reply:
-            root = {"uri": uri, "cid": cid}
             try:
-                self.client.create_post(
-                    {
-                        "$type": POST_COLLECTION,
-                        "text": reply_text,
-                        "createdAt": now_iso(),
-                        "langs": [self.lang],
-                        "facets": facets_for(reply_text),
-                        "reply": {"root": root, "parent": root},
-                    }
-                )
+                parent = self._reply(reply_text, root, parent)
             except Exception as exc:  # any error: the video is already public, so it must not look failed
                 log.warning("Bluesky sources reply failed: %s", exc)
                 note = " (sources reply failed; add it by hand)"
+                parent = root
+        for text in credit_replies or []:
+            try:
+                parent = self._reply(text, root, parent)
+            except Exception as exc:  # same rule: a live post never looks failed over a reply
+                log.warning("Bluesky image credits reply failed: %s", exc)
+                note += " (image credits reply failed; add it by hand)"
+                break
         return created, note
 
     # -- publish -----------------------------------------------------------------------
@@ -583,6 +637,7 @@ class BlueskyPublisher(Publisher):
             reply_text = (
                 build_sources_reply(list(metadata.get("sources") or [])) if self.sources_reply else ""
             )
+            credit_replies = build_credit_replies(list(metadata.get("attributions") or []))
             job = self.client.upload_video(path, f"{video['id']}.mp4")
             job_id = str(job.get("jobId") or "")
             if not job_id:
@@ -596,6 +651,7 @@ class BlueskyPublisher(Publisher):
                         "job_id": job_id,
                         "record": record,
                         "sources_reply": reply_text,
+                        "credits_replies": credit_replies,
                         "remaining_daily_videos": limits.get("remainingDailyVideos"),
                         "at": now_iso(),
                     },
@@ -629,7 +685,7 @@ class BlueskyPublisher(Publisher):
                     time.sleep(5)
                 polled = True
                 job = self.client.job_status(job_id)
-            created, note = self._finish(record, dict(job["blob"]), reply_text)
+            created, note = self._finish(record, dict(job["blob"]), reply_text, credit_replies)
             handle = self.client.session().handle
         uri = str(created.get("uri") or "")
         return PublishResult(
@@ -709,7 +765,10 @@ class BlueskyPublisher(Publisher):
                 )
             if state != "JOB_STATE_COMPLETED" or not job.get("blob"):
                 return None
-            created, note = self._finish(record, dict(job["blob"]), str(saved.get("sources_reply") or ""))
+            credit_replies = [str(t) for t in saved.get("credits_replies") or [] if t]
+            created, note = self._finish(
+                record, dict(job["blob"]), str(saved.get("sources_reply") or ""), credit_replies
+            )
             handle = self.client.session().handle
         uri = str(created.get("uri") or "")
         return PublishResult(

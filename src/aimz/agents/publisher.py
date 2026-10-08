@@ -149,11 +149,13 @@ class PublishStage(Agent):
         disclosure = str(self.svc.config.get("publishing.ai_disclosure_text", ""))
         src_lines = "\n".join(f"- {s.get('title', '')}: {s.get('url', '')}" for s in sources)
         attr_lines = "\n".join(f"- {a}" for a in attributions)
+        # Image credits go before the sources: a long source list is what the 4900-character cut below
+        # trims, never the credits (constitution section 5; credits are no longer drawn on the frames).
         description = (
             f"{public_summary(script)}\n\n"
             f"{disclosure}\n\n"
-            f"Sources:\n{src_lines or '- (see package sources.json)'}\n"
-            + (f"\nImage credits:\n{attr_lines}\n" if attr_lines else "")
+            + (f"Image credits:\n{attr_lines}\n\n" if attr_lines else "")
+            + f"Sources:\n{src_lines or '- (see package sources.json)'}\n"
         )
         tags = public_tags(loads(script.get("tags_json"), []) or [], idea)
         tags += [t for t in self.svc.config.get("publishing.youtube.default_tags", []) or [] if t not in tags]

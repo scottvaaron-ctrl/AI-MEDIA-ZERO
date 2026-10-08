@@ -12,8 +12,14 @@ from typing import Any
 
 from aimz import guideline, identity
 from aimz.agents.base import Agent
+from aimz.core.attention import (  # picture-check states (aimz status)
+    DEFAULT_RELEVANCE_FIX,
+    PREVIEWS_STATE,
+    RELEVANCE_FIX_STATE,
+    RELEVANCE_STATE,
+)
 from aimz.core.runs import RunContext
-from aimz.domain.models import AssetRecord, Beat, CaptionStyle, Scene, Timeline
+from aimz.domain.models import AssetCandidate, AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
 from aimz.experiments.allocation import per_video
 from aimz.experiments.settings import SettingsEngine, capabilities
@@ -36,6 +42,19 @@ def asset_queries(visual_query: str, title: str) -> list[str]:
         if len(words) >= 3:
             out.append(" ".join(words[:2]))
     return list(dict.fromkeys(q for q in out if q))
+
+
+def rank_candidates(
+    scored: list[tuple[AssetCandidate, float]], threshold: float, by_sa_penalty: float
+) -> list[AssetCandidate]:
+    """Candidates whose score reaches ``threshold``, best first; CC BY-SA ranks ``by_sa_penalty`` lower."""
+    passing = [(c, s) for c, s in scored if s >= threshold]
+
+    def rank(item: tuple[AssetCandidate, float]) -> float:
+        cand, score = item
+        return score - (by_sa_penalty if cand.license.upper().startswith("CC BY-SA") else 0.0)
+
+    return [c for c, _ in sorted(passing, key=rank, reverse=True)]
 
 
 def _words(text: str) -> list[str]:
@@ -162,6 +181,13 @@ class ProducerAgent(Agent):
         self.experiments = experiments
         self._guideline: Guideline | None = None
         self._guideline_loaded = False
+        # Picture-matching check: (run id, reason) once it is unavailable for that run; per-beat records.
+        self._gate_off: tuple[str | None, str] | None = None
+        # (run id,) once that run has warned that no preview could be loaded (a tuple so a None run id counts).
+        self._previews_warned: tuple[str | None] | None = None
+        self._relevance_beats: list[dict[str, Any]] = []
+        self._relevance_fallback = 0
+        self._query_log: list[dict[str, Any]] | None = None
 
     def default_settings(self) -> dict[str, Any]:
         """What the renderer does for a setting that is off (today's behaviour)."""
@@ -182,7 +208,7 @@ class ProducerAgent(Agent):
             "palette_hue": None,
             "headline_on_cards": "on",
             "progress_counter": "off",
-            "template": "card",
+            "template": "full_bleed",
             "clip_scenes": "off",
             "music": "off",
             "music_volume_db": -14.0,
@@ -245,13 +271,15 @@ class ProducerAgent(Agent):
         hue = chosen.get("palette_hue")
         show_headline = chosen.get("headline_on_cards") != "off"
         counter_on = chosen.get("progress_counter") == "on"
-        template = str(chosen.get("template") or "card")
+        template = str(chosen.get("template") or "full_bleed")
         clips_on = chosen.get("clip_scenes") == "on"
         scenes: list[Scene] = []
         attributions: list[str] = []
         cursor = 0.0
         shot_idx = 0
         first_image: str | None = None
+        self._relevance_beats = []
+        self._relevance_fallback = 0
         for i, beat in enumerate(beats):
             # ---- narration --------------------------------------------------
             wav = out_dir / f"scene_{i:02d}.wav"
@@ -262,10 +290,7 @@ class ProducerAgent(Agent):
             # Try a licensed photo for every beat except quotes; the card renders on top of it.
             asset: AssetRecord | None = None
             if search_assets and beat.visual_type != "quote_card":
-                for query in asset_queries(beat.visual_query, title):
-                    asset = self._find_asset(ctx, query, out_dir / "assets")
-                    if asset is not None:
-                        break
+                asset = self._pick_asset(ctx, beat, title, out_dir / "assets", i)
             clip: AssetRecord | None = None
             if clips_on and search_assets and beat.visual_type in {"image", "text_card"}:
                 for query in asset_queries(beat.visual_query, title):
@@ -413,6 +438,9 @@ class ProducerAgent(Agent):
                 scenes, attributions, first_image, cursor = self.assemble(
                     ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
                 )
+                relevance_note = self.relevance_note()
+                if relevance_note is not None:
+                    run.note("relevance", {**run.summary.get("relevance", {}), video_id: relevance_note})
                 timeline = Timeline(
                     video_id=video_id,
                     title=script["title"],
@@ -491,7 +519,176 @@ class ProducerAgent(Agent):
         run.bump("videos_rendered")
         return video_id
 
-    def _find_asset(self, ctx: Any, query: str, dest: Path) -> AssetRecord | None:
+    # ---- picture-matching check (spec 2026-10-08-picture-relevance, sections 4-5) -----------------------------
+
+    def _relevance_cfg(self) -> dict[str, Any]:
+        cfg = self.svc.config.get("assets.relevance", {})
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _match_text(self, beat: Beat) -> str | tuple[str, str] | None:
+        """What the beat's pictures are scored against (``assets.relevance.text``); None when the check is off."""
+        cfg = self._relevance_cfg()
+        if not cfg.get("enabled"):
+            return None
+        signal = str(cfg.get("text") or "narration")
+        if signal == "visual_query":
+            return beat.visual_query or beat.narration
+        if signal == "max" and beat.visual_query:
+            return (beat.narration, beat.visual_query)
+        return beat.narration
+
+    def _gate_reason(self, ctx: Any) -> str | None:
+        """Why the check is off for the rest of this run, or None while it is usable."""
+        off = self._gate_off
+        if off is not None and off[0] == getattr(ctx, "run_id", None):
+            return off[1]
+        return None
+
+    def _gate_down(self, ctx: Any, reason: str, fix: str = "") -> None:
+        """First download wins for the rest of this run; warn once and show it, with the command that
+        fixes it, in ``aimz status``."""
+        if self._gate_reason(ctx) is None:
+            self.log.warning("picture-matching check unavailable, first download wins this run: %s", reason)
+        self._gate_off = (getattr(ctx, "run_id", None), reason)
+        self.svc.db.set_state(RELEVANCE_STATE, reason[:500])
+        self.svc.db.set_state(RELEVANCE_FIX_STATE, (fix or DEFAULT_RELEVANCE_FIX)[:200])
+
+    def _gate_scorer(self, ctx: Any) -> Any | None:
+        """The healthy relevance scorer, or None (recorded once per run as unavailable)."""
+        if self._gate_reason(ctx) is not None:
+            return None
+        from aimz.providers.image import relevance
+
+        scorer = relevance.get_scorer(self.svc)
+        if scorer is None:
+            health = relevance.scorer_health(Path(self.svc.env.siglip_model_dir))
+            if health.ok:  # files and packages are there, so the model itself failed to load or download
+                self._gate_down(ctx, "SigLIP model could not be downloaded", DEFAULT_RELEVANCE_FIX)
+            else:
+                self._gate_down(ctx, health.detail, health.fix)
+        return scorer
+
+    def _pick_asset(self, ctx: Any, beat: Beat, title: str, dest: Path, idx: int) -> AssetRecord | None:
+        """The beat's picture: the best one that passes the check, else none (text card); with the check
+        off or unavailable, the first one that downloads."""
+        queries = asset_queries(beat.visual_query, title)
+        text = self._match_text(beat)
+        if text is not None and self._gate_scorer(ctx) is not None:
+            self._query_log = []
+            asset: AssetRecord | None = None
+            for query in queries:
+                asset = self._find_asset(ctx, query, dest, text)
+                if asset is not None or self._gate_reason(ctx) is not None:
+                    break
+            tried, self._query_log = self._query_log, None
+            starved = (  # only while the check is still up: a scorer crash is its own alarm
+                self._gate_reason(ctx) is None
+                and asset is None
+                and sum(q["candidates"] for q in tried) > 0
+                and all(q["top_score"] is None for q in tried)
+            )
+            if self._gate_reason(ctx) is None and not starved:
+                self._relevance_beats.append(
+                    {"beat": idx, "queries": tried, "chosen": asset.id if asset is not None else "text_card"}
+                )
+                return asset
+            if starved:
+                self._previews_failing(ctx, sum(q["candidates"] for q in tried))
+            self._relevance_fallback += 1
+            if asset is not None:  # the scorer failed and _find_asset already fell back for that query
+                return asset
+        elif text is not None:
+            self._relevance_fallback += 1
+        for query in queries:
+            asset = self._find_asset(ctx, query, dest)
+            if asset is not None:
+                return asset
+        return None
+
+    def _previews_failing(self, ctx: Any, candidates: int) -> None:
+        """A beat found candidates but could load none of their previews: it falls back to first download
+        wins (not a text card); warn once per run and show it in ``aimz status`` until a preview scores."""
+        run_id = getattr(ctx, "run_id", None)
+        reason = f"{candidates} picture(s) found but no preview could be loaded"
+        if self._previews_warned != (run_id,):
+            self.log.warning("picture-matching check: %s; first download wins for such beats", reason)
+            self._previews_warned = (run_id,)
+        self.svc.db.set_state(PREVIEWS_STATE, reason[:500])
+
+    def relevance_note(self) -> dict[str, Any] | None:
+        """The last ``assemble`` call's picture-matching record, or None when the check was off."""
+        if not self._relevance_beats and not self._relevance_fallback:
+            return None
+        chosen = sum(1 for b in self._relevance_beats if b["chosen"] != "text_card")
+        return {
+            "beats": list(self._relevance_beats),
+            "chosen": chosen,
+            "text_card": len(self._relevance_beats) - chosen,
+            "fallback": self._relevance_fallback,
+        }
+
+    def _find_asset(
+        self, ctx: Any, query: str, dest: Path, text: str | tuple[str, str] | None = None
+    ) -> AssetRecord | None:
+        """One query's picture. ``text`` is what candidates are scored against (a pair: the higher score of
+        the two counts); None, or no usable scorer, means the first candidate that downloads wins."""
+        scorer = self._gate_scorer(ctx) if text is not None else None
+        if scorer is None or text is None:
+            return self._first_download(ctx, query, dest)
+        cfg = self._relevance_cfg()
+        width = int(cfg.get("preview_width") or 320)
+        max_results = int(self.svc.config.get("assets.wikimedia.max_results", 6))
+        pool: list[tuple[Any, AssetCandidate, Any]] = []  # (provider, candidate, preview image)
+        found = 0
+        for provider in self.svc.assets:
+            try:
+                cands = provider.search(ctx, query, max_results=max_results)
+            except Exception as exc:
+                self.log.warning("asset search failed on %s: %s", provider.name, exc)
+                continue
+            found += len(cands)
+            for cand in cands:
+                img = provider.preview(ctx, cand, width=width)
+                if img is not None:  # a candidate that cannot be scored cannot pass
+                    pool.append((provider, cand, img))
+        scores: list[float] = []
+        if pool:
+            images = [img for _, _, img in pool]
+            try:
+                texts = (text,) if isinstance(text, str) else text
+                per_text = [scorer.score_many(images, t) for t in texts]
+                scores = [max(col) for col in zip(*per_text, strict=True)]
+            except Exception as exc:
+                self._gate_down(ctx, f"{type(exc).__name__}: {exc}")
+                return self._first_download(ctx, query, dest)
+            finally:
+                for img in images:
+                    img.close()
+            for state in (RELEVANCE_STATE, RELEVANCE_FIX_STATE, PREVIEWS_STATE):  # a preview was scored
+                if self.svc.db.get_state(state):
+                    self.svc.db.set_state(state, "")
+        if self._query_log is not None:
+            self._query_log.append(
+                {"query": query, "candidates": found, "top_score": round(max(scores), 4) if scores else None}
+            )
+        threshold = float(cfg.get("threshold") or 0.0)
+        penalty = float(cfg.get("by_sa_penalty", 0.05) or 0.0)
+        owner = {id(cand): provider for provider, cand, _ in pool}
+        ranked = rank_candidates(
+            [(c, s) for (_, c, _), s in zip(pool, scores, strict=True)], threshold, penalty
+        )
+        for cand in ranked:
+            try:
+                rec = owner[id(cand)].fetch(ctx, cand, dest)
+            except Exception as exc:
+                self.log.warning("asset fetch failed: %s", exc)
+                continue
+            if rec is not None:
+                self.svc.db.update("assets", rec.id, {"query": query[:200]})
+                return rec
+        return None
+
+    def _first_download(self, ctx: Any, query: str, dest: Path) -> AssetRecord | None:
         max_results = int(self.svc.config.get("assets.wikimedia.max_results", 6))
         for provider in self.svc.assets:
             try:

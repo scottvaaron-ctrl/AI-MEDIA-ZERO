@@ -20,6 +20,7 @@ can implement this same interface once the owner's app is audited; the pipeline 
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -29,11 +30,72 @@ from aimz.providers.base import HealthStatus, ProviderContext, Publisher
 from aimz.providers.publishers.captions import hashtags
 from aimz.providers.publishers.packages import write_common_package
 
+log = logging.getLogger("aimz.publish.tiktok")
 
-def build_caption(title: str, tags: list[str], max_len: int = 2200) -> str:
+
+TIKTOK_CAPTION_LIMIT = 2200  # TikTok counts the caption in UTF-16 code units
+CREDITS_HEADING = "Image credits:"
+CREDITS_OVERFLOW = "Full credits: see YouTube description"
+_NOTE = "AI-narrated, sourced explainer. Sources in comments/bio."
+
+
+def utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _cut_utf16(text: str, limit: int) -> str:
+    """``text`` cut to at most ``limit`` UTF-16 units, never splitting a surrogate pair."""
+    if limit <= 0:
+        return ""
+    if utf16_len(text) <= limit:
+        return text
+    out: list[str] = []
+    used = 0
+    for ch in text:
+        size = 2 if ord(ch) > 0xFFFF else 1
+        if used + size > limit:
+            break
+        out.append(ch)
+        used += size
+    return "".join(out)
+
+
+def build_caption(
+    title: str, tags: list[str], max_len: int = TIKTOK_CAPTION_LIMIT, credits: list[str] | None = None
+) -> str:
+    """Title, AI-disclosure line, hashtags, then every image credit (constitution section 5).
+
+    Credits are never dropped silently: the title (then the rest of the head) is trimmed to make room. If
+    the credits alone do not fit, as many whole credit lines as fit are kept, followed by a pointer to the
+    YouTube description (which lists them all), and a warning is logged."""
     tag_line = " ".join(hashtags(tags, 5))
-    cap = f"{title}\n\nAI-narrated, sourced explainer. Sources in comments/bio.\n{tag_line}".strip()
-    return cap[:max_len]
+    tail = f"{_NOTE}\n{tag_line}".strip()
+    lines = list(dict.fromkeys(c.strip() for c in credits or [] if c and c.strip()))
+    if not lines:
+        return _cut_utf16(f"{title}\n\n{tail}".strip(), max_len)
+    block = CREDITS_HEADING + "\n" + "\n".join(lines)
+    if utf16_len(block) > max_len:
+        kept: list[str] = []
+        for line in lines:
+            candidate = "\n".join([CREDITS_HEADING, *kept, line, CREDITS_OVERFLOW])
+            if utf16_len(candidate) > max_len:
+                break
+            kept.append(line)
+        log.warning(
+            "TikTok caption: only %d of %d image credits fit in %d characters; "
+            "the caption points to the YouTube description for the rest",
+            len(kept),
+            len(lines),
+            max_len,
+        )
+        return "\n".join([CREDITS_HEADING, *kept, CREDITS_OVERFLOW])
+    room = max_len - utf16_len(block) - 2  # the blank line between the head and the credits
+    title_room = room - utf16_len(tail) - 2
+    if title_room >= min(20, utf16_len(title.strip())):
+        head = f"{_cut_utf16(title.strip(), title_room).rstrip()}\n\n{tail}".strip()
+    else:  # not even a short title fits next to the note: cut the head as a whole
+        head = _cut_utf16(f"{title}\n\n{tail}".strip(), room).rstrip()
+    return f"{head}\n\n{block}" if head else block
 
 
 class TikTokPackagePublisher(Publisher):
@@ -58,7 +120,11 @@ class TikTokPackagePublisher(Publisher):
     ) -> PublishResult:
         with self.authorized(ctx, "tiktok_package"):
             write_common_package(package_dir, video, script, metadata)
-            caption = build_caption(metadata.get("title", video["title"]), metadata.get("tags", []))
+            caption = build_caption(
+                metadata.get("title", video["title"]),
+                metadata.get("tags", []),
+                credits=list(metadata.get("attributions") or []),
+            )
             (package_dir / "caption.txt").write_text(caption + "\n", encoding="utf-8")
             if video.get("thumbnail_path") and Path(video["thumbnail_path"]).exists():
                 shutil.copyfile(video["thumbnail_path"], package_dir / "cover.png")

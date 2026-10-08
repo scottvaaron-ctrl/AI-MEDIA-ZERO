@@ -27,7 +27,7 @@ YouTube projects (Breakdown, Monmouth County & Politics) are separate and owner-
 | Part | What | Status |
 |---|---|---|
 | 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done**, merged to `main` 2026-10-08 (`fb57dad`), 416 tests |
-| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, image credits in the description); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done** on branch `feat/script-checks` (2026-10-08, not yet merged), 448 tests. B, C, D not started |
+| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, credits and disclosure in the description, none on screen); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done** on branch `feat/script-checks` (2026-10-08, not yet merged), 448 tests. **B built** on branch `feat/picture-relevance` (2026-10-08, not yet merged): local picture-matching check, no credits or disclosure on screen, full-bleed default. C, D not started |
 | 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started (a test-only draft exists: `data/tests/2026-10-07-guideline-test/guideline-TEST-DRAFT.md`) |
 | Switches | Kill switch = the agent does nothing (only YouTube's required data deletion runs); new posting switch `python -m aimz posting on|off|status` pauses only posting | **Done**, merged 2026-10-08 (owner decision 2026-10-07) |
 | Constitution | Sections 1, 3, 4 and 8 rewritten (owner-approved 2026-10-07) | **Done** |
@@ -232,12 +232,27 @@ Do these in order.
        is skipped, not fatal.
      * Spec: `docs/superpowers/specs/2026-10-08-script-checks-design.md`. Plan:
        `docs/superpowers/plans/2026-10-08-script-checks.md`.
+   * **Piece B (picture and layout): built on branch `feat/picture-relevance` (2026-10-08), not yet merged.**
+     * A local SigLIP 2 picture-matching check (ONNX, 8-bit, files in `data/models/siglip2`, optional extra
+       `vision`; `python -m aimz doctor --fix` downloads the model). For each beat it scores small previews of
+       the search results against the narration, uses the best one above a low floor, downloads only the
+       winner, tries the next search if none passes, and uses a text card when nothing passes. If the check
+       cannot run, or no preview can be loaded, pictures are chosen as before and `aimz status` says so.
+       Each run note has a `relevance` entry per beat.
+     * Calibrated 2026-10-08 on 50 hand-labelled pairs (34 match, 16 mismatch): narration signal, floor
+       0.00005. The floor is deliberately low: the balanced-accuracy value (0.0012) would have rejected 13 of
+       34 good pictures. Details in `docs/VIDEO_QUALITY_RESEARCH.md`.
+     * A live smoke test found Wikimedia only serves standard thumbnail widths (320 px gave HTTP 400), so
+       previews use 330 px. After that, Kamakura beats got the Great Buddha of Kamakura and derailment beats got
+       derailment photos.
+     * No credits and no AI-disclosure line on screen. Full credit stays in the description; disclosure is in
+       the description and the platform labels (YouTube `containsSyntheticMedia`, TikTok `is_aigc`, Bluesky
+       post text). `docs/COMPLIANCE.md` is updated.
+     * The default layout is now `full_bleed` when no guideline locks it.
+     * **Owner decision pending: confirm the low picture-check floor (0.00005).**
    * **Still to do:**
-     * **B, picture and layout:** SigLIP relevance gate (one image did not match its beat), full-bleed default
-       layout, image credits moved into the description (the CC licence allows it when nothing is credited on
-       screen; see `docs/VIDEO_QUALITY_RESEARCH.md`).
      * **C, sound:** Kokoro-82M voice (Apache-2.0, CPU) as a voice option the guideline can lock; -14 LUFS
-       mastering.
+       mastering. This is next.
      * **D, stock video:** stock-video providers.
      * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
    * **After piece A is merged:** the live database gets migration `0008` automatically on the next run. Back up
@@ -271,3 +286,4 @@ Do these in order.
 | 2026-10-07 | Part 1 | Owner lowered the proposal bar to 90% (guideline wins and the safety stop now at P <= 0.10). | Test video |
 | 2026-10-07/08 | Test + switches | Rendered a 31 s test video in an isolated copy with a test-only guideline (`data/tests/2026-10-07-guideline-test/`). The upload failed because the YouTube login expired. Owner decided: auto-posting under guardrails, kill switch = do nothing, new posting switch; built and reviewed. Constitution sections 1/3/4/8 applied. Merged to `main` (`fb57dad`), 416 tests; live `aimz status` checked. | Section 6 (handoff) |
 | 2026-10-08 | Part 2, piece A | Split part 2 into pieces A to D (order owner-approved). Owner logged in to YouTube; test video uploaded unlisted (https://www.youtube.com/watch?v=fAO4zO8QbpY). Built piece A on `feat/script-checks`: guideline hook check keys, critic code checks for the hook, guideline genre in `identity.genre_line`, editor genre gate with `ideas.genre_checked_version` (migration `0008`). 448 tests pass; ruff and mypy clean. Not merged; live database not migrated yet. | Merge piece A (back up the database first); then spec for piece B |
+| 2026-10-08 | Part 2, piece B | Built piece B on `feat/picture-relevance`: local SigLIP 2 picture-matching check (ONNX, optional extra `vision`, `doctor --fix` downloads the model), per-beat `relevance` entries in run notes, text card when nothing passes, fallback to old picture choice with an `aimz status` warning. Calibrated on 50 hand-labelled pairs (floor 0.00005, deliberately low). Live smoke test fixed Wikimedia preview width (330 px). No credits or disclosure on screen; credit and disclosure in the description and platform labels; `docs/COMPLIANCE.md` updated; default layout `full_bleed`. Not merged. | Merge piece B (install the `vision` extra into `.venv`, run `doctor --fix`); owner confirms the floor; then spec for piece C (Kokoro voice, -14 LUFS), then D |

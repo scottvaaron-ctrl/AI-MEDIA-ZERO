@@ -10,10 +10,14 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from aimz.domain.models import AssetCandidate, AssetRecord
 from aimz.providers.base import AssetProvider, HealthStatus, ProviderContext
 from aimz.util import new_id, now_iso, sha256_file
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 _EXT = {".jpg", ".jpeg", ".png"}
 
@@ -68,6 +72,22 @@ class OwnerLibraryAssetProvider(AssetProvider):
             )
             for _, p in scored[:max_results]
         ]
+
+    def preview(
+        self, ctx: ProviderContext, candidate: AssetCandidate, width: int = 320
+    ) -> Image.Image | None:
+        """Read the local file (no copy, no DB row). Downscaled to ``width`` to keep scoring cheap."""
+        try:
+            from PIL import Image as PILImage
+
+            with PILImage.open(Path(candidate.file_url)) as im:
+                im.load()
+                out = im.convert("RGB")
+            if out.width > width:
+                out.thumbnail((width, width * 4))
+            return out
+        except Exception:
+            return None
 
     def fetch(self, ctx: ProviderContext, candidate: AssetCandidate, dest_dir: Path) -> AssetRecord | None:
         src = Path(candidate.file_url)

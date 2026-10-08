@@ -355,7 +355,11 @@ class TikTokDirectPostPublisher(Publisher):
                 raise PermanentPublishError(
                     f"video is {video.get('duration_s')}s; creator limit is {max_dur}s"
                 )
-            caption = build_caption(metadata.get("title", video["title"]), metadata.get("tags", []))
+            caption = build_caption(
+                metadata.get("title", video["title"]),
+                metadata.get("tags", []),
+                credits=list(metadata.get("attributions") or []),
+            )
             post_info = {
                 "title": caption[:2200],
                 "privacy_level": privacy,

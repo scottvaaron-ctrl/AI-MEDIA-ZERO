@@ -53,7 +53,8 @@ In `ProducerAgent` (replacing the first-download-wins loop when the gate is avai
 1. For each of the beat's queries (`asset_queries`, unchanged, up to 4), search as today (up to
    `assets.wikimedia.max_results`, default 6 candidates).
 2. Download each candidate's **preview** (about 320 px), score it, discard the preview. `AssetCandidate` gains
-   `preview_url: str = ""`. Wikimedia: the thumb URL with the width segment replaced (`/1280px-` -> `/320px-`), else
+   `preview_url: str = ""`. Wikimedia: the thumb URL with the width segment replaced (`/1280px-` -> `/330px-`: the requested width is
+   snapped up to one of Wikimedia's standard thumbnail widths, since others are refused), else
    `file_url`. Pexels: `src.small`. Pixabay: `previewURL` / `webformatURL`. Owner library: the local file.
 3. Candidates scoring at or above `assets.relevance.threshold` pass. Rank by score, minus
    `assets.relevance.by_sa_penalty` (default 0.05) for licences starting with "CC BY-SA". `fetch()` the top one

@@ -312,3 +312,26 @@ def test_clip_scene_music_sfx_and_loop_render(svc, ffmpeg_available: bool) -> No
     assert check.ok, check.problems
     probe = subprocess.run([renderer.ffmpeg, "-i", res.video_path], capture_output=True, text=True).stderr
     assert "Audio: aac" in probe
+
+
+# -- credits and the AI disclosure are never drawn on screen (they live in the description) ---------------------
+
+CREDIT = "Ann Lee — Moon over hills — CC BY 4.0 — via Wikimedia Commons"
+
+
+def test_card_draws_no_attribution(svc) -> None:  # noqa: ANN001
+    photo = svc.env.data_dir / "cp.png"
+    Image.new("RGB", (900, 1400), (200, 120, 60)).save(photo)
+    for extra in ({}, {"image_path": str(photo)}):
+        with_credits = _png(svc, "cr1", attribution=CREDIT, disclosure="AI narration", **extra)
+        without = _png(svc, "cr2", attribution="", disclosure="", **extra)
+        assert with_credits.tobytes() == without.tobytes()
+
+
+def test_layered_card_draws_no_attribution(svc) -> None:  # noqa: ANN001
+    photo = svc.env.data_dir / "lp.png"
+    Image.new("RGB", (900, 1400), (200, 120, 60)).save(photo)
+    for extra in ({"template": "full_bleed", "image_path": str(photo)}, {"overlay": True}):
+        with_credits = _png(svc, "lc1", attribution=CREDIT, disclosure="AI narration", **extra)
+        without = _png(svc, "lc2", attribution="", disclosure="", **extra)
+        assert with_credits.tobytes() == without.tobytes()

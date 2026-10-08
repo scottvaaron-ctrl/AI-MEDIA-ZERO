@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -38,6 +38,9 @@ from aimz.domain.models import (
     Timeline,
 )
 from aimz.util import new_id, now_iso
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -256,6 +259,20 @@ class VideoProvider(Provider):
 # --------------------------------------------------------------------------------------
 # Assets
 # --------------------------------------------------------------------------------------
+def decode_preview(data: bytes) -> Image.Image | None:
+    """Decode image bytes into a fully loaded RGB PIL image (no open file handle); None if undecodable."""
+    try:
+        import io
+
+        from PIL import Image as PILImage
+
+        with PILImage.open(io.BytesIO(data)) as im:
+            im.load()
+            return im.convert("RGB")
+    except Exception:
+        return None
+
+
 class AssetProvider(Provider):
     kind = "asset"
 
@@ -266,6 +283,25 @@ class AssetProvider(Provider):
     def fetch(
         self, ctx: ProviderContext, candidate: AssetCandidate, dest_dir: Path
     ) -> AssetRecord | None: ...
+
+    def preview(
+        self, ctx: ProviderContext, candidate: AssetCandidate, width: int = 320
+    ) -> Image.Image | None:
+        """A small, fully loaded PIL image of the candidate, or None. Never raises, never writes DB rows or files."""
+        return None
+
+    def _http_preview(self, ctx: ProviderContext, client: Any, url: str) -> Image.Image | None:
+        """Download ``url`` through this provider's authorized path and decode it; None on any failure."""
+        if not url:
+            return None
+        try:
+            with self.authorized(ctx, "asset_preview"):
+                r = client.get(url)
+                r.raise_for_status()
+                data = bytes(r.content)
+            return decode_preview(data)
+        except Exception:
+            return None
 
 
 # --------------------------------------------------------------------------------------

@@ -11,6 +11,14 @@ from typing import Any
 from aimz.db import Database
 from aimz.util import iso_ago
 
+# State keys the producer's picture-matching check writes (``ProducerAgent``) and ``attention`` reads.
+RELEVANCE_STATE = "relevance_unavailable"  # why the check is off (package/model missing, scorer raised)
+PREVIEWS_STATE = "relevance_previews_failing"  # candidates found but no preview could be loaded to score
+RELEVANCE_FIX_STATE = (
+    "relevance_unavailable_fix"  # the command that clears RELEVANCE_STATE (scorer_health's fix)
+)
+DEFAULT_RELEVANCE_FIX = "python -m aimz doctor --fix"
+
 
 def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}
@@ -75,6 +83,23 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
                 "why": "YouTube refuses the stored login. Per YouTube policy, this channel's YouTube data "
                 "(metrics, comments) is deleted automatically 7 days after this date unless it works again",
                 "fix": "python -m aimz youtube auth",
+            }
+        ]
+    picture_check = db.get_state(RELEVANCE_STATE)
+    if picture_check:
+        out["picture_check_unavailable"] = [
+            {
+                "why": f"picture-matching check unavailable: {picture_check}",
+                "fix": db.get_state(RELEVANCE_FIX_STATE) or DEFAULT_RELEVANCE_FIX,
+            }
+        ]
+    previews_failing = db.get_state(PREVIEWS_STATE)
+    if previews_failing:
+        out["picture_check_previews_failing"] = [
+            {
+                "why": "picture-matching check: previews could not be loaded",
+                "detail": previews_failing,
+                "fix": "check network access to the picture source; pictures are chosen without the check meanwhile",
             }
         ]
     # Local import: guideline_proposals imports the experiment settings, which this module does not need.

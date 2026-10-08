@@ -235,6 +235,11 @@ def capabilities(svc: Any) -> set[str]:
         caps.add("stock_video")
     if sfx("whoosh") is not None:
         caps.add("sfx")
+    from aimz.providers.image import relevance
+
+    model_dir = getattr(getattr(svc, "env", None), "siglip_model_dir", None)
+    if model_dir is not None and relevance.packages_importable() and relevance.model_present(model_dir):
+        caps.add("relevance_gate")
     return caps
 
 
