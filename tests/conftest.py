@@ -11,6 +11,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _never_download_siglip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must never fetch the picture-matching model (378 MB) or touch the network."""
+    monkeypatch.setenv("SIGLIP_AUTO_DOWNLOAD", "false")
+
+
 @pytest.fixture()
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A throwaway project directory with real config files and offline providers."""
@@ -28,6 +34,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "YOUTUBE_MODE": "draft",
         "YOUTUBE_ENABLED": "false",
         "AIMZ_LOG_LEVEL": "WARNING",
+        "SIGLIP_AUTO_DOWNLOAD": "false",
         "AIMZ_INSTANCE": "main",
         "AIMZ_INSTANCES_DIR": str(tmp_path / "instances"),  # never the real instances/ folder
     }

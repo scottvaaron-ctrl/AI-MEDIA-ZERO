@@ -81,6 +81,19 @@ Our current template (same layout, same voice, same Ken Burns, Wikipedia-style r
   - For us, a SigLIP 2 model (Apache-2.0, CPU) can score each candidate image against a concrete visual query and reject the off-topic ones.
   - Thresholds must be calibrated on about 50 of our own hand-labelled pairs.
   - CLIP is weak on dates and named people, so keep the metadata check for those.
+- **Calibration (2026-10-08).** SigLIP 2 base, 8-bit ONNX, scoring a 320 px preview against the beat.
+  - Data: 50 distinct picture/narration pairs from 48 past videos (`scripts/calibrate_relevance.py build`), labelled
+    by Claude: 34 match, 16 mismatch, no synthetic mismatches. Rule: "match" if the picture shows the kind of thing
+    the sentence is about; a wrong named person or date still counts as a match, because this model cannot judge
+    those. Files: `data/calibration/relevance/` (pairs.csv, contact-sheet.png, result.json).
+  - Best single signal: the narration (balanced accuracy 0.75). The AI's `visual_query` was worse, often because it
+    asks for something other than what the narration says (e.g. "map of New Zealand" for a beetle).
+  - Scores overlap heavily: many good pictures score very low when the narration is abstract. The clearly unrelated
+    ones (a pop concert for a NASA "Mars" story, a statue for a nebula) sit at the bottom.
+  - The balanced-accuracy pass mark (0.0012) rejected 13 of 34 good pictures, which would turn many beats into text
+    cards. **Chosen instead: a floor of 0.00005** (keeps 31/34 good, rejects 6/16 bad outright). The main gain is
+    ranking: the best-scoring of up to 24 candidates per beat is used instead of the first download.
+  - Revisit after a few weeks of run notes (`relevance` entries: top scores, text-card rate).
 
 ### Attribution
 - [V] Under CC 4.0, attribution may be given "in any reasonable manner based on the medium". Full TASL credit (title, author, source, license) in the description is defensible for Shorts **if nothing else is credited on screen**. CC BY-SA 3.0 requires credits to be "at least as prominent" as any other credits shown.

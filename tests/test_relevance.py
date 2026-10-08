@@ -279,3 +279,19 @@ def test_capability_relevance_gate_needs_packages(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr(relevance, "packages_importable", lambda: False)
     svc = SimpleNamespace(assets=[], env=SimpleNamespace(siglip_model_dir=tmp_path))
     assert "relevance_gate" not in exp_settings.capabilities(svc)
+
+
+def test_get_scorer_in_test_env_never_downloads(svc: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: with the check enabled and no model, the test environment must not download."""
+    import aimz.providers.image.relevance as rel
+
+    def _fail(*_a: Any, **_k: Any) -> None:
+        raise AssertionError("download_model must not be called in tests")
+
+    monkeypatch.setattr(rel, "download_model", _fail)
+    monkeypatch.setattr(rel, "packages_importable", lambda: True)
+    monkeypatch.setattr(rel, "_SCORERS", {})
+    monkeypatch.setattr(rel, "_FAILED", set())
+    assert svc.env.siglip_auto_download is False
+    assert not rel.model_present(Path(svc.env.siglip_model_dir))
+    assert rel.get_scorer(svc) is None
