@@ -13,9 +13,10 @@ from aimz.core.errors import ProviderError
 from aimz.domain.models import Scene, Timeline
 from aimz.providers.audio.library import music_moods, track_for
 from aimz.providers.video.ffmpeg_renderer import (
+    LIMIT_DBFS,
     LOUDNORM,
     FFmpegRenderer,
-    loudnorm_second_pass,
+    level_chain,
     parse_loudnorm_json,
     resolve_ffmpeg,
 )
@@ -50,25 +51,31 @@ def test_parse_loudnorm_json() -> None:
     assert parse_loudnorm_json("{ not json") is None
 
 
-def test_second_pass_string() -> None:
-    s = loudnorm_second_pass(parse_loudnorm_json(SAMPLE) or {})
-    assert s.startswith(LOUDNORM + ":")
-    assert "measured_I=-23.5" in s and "measured_TP=-5.2" in s and "measured_LRA=1" in s
-    assert "measured_thresh=-33.8" in s and "offset=0.02" in s
-    assert s.endswith("linear=true")
+def test_level_chain_string() -> None:
+    s = level_chain(6.5)
+    assert s.startswith("aformat=sample_fmts=flt,volume=6.50dB,aresample=192000,alimiter=limit=")
+    assert f"limit={10 ** (LIMIT_DBFS / 20):.4f}" in s and "level=disabled" in s
+    assert s.endswith("aresample=48000")
 
 
-def _tone(path: Path, gain_db: float, seconds: float = 3.0) -> None:
+def _tone(path: Path, gain_db: float | None, seconds: float = 3.0) -> None:
+    """A sine at ``gain_db``; None gives "peaky" audio like real narration: a quiet body with full-scale clicks."""
     ffmpeg = resolve_ffmpeg("")
     assert ffmpeg
+    src = (
+        f"sine=frequency=440:duration={seconds}"
+        if gain_db is not None
+        else rf"aevalsrc=0.03*sin(2*PI*440*t)+if(lt(mod(t\,0.25)\,0.003)\,0.95\,0):s=24000:d={seconds}"
+    )
+    af = f"volume={gain_db}dB" if gain_db is not None else "anull"
     subprocess.run(
-        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-         f"sine=frequency=440:duration={seconds}", "-af", f"volume={gain_db}dB", "-ar", "24000", "-ac", "1", str(path)],
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", src, "-af", af,
+         "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(path)],
         check=True,
     )  # fmt: skip
 
 
-def _timeline(svc: Any, gain_db: float, music: bool) -> Timeline:
+def _timeline(svc: Any, gain_db: float | None, music: bool) -> Timeline:
     ctx = svc.ctx()
     scenes, cursor = [], 0.0
     for i in range(2):
@@ -90,10 +97,10 @@ def _timeline(svc: Any, gain_db: float, music: bool) -> Timeline:
     return Timeline(video_id="v", title="t", scenes=scenes, total_duration_s=cursor, fps=24, **extra)
 
 
-@pytest.mark.parametrize("gain_db", [-30.0, 0.0], ids=["quiet", "loud"])
+@pytest.mark.parametrize("gain_db", [-30.0, 0.0, None], ids=["quiet", "loud", "peaky"])
 @pytest.mark.parametrize("music", [False, True], ids=["no-music", "music"])
 def test_quiet_and_loud_tones_land_at_minus_14(
-    svc, ffmpeg_available: bool, gain_db: float, music: bool
+    svc, ffmpeg_available: bool, gain_db: float | None, music: bool
 ) -> None:  # noqa: ANN001
     if not ffmpeg_available:
         pytest.skip("ffmpeg not available")
@@ -133,6 +140,6 @@ def test_pass1_failure_falls_back_to_single_pass(
         renderer.render(svc.ctx(), _timeline(svc, -30.0, False), svc.env.data_dir / "render")
     final = next(a for a in seen if "list.txt" in a)
     graph = final[final.index("-filter_complex") + 1]
-    assert LOUDNORM in graph and "measured_I" not in graph
-    assert "48000" in final
+    assert LOUDNORM in graph and "alimiter" not in graph
+    assert "48000" in final and final[final.index("-ac") + 1] == "2"
     assert any("single-pass loudnorm" in r.getMessage() for r in caplog.records)

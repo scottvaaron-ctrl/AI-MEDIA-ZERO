@@ -67,7 +67,7 @@ def _fmt_ass_time(t: float) -> str:
 
 
 # Final loudness (YouTube plays back at about -14 LUFS and only turns loud audio down).
-LOUDNORM = "loudnorm=I=-14:TP=-1:LRA=11"
+LOUDNORM = "loudnorm=I=-14:TP=-1:LRA=11"  # the fallback leveller, and the loudness meter
 LOUDNESS_TARGET = -14.0
 _LOUDNORM_KEYS = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
 
@@ -86,11 +86,20 @@ def parse_loudnorm_json(stderr: str) -> dict[str, float] | None:
     return out if all(math.isfinite(v) for v in out.values()) else None
 
 
-def loudnorm_second_pass(m: dict[str, float]) -> str:
-    """The loudnorm filter for the apply pass, fed the first pass's measurements (linear gain where possible)."""
+# Real narration peaks near full scale while its body is quiet, so loudnorm alone cannot reach -14 LUFS without
+# exceeding the peak limit (it falls back to dynamic mode, which lands near -15.5 on a Short). Instead: one measured
+# gain, then a limiter run at 4x the sample rate (close to a true-peak limiter). Measured on the live voices
+# 2026-10-09: -14.1 to -14.6 LUFS, true peak about -4.5 dBTP after AAC.
+LIMIT_DBFS = -2.0
+LEVEL_TOLERANCE_LU = 0.3  # stop correcting the gain once this close to the target
+LEVEL_CORRECTIONS = 3  # the limiter takes some loudness back; re-measure at most this many times
+
+
+def level_chain(gain_db: float) -> str:
+    """Gain in float (16-bit input would clip before the limiter), then the oversampled peak limiter."""
     return (
-        f"{LOUDNORM}:measured_I={m['input_i']:g}:measured_TP={m['input_tp']:g}:measured_LRA={m['input_lra']:g}"
-        f":measured_thresh={m['input_thresh']:g}:offset={m['target_offset']:g}:linear=true"
+        f"aformat=sample_fmts=flt,volume={gain_db:.2f}dB,aresample=192000,"
+        f"alimiter=limit={10 ** (LIMIT_DBFS / 20):.4f}:attack=2:release=80:level=disabled,aresample=48000"
     )
 
 
@@ -216,6 +225,35 @@ class FFmpegRenderer(VideoProvider):
             raise ProviderError(f"ffmpeg {label} did not finish within {RENDER_TIMEOUT_S} s") from exc
         if proc.returncode != 0:
             raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
+
+    def _mix_loudness(self, timeline: Timeline, work: Path, chain: str | None) -> float | None:
+        """Integrated loudness of the final audio mix, optionally after ``chain``; None for silence."""
+        tail = (f"{chain}," if chain else "") + LOUDNORM + ":print_format=json"
+        inputs, args = self._audio_mix(timeline, work, None, tail)
+        err = self._run_capture(
+            ["-f", "concat", "-safe", "0", "-i", "list.txt", *inputs, *args, "-vn", "-f", "null", "-"],
+            work,
+            "loudness measurement",
+        )
+        m = parse_loudnorm_json(err)
+        return m["input_i"] if m else None
+
+    def _level_gain(self, timeline: Timeline, work: Path) -> float | None:
+        """The gain that brings the mix, after the limiter, to -14 LUFS; None when it cannot be measured."""
+        try:
+            first = self._mix_loudness(timeline, work, None)
+            if first is None:
+                return None
+            gain = LOUDNESS_TARGET - first
+            for _ in range(LEVEL_CORRECTIONS):
+                now = self._mix_loudness(timeline, work, level_chain(gain))
+                if now is None or abs(LOUDNESS_TARGET - now) <= LEVEL_TOLERANCE_LU:
+                    break
+                gain += LOUDNESS_TARGET - now
+            return gain
+        except ProviderError as exc:
+            log.warning("loudness measurement: %s", exc)
+            return None
 
     def _run_capture(self, args: list[str], cwd: Path, label: str) -> str:
         """Like ``_run`` at log level info, returning ffmpeg's stderr (where loudnorm prints its JSON)."""
@@ -483,35 +521,10 @@ class FFmpegRenderer(VideoProvider):
                 ass_filter = "ass=captions.ass:fontsdir=fonts"
 
             final = out_dir / "video.mp4"
-            tail = LOUDNORM
-            measured = None
-            try:  # pass 1: measure the finished mix, so pass 2 can apply one linear gain
-                m_inputs, m_args = self._audio_mix(timeline, work, None, LOUDNORM + ":print_format=json")
-                err = self._run_capture(
-                    [
-                        "-f",
-                        "concat",
-                        "-safe",
-                        "0",
-                        "-i",
-                        "list.txt",
-                        *m_inputs,
-                        *m_args,
-                        "-vn",
-                        "-f",
-                        "null",
-                        "-",
-                    ],
-                    work,
-                    "loudness pass 1",
-                )
-                measured = parse_loudnorm_json(err)
-            except ProviderError as exc:
-                log.warning("loudness pass 1: %s", exc)
-            if measured is not None:
-                tail = loudnorm_second_pass(measured)
-            else:
-                log.info("loudness pass 1 failed; single-pass loudnorm")
+            gain = self._level_gain(timeline, work)
+            if gain is None:
+                log.info("loudness measurement failed; single-pass loudnorm")
+            tail = level_chain(gain) if gain is not None else LOUDNORM
             mix_inputs, mix_args = self._audio_mix(timeline, work, ass_filter, tail)
             self._run(
                 [
@@ -537,6 +550,9 @@ class FFmpegRenderer(VideoProvider):
                     "128k",
                     "-ar",
                     "48000",
+                    # Stereo: at 128k, ffmpeg's AAC encoder adds about 4 dB of peak to mono speech, not to stereo.
+                    "-ac",
+                    "2",
                     "-movflags",
                     "+faststart",
                     str(final.resolve()),
