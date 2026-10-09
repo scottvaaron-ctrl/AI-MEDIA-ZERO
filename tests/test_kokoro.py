@@ -128,7 +128,8 @@ def test_download_model_uses_part_files(tmp_path: Path) -> None:
 
 
 def test_health_reports_missing_model(tmp_path: Path) -> None:
-    h = KokoroTTSProvider(tmp_path, auto_download=False).health()
+    # A loaded engine skips the package check, so this runs where kokoro-onnx is not installed (CI).
+    h = KokoroTTSProvider(tmp_path, auto_download=False, engine=FakeKokoro()).health()
     assert h.ok is False
     assert "doctor --fix" in (h.fix or "")
 

@@ -97,7 +97,7 @@ def _timeline(svc: Any, gain_db: float | None, music: bool) -> Timeline:
     return Timeline(video_id="v", title="t", scenes=scenes, total_duration_s=cursor, fps=24, **extra)
 
 
-@pytest.mark.parametrize("gain_db", [-30.0, 0.0, None], ids=["quiet", "loud", "peaky"])
+@pytest.mark.parametrize("gain_db", [-6.0, 12.0, None], ids=["quiet", "loud", "peaky"])
 @pytest.mark.parametrize("music", [False, True], ids=["no-music", "music"])
 def test_quiet_and_loud_tones_land_at_minus_14(
     svc, ffmpeg_available: bool, gain_db: float | None, music: bool
@@ -137,9 +137,29 @@ def test_pass1_failure_falls_back_to_single_pass(
     monkeypatch.setattr(renderer, "_run_capture", capture)
     monkeypatch.setattr(renderer, "_run", run)
     with caplog.at_level(logging.INFO):
-        renderer.render(svc.ctx(), _timeline(svc, -30.0, False), svc.env.data_dir / "render")
+        renderer.render(svc.ctx(), _timeline(svc, -6.0, False), svc.env.data_dir / "render")
     final = next(a for a in seen if "list.txt" in a)
     graph = final[final.index("-filter_complex") + 1]
     assert LOUDNORM in graph and "alimiter" not in graph
     assert "48000" in final and final[final.index("-ac") + 1] == "2"
     assert any("single-pass loudnorm" in r.getMessage() for r in caplog.records)
+
+
+def test_near_silent_audio_is_not_boosted_into_hiss(
+    svc, ffmpeg_available: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001
+    if not ffmpeg_available:
+        pytest.skip("ffmpeg not available")
+    from aimz.providers.video import ffmpeg_renderer
+
+    renderer = FFmpegRenderer(svc.env.ffmpeg_bin, svc.env.ffprobe_bin)
+    gains: list[float] = []
+    real_chain = ffmpeg_renderer.level_chain
+
+    def spy(gain_db: float) -> str:
+        gains.append(gain_db)
+        return real_chain(gain_db)
+
+    monkeypatch.setattr(ffmpeg_renderer, "level_chain", spy)
+    renderer.render(svc.ctx(), _timeline(svc, -45.0, False), svc.env.data_dir / "render")
+    assert gains and max(gains) <= ffmpeg_renderer.MAX_GAIN_DB == 20.0

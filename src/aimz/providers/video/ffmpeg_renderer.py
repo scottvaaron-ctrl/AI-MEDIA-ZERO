@@ -93,6 +93,8 @@ def parse_loudnorm_json(stderr: str) -> dict[str, float] | None:
 LIMIT_DBFS = -2.0
 LEVEL_TOLERANCE_LU = 0.3  # stop correcting the gain once this close to the target
 LEVEL_CORRECTIONS = 3  # the limiter takes some loudness back; re-measure at most this many times
+# Near-silent audio (a failed voice, a music-only bed) would otherwise be boosted by 50 dB into audible hiss.
+MAX_GAIN_DB = 20.0
 
 
 def level_chain(gain_db: float) -> str:
@@ -244,12 +246,12 @@ class FFmpegRenderer(VideoProvider):
             first = self._mix_loudness(timeline, work, None)
             if first is None:
                 return None
-            gain = LOUDNESS_TARGET - first
+            gain = min(MAX_GAIN_DB, LOUDNESS_TARGET - first)
             for _ in range(LEVEL_CORRECTIONS):
                 now = self._mix_loudness(timeline, work, level_chain(gain))
                 if now is None or abs(LOUDNESS_TARGET - now) <= LEVEL_TOLERANCE_LU:
                     break
-                gain += LOUDNESS_TARGET - now
+                gain = min(MAX_GAIN_DB, gain + LOUDNESS_TARGET - now)
             return gain
         except ProviderError as exc:
             log.warning("loudness measurement: %s", exc)
@@ -550,7 +552,8 @@ class FFmpegRenderer(VideoProvider):
                     "128k",
                     "-ar",
                     "48000",
-                    # Stereo: at 128k, ffmpeg's AAC encoder adds about 4 dB of peak to mono speech, not to stereo.
+                    # Stereo: the upmix puts each channel 3 dB lower at the same loudness (BS.1770 sums channels); that headroom
+                    # absorbs the peak ffmpeg's AAC adds (about 4 dB on mono speech). An upmix without it loses that margin.
                     "-ac",
                     "2",
                     "-movflags",

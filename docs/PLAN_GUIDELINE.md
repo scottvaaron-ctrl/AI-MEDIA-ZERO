@@ -257,16 +257,17 @@ Do these in order.
        `en_US-kristin-medium`, `video_settings` records `voice_fallback`, and `aimz status` lists
        `voice_unavailable`. `aimz voice set|show`: the owner set Bella; the AI cannot change an owner-set voice.
        Loudness: the spec's two-pass `loudnorm` could not meet -14 LUFS / -1 dBTP on real narration (Piper peaks
-       at 0 dBTP; ffmpeg's AAC at 128k mono adds ~4 dB of peak), so the final mix is measured, given a gain
+       at 0 dBTP; ffmpeg's AAC at 128k mono added ~4 dB of peak), so the final mix is measured, given a gain
        (re-measured up to 3 times), run through a 4x-oversampled limiter at -2 dBFS and written as 48 kHz stereo
-       AAC 128k. Measured on all six voices and every music/sfx setting: -14.1 to -14.5 LUFS, about -4.7 dBTP.
+       AAC 128k (the mono-to-stereo upmix puts each channel 3 dB lower at the same loudness, which is most of the
+       peak headroom). A gain above +20 dB is never applied (near-silence would become hiss), and videos narrated
+       with the fallback voice are left out of experiment results. Measured on all six voices and every music/sfx setting: -14.1 to -14.5 LUFS, about -4.7 dBTP.
        Samples to listen to: `data/tests/2026-10-09-sound/`. Spec: `docs/superpowers/specs/2026-10-09-sound-design.md`;
        plan: `docs/superpowers/plans/2026-10-09-sound.md`.
      * **D, stock video:** next. The constitution §5 media sentence is in (2026-10-09); the owner's Pexels and
        Pixabay keys are still needed (`docs/OWNER_TODO.md` A4).
      * **Owner question 2026-10-09 (open):** the "X is a..." hook check also blocks some good hooks; the owner
        asked whether it can pass good definition openings and fail bad ones. Proposal in the CEO brief.
-     * **D, stock video:** stock-video providers.
      * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
    * **After piece A is merged:** the live database gets migration `0008` automatically on the next run. Back up
      `data/aimz.sqlite3` first (copy it into `data/backups/`).
@@ -274,7 +275,7 @@ Do these in order.
      `hook_no_question`, `hook_no_definition`) in its `checks:`.
 4. **Part 3.** Draft Backhouse Explainers' `config/guideline.md` from the research and the test draft. The owner
    approves it line by line before it goes in place. The channel's current identity is "maps and geography
-   oddities", voice `en_US-kristin-medium`. Writing this file activates the guideline: the first cycle retires
+   oddities", voice `kokoro:af_bella` (owner-set 2026-10-09; the guideline should lock this voice, not kristin). Writing this file activates the guideline: the first cycle retires
    the running experiment and hands the locked settings to the guideline.
 5. **Owner items outside this plan:**
    * Set the Google OAuth consent screen to "In production", so the YouTube login stops expiring every 7 days.
