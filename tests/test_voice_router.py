@@ -95,3 +95,23 @@ def test_registry_builds_router_for_piper_and_silent_for_tests(
         assert svc.tts.kokoro.model_dir == svc.env.kokoro_model_dir
     finally:
         svc.close()
+
+
+def test_present_voices_lists_piper_files_and_kokoro_when_its_model_is_there(tmp_path: Path) -> None:
+    import numpy as np
+
+    from aimz.providers.tts.kokoro import MODEL_FILES, KokoroTTSProvider
+    from aimz.providers.tts.piper import PiperTTSProvider
+
+    (tmp_path / "piper").mkdir()
+    (tmp_path / "piper" / "en_US-kristin-medium.onnx").write_bytes(b"x")
+    r = VoiceRouterTTS(
+        PiperTTSProvider(tmp_path / "piper", auto_download=False),
+        KokoroTTSProvider(tmp_path / "k", auto_download=False),
+    )
+    assert r.present_voices() == ["en_US-kristin-medium"]
+    (tmp_path / "k").mkdir()
+    (tmp_path / "k" / MODEL_FILES[0]).write_bytes(b"onnx")
+    np.savez(tmp_path / "k" / "v.npz", af_bella=np.zeros(2))
+    (tmp_path / "k" / "v.npz").replace(tmp_path / "k" / MODEL_FILES[1])
+    assert r.present_voices() == ["en_US-kristin-medium", "kokoro:af_bella"]

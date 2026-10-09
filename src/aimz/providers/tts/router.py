@@ -12,7 +12,12 @@ from typing import Any
 
 from aimz.core.errors import BudgetDenied, KillSwitchEngaged, VoiceUnavailable
 from aimz.providers.base import HealthStatus, ProviderContext, SpeechOptions, TTSProvider, TTSResult
-from aimz.providers.tts.kokoro import COMMERCIAL_SAFE_KOKORO_VOICES, PREFIX, KokoroTTSProvider
+from aimz.providers.tts.kokoro import (
+    COMMERCIAL_SAFE_KOKORO_VOICES,
+    PREFIX,
+    KokoroTTSProvider,
+    model_present,
+)
 from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES, PiperTTSProvider
 
 
@@ -44,6 +49,11 @@ class VoiceRouterTTS(TTSProvider):
 
     def ensure_voice(self, voice: str | None = None) -> Any:
         return self.piper.ensure_voice(voice)
+
+    def present_voices(self) -> list[str]:
+        """Voices that can be spoken now without a download: Piper's voice files, then Kokoro's when its model is in place."""
+        kokoro = list(COMMERCIAL_SAFE_KOKORO_VOICES) if model_present(self.kokoro.model_dir) else []
+        return self.piper.present_voices() + kokoro
 
     def health(self) -> HealthStatus:
         p, k = self.piper.health(), self.kokoro.health()
