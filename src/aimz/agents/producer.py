@@ -17,7 +17,10 @@ from aimz.core.attention import (  # picture-check states (aimz status)
     PREVIEWS_STATE,
     RELEVANCE_FIX_STATE,
     RELEVANCE_STATE,
+    VOICE_FIX_STATE,
+    VOICE_STATE,
 )
+from aimz.core.errors import VoiceUnavailable
 from aimz.core.runs import RunContext
 from aimz.domain.models import AssetCandidate, AssetRecord, Beat, CaptionStyle, Scene, Timeline
 from aimz.experiments import shared
@@ -29,6 +32,8 @@ from aimz.providers.base import SpeechOptions
 from aimz.util import loads, new_id, now_iso, slugify
 
 SCENE_PAD_S = 0.35
+# Narration voice used for a whole video when the Kokoro voice fails (owner decision 2026-10-08).
+FALLBACK_VOICE = "en_US-kristin-medium"
 _STOP = {"the", "a", "an", "of", "and", "in", "on", "for", "to", "with", "by", "at", "from", "over", "about"}
 
 
@@ -185,6 +190,8 @@ class ProducerAgent(Agent):
         self._gate_off: tuple[str | None, str] | None = None
         # (run id,) once that run has warned that no preview could be loaded (a tuple so a None run id counts).
         self._previews_warned: tuple[str | None] | None = None
+        # (run id,) once that run has warned that the Kokoro voice is unavailable.
+        self._voice_warned: tuple[str | None] | None = None
         self._relevance_beats: list[dict[str, Any]] = []
         self._relevance_fallback = 0
         self._query_log: list[dict[str, Any]] | None = None
@@ -378,6 +385,27 @@ class ProducerAgent(Agent):
             cursor += tail
         return scenes, attributions, first_image, cursor
 
+    def _voice_down(self, run: RunContext, exc: Exception) -> None:
+        """Record why Kokoro failed (``aimz status``) and warn once per run."""
+        reason = str(exc)
+        kokoro = getattr(self.svc.tts, "kokoro", None)
+        fix = None
+        if kokoro is not None:
+            try:
+                fix = kokoro.health().fix
+            except Exception:
+                fix = None
+        self.svc.db.set_state(VOICE_STATE, reason[:500])
+        self.svc.db.set_state(VOICE_FIX_STATE, (fix or DEFAULT_RELEVANCE_FIX)[:200])
+        if self._voice_warned != (run.id,):
+            self._voice_warned = (run.id,)
+            self.log.warning("Kokoro voice unavailable (%s); narrating with %s", reason, FALLBACK_VOICE)
+
+    def _voice_up(self) -> None:
+        for state in (VOICE_STATE, VOICE_FIX_STATE):
+            if self.svc.db.get_state(state):
+                self.svc.db.set_state(state, "")
+
     def _find_clip(self, ctx: Any, query: str, dest: Path) -> AssetRecord | None:
         for provider in self.svc.assets:
             if not hasattr(provider, "search_videos"):
@@ -435,9 +463,21 @@ class ProducerAgent(Agent):
                 run, self.name, "produce", {"script_id": script_id, "video_id": video_id}
             ) as span:
                 ctx = self.pctx(run, video_id, span)
-                scenes, attributions, first_image, cursor = self.assemble(
-                    ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
-                )
+                try:
+                    scenes, attributions, first_image, cursor = self.assemble(
+                        ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
+                    )
+                    if str(chosen.get("voice") or "").startswith("kokoro:"):
+                        self._voice_up()
+                except VoiceUnavailable as exc:
+                    # One video never mixes voices: the whole video is narrated again with the fallback.
+                    self._voice_down(run, exc)
+                    self.settings.overwrite(video_id, "voice", FALLBACK_VOICE, "voice_fallback")
+                    self.settings.overwrite(video_id, "voice_fallback", chosen.get("voice"), "voice_fallback")
+                    chosen = {**chosen, "voice": FALLBACK_VOICE}
+                    scenes, attributions, first_image, cursor = self.assemble(
+                        ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
+                    )
                 relevance_note = self.relevance_note()
                 if relevance_note is not None:
                     run.note("relevance", {**run.summary.get("relevance", {}), video_id: relevance_note})

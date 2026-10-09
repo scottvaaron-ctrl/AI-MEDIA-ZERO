@@ -466,6 +466,13 @@ class SettingsEngine:
         best = max(options, key=lambda v: draws[enc(v)])
         return best, "bandit"
 
+    def overwrite(self, video_id: str, variable: str, value: Any, source: str) -> None:
+        """Replace a value already recorded for this video (e.g. the voice after a fallback)."""
+        self.db.execute(
+            "INSERT OR REPLACE INTO video_settings (video_id, variable, value, source, created_at) VALUES (?,?,?,?,?)",
+            [video_id, variable, enc(value), source, now_iso()],
+        )
+
     def record(self, video_id: str, variable: str, value: Any, source: str) -> None:
         """Record a value that was not assigned here (e.g. the hour a video was posted). First write wins."""
         self.db.execute(
