@@ -205,7 +205,8 @@ CATALOG: dict[str, SettingDef] = {
             "music_volume_db",
             "production",
             "Music gain in dB before ducking. Measured under a narrator at about -16 dB RMS: -30 gives about "
-            "-43 dB (barely there), -14 about -27 dB (a quiet bed), -6 about -19 dB (clearly present).",
+            "-43 dB (barely there), -14 about -27 dB (a quiet bed), -6 about -19 dB (clearly present). This sets "
+            "the mix relative to the voice; the whole video is then levelled to -14 LUFS.",
             "number",
             {"min": -30.0, "max": -6.0},
         ),

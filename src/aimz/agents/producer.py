@@ -499,6 +499,11 @@ class ProducerAgent(Agent):
                 )
                 (out_dir / "timeline.json").write_text(timeline.model_dump_json(indent=2), encoding="utf-8")
                 result = self.svc.renderer.render(ctx, timeline, out_dir)
+                lufs = getattr(result, "loudness_lufs", None)
+                if lufs is not None:
+                    peak = getattr(result, "true_peak_dbtp", None)
+                    note = {"loudness_lufs": lufs, "true_peak_dbtp": peak}
+                    run.note("loudness", {**run.summary.get("loudness", {}), video_id: note})
                 thumb = self.svc.cards.render_thumbnail(
                     ctx, script["title"], video_id, out_dir / "thumbnail.png", first_image
                 )

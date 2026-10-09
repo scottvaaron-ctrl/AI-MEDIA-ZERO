@@ -146,3 +146,18 @@ def test_one_warning_per_run(svc, caplog: pytest.LogCaptureFixture) -> None:  # 
         producer.produce(run, _script(svc))
         producer.produce(run, _script(svc))
     assert sum("Kokoro voice unavailable" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_loudness_run_note(svc) -> None:  # noqa: ANN001
+    producer, _ = _setup(svc, fail_on=None)
+
+    class LoudRenderer(FakeRenderer):
+        def render(self, ctx: Any, timeline: Any, out_dir: Path) -> Any:
+            res = super().render(ctx, timeline, out_dir)
+            res.loudness_lufs, res.true_peak_dbtp = -14.1, -1.3
+            return res
+
+    svc.renderer = LoudRenderer()
+    with svc.tracker.run("produce") as run:
+        video_id = producer.produce(run, _script(svc))
+    assert run.summary["loudness"][video_id] == {"loudness_lufs": -14.1, "true_peak_dbtp": -1.3}

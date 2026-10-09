@@ -13,7 +13,9 @@ relative paths; this sidesteps Windows drive-letter escaping inside filter strin
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -62,6 +64,34 @@ def _fmt_ass_time(t: float) -> str:
     m = int((t % 3600) // 60)
     s = t % 60
     return f"{h:d}:{m:02d}:{s:05.2f}"
+
+
+# Final loudness (YouTube plays back at about -14 LUFS and only turns loud audio down).
+LOUDNORM = "loudnorm=I=-14:TP=-1:LRA=11"
+LOUDNESS_TARGET = -14.0
+_LOUDNORM_KEYS = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+
+
+def parse_loudnorm_json(stderr: str) -> dict[str, float] | None:
+    """The measured values from loudnorm's ``print_format=json`` block; None if absent or not finite (silence)."""
+    start = stderr.rfind("{")
+    end = stderr.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        data = json.loads(stderr[start : end + 1])
+        out = {k: float(data[k]) for k in _LOUDNORM_KEYS}
+    except (ValueError, KeyError, TypeError):
+        return None
+    return out if all(math.isfinite(v) for v in out.values()) else None
+
+
+def loudnorm_second_pass(m: dict[str, float]) -> str:
+    """The loudnorm filter for the apply pass, fed the first pass's measurements (linear gain where possible)."""
+    return (
+        f"{LOUDNORM}:measured_I={m['input_i']:g}:measured_TP={m['input_tp']:g}:measured_LRA={m['input_lra']:g}"
+        f":measured_thresh={m['input_thresh']:g}:offset={m['target_offset']:g}:linear=true"
+    )
 
 
 RENDER_TIMEOUT_S = 1800  # a 60-90 s Short renders in a few minutes; this is only a hang guard
@@ -187,6 +217,42 @@ class FFmpegRenderer(VideoProvider):
         if proc.returncode != 0:
             raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
 
+    def _run_capture(self, args: list[str], cwd: Path, label: str) -> str:
+        """Like ``_run`` at log level info, returning ffmpeg's stderr (where loudnorm prints its JSON)."""
+        assert self.ffmpeg
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "info", "-nostats", "-y", *args]
+        try:
+            proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=RENDER_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(f"ffmpeg {label} did not finish within {RENDER_TIMEOUT_S} s") from exc
+        if proc.returncode != 0:
+            raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
+        return proc.stderr
+
+    def measure_loudness(self, path: Path) -> tuple[float, float] | None:
+        """(integrated LUFS, true peak dBTP) of a file's audio, or None when it cannot be measured."""
+        try:
+            err = self._run_capture(
+                [
+                    "-i",
+                    str(Path(path).resolve()),
+                    "-map",
+                    "0:a",
+                    "-af",
+                    LOUDNORM + ":print_format=json",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                Path(path).parent,
+                "loudness check",
+            )
+        except ProviderError as exc:
+            log.warning("loudness check failed: %s", exc)
+            return None
+        m = parse_loudnorm_json(err)
+        return (m["input_i"], m["input_tp"]) if m else None
+
     def probe_duration(self, path: Path) -> float:
         if self.ffprobe:
             try:
@@ -271,8 +337,11 @@ class FFmpegRenderer(VideoProvider):
 
     # -- audio bed ---------------------------------------------------------------------
     @staticmethod
-    def _audio_mix(timeline: Timeline, work: Path, ass_filter: str) -> tuple[list[str], list[str]]:
-        """Inputs and filter arguments for the final pass: captions, plus music and cut sounds when set.
+    def _audio_mix(
+        timeline: Timeline, work: Path, ass_filter: str | None, tail: str
+    ) -> tuple[list[str], list[str]]:
+        """Inputs and filter arguments for the final pass: captions, music and cut sounds when set, and the
+        loudness filter ``tail`` at the end of the audio. ``ass_filter=None`` builds the audio only (to measure it).
 
         Music loops for the whole video, fades in and out, and is ducked under the narration with a
         side-chain compressor, so it never covers the voice.
@@ -280,10 +349,8 @@ class FFmpegRenderer(VideoProvider):
         music = Path(timeline.music_path) if timeline.music_path else None
         sfx = Path(timeline.sfx_path) if timeline.sfx_path else None
         cuts = [c for c in timeline.sfx_times if c > 0.2] if sfx else []
-        if (music is None or not music.exists()) and not cuts:
-            return [], ["-vf", ass_filter]
         inputs: list[str] = []
-        parts = [f"[0:v]{ass_filter}[v]"]
+        parts = [f"[0:v]{ass_filter}[v]"] if ass_filter is not None else []
         audio = "[0:a]"
         n = 1
         if music is not None and music.exists():
@@ -315,7 +382,9 @@ class FFmpegRenderer(VideoProvider):
             delayed = "".join(f"[d{k}]" for k in range(len(cuts)))
             parts.append(f"{audio}{delayed}amix=inputs={len(cuts) + 1}:duration=first:normalize=0[aout]")
             audio = "[aout]"
-        return inputs, ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", audio]
+        parts.append(f"{audio}{tail}[afinal]")
+        maps = ["-map", "[v]"] if ass_filter is not None else []
+        return inputs, ["-filter_complex", ";".join(parts), *maps, "-map", "[afinal]"]
 
     # -- render ------------------------------------------------------------------------
     def render(self, ctx: ProviderContext, timeline: Timeline, out_dir: Path) -> RenderResult:
@@ -414,7 +483,36 @@ class FFmpegRenderer(VideoProvider):
                 ass_filter = "ass=captions.ass:fontsdir=fonts"
 
             final = out_dir / "video.mp4"
-            mix_inputs, mix_args = self._audio_mix(timeline, work, ass_filter)
+            tail = LOUDNORM
+            measured = None
+            try:  # pass 1: measure the finished mix, so pass 2 can apply one linear gain
+                m_inputs, m_args = self._audio_mix(timeline, work, None, LOUDNORM + ":print_format=json")
+                err = self._run_capture(
+                    [
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "0",
+                        "-i",
+                        "list.txt",
+                        *m_inputs,
+                        *m_args,
+                        "-vn",
+                        "-f",
+                        "null",
+                        "-",
+                    ],
+                    work,
+                    "loudness pass 1",
+                )
+                measured = parse_loudnorm_json(err)
+            except ProviderError as exc:
+                log.warning("loudness pass 1: %s", exc)
+            if measured is not None:
+                tail = loudnorm_second_pass(measured)
+            else:
+                log.info("loudness pass 1 failed; single-pass loudnorm")
+            mix_inputs, mix_args = self._audio_mix(timeline, work, ass_filter, tail)
             self._run(
                 [
                     "-f",
@@ -437,6 +535,8 @@ class FFmpegRenderer(VideoProvider):
                     "aac",
                     "-b:a",
                     "128k",
+                    "-ar",
+                    "48000",
                     "-movflags",
                     "+faststart",
                     str(final.resolve()),
@@ -445,6 +545,11 @@ class FFmpegRenderer(VideoProvider):
                 "concat+captions",
             )
             duration = self.probe_duration(final)
+            loudness = self.measure_loudness(final)
+            if loudness is not None and (abs(loudness[0] - LOUDNESS_TARGET) > 1.0 or loudness[1] > -1.0):
+                log.warning(
+                    "final loudness %.1f LUFS / %.1f dBTP is off target (-14 LUFS, -1 dBTP)", *loudness
+                )
             poster = out_dir / "poster.png"
             self._run(
                 ["-ss", "0.5", "-i", str(final.resolve()), "-frames:v", "1", str(poster.resolve())],
@@ -462,4 +567,6 @@ class FFmpegRenderer(VideoProvider):
             thumbnail_path=str(poster),
             captions_path=str(srt_path),
             duration_s=duration,
+            loudness_lufs=loudness[0] if loudness else None,
+            true_peak_dbtp=loudness[1] if loudness else None,
         )
