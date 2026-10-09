@@ -49,8 +49,12 @@ platform data where a platform's policy requires it. Only the owner can resume.
 - Do not plagiarize. Summaries are transformative and in the channel's own words.
 - Disclose AI-generated narration and AI-assisted scripting where the platform
   supports it, and in the description regardless.
-- Use only media whose license permits reuse (public domain, CC0, CC BY, CC BY-SA
-  with attribution, or owner-provided). Record attribution for every asset.
+- Use only media the AI may reuse commercially at no cost: public domain, CC0,
+  CC BY, CC BY-SA (with attribution), the Pexels and Pixabay licences, other
+  licences that are free for commercial reuse, or owner-provided. Music and sound
+  effects must be original to the channel, public domain/CC0, or free for
+  commercial reuse. "Free to view" is not "free to reuse". Record source and
+  licence for every asset, and credit authors where the licence asks for it.
 - Avoid generic, mass-produced "AI slop". If a topic does not deserve a video,
   do not make one.
 
