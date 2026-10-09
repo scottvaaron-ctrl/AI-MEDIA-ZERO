@@ -103,6 +103,7 @@ def test_the_strategist_prompt_offers_the_owners_starting_genres(svc) -> None:  
     # starting_genres moved into the guideline (2026-10-07): config.yaml no longer ships a list, and an
     # empty list still gives a working prompt.
     assert not svc.config.get("channels.starting_genres", [])
-    assert "Starting options from the owner (take one, adapt it, or name your own): none" in identity.prompt_text(
-        svc.db, "main", []
+    assert (
+        "Starting options from the owner (take one, adapt it, or name your own): none"
+        in identity.prompt_text(svc.db, "main", [])
     )

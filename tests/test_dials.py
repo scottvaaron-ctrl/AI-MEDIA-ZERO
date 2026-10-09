@@ -16,6 +16,7 @@ from aimz.domain.models import CaptionStyle, Scene, Timeline
 from aimz.experiments.settings import CATALOG, SettingsEngine
 from aimz.providers.base import SpeechOptions
 from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES, PiperTTSProvider
+from aimz.providers.tts.router import cleared_voices
 from aimz.providers.tts.silent import SilentTTSProvider
 from aimz.providers.video.ffmpeg_renderer import FFmpegRenderer, split_caption
 from aimz.providers.video.fonts import shipped_fonts
@@ -25,7 +26,8 @@ from aimz.providers.video.fonts import shipped_fonts
 
 def test_voice_choices_exclude_non_commercial_voices() -> None:
     choices = CATALOG["voice"].bounds["choices"]
-    assert choices == list(COMMERCIAL_SAFE_VOICES)
+    assert choices == cleared_voices()
+    assert "kokoro:af_bella" in choices and "kokoro:am_fenrir" not in choices
     for banned in (
         "en_US-lessac-medium",
         "en_US-ryan-medium",
@@ -44,13 +46,13 @@ def test_voice_has_no_default_and_cannot_be_turned_off(svc) -> None:  # noqa: AN
     assert "cannot be turned off" in (eng.change("voice", "off") or "")
     rng = random.Random(1)
     seen = {eng.assign(f"vid_{i}", {}, {"voice": None}, [], rng).values["voice"] for i in range(40)}
-    assert seen and seen <= set(COMMERCIAL_SAFE_VOICES) and len(seen) > 1
+    assert seen and seen <= set(cleared_voices()) and len(seen) > 1
     # A voice locked before it was found not cleared is never used.
     svc.db.execute(
         "UPDATE setting_space SET status='locked', locked_value=? WHERE variable='voice'",
         [json.dumps("en_US-joe-medium")],
     )
-    assert eng.assign("vid_x", {}, {"voice": None}, [], rng).values["voice"] in COMMERCIAL_SAFE_VOICES
+    assert eng.assign("vid_x", {}, {"voice": None}, [], rng).values["voice"] in cleared_voices()
 
 
 def test_count_dials_round_to_whole_numbers(svc) -> None:  # noqa: ANN001

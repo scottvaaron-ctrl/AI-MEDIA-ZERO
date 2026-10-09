@@ -23,7 +23,7 @@ from typing import Any
 
 from aimz.db import Database
 from aimz.providers.audio.library import music_moods, sfx
-from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES
+from aimz.providers.tts.router import cleared_voices
 from aimz.providers.video.ffmpeg_renderer import CAPTION_COLORS, CAPTION_MARGINS
 from aimz.providers.video.fonts import shipped_fonts
 from aimz.util import now_iso
@@ -72,7 +72,7 @@ CATALOG: dict[str, SettingDef] = {
         SettingDef(
             "speech_length_scale",
             "production",
-            "Narration speed as Piper's length_scale: 1.0 is the voice's normal pace, above 1 is slower, below 1 faster.",
+            "Narration speed as a length scale: 1.0 is the voice's normal pace, above 1 is slower, below 1 faster.",
             "number",
             {"min": 0.75, "max": 1.35},
         ),
@@ -96,7 +96,7 @@ CATALOG: dict[str, SettingDef] = {
             "Narration voice. Only licence-cleared voices (public-domain recordings, commercial use allowed). "
             "There is no default: until you open or lock it, every cleared voice is tried.",
             "choice",
-            {"choices": list(COMMERCIAL_SAFE_VOICES)},
+            {"choices": cleared_voices()},
             always_on=True,
         ),
         SettingDef(

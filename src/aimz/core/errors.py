@@ -61,3 +61,7 @@ class ValidationError(AimzError):
 
 class OwnerApprovalRequired(AimzError):
     """The action is gated behind an explicit owner approval."""
+
+
+class VoiceUnavailable(ProviderError):
+    """The chosen narration engine (Kokoro) failed; the producer re-narrates the whole video with the fallback voice."""
