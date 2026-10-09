@@ -27,7 +27,7 @@ YouTube projects (Breakdown, Monmouth County & Politics) are separate and owner-
 | Part | What | Status |
 |---|---|---|
 | 1 | The guideline system: file, enforcement, one experiment per channel, proposals and owner approval, CLI, dashboard page, new-channel gate, docs | **Done**, merged to `main` 2026-10-08 (`fb57dad`), 416 tests |
-| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, credits and disclosure in the description, none on screen); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done**, merged to `main` 2026-10-08. **B done**, merged to `main` 2026-10-08 (562 tests): local picture-matching check (live), no credits or disclosure on screen, credits on every platform, full-bleed default. C, D not started |
+| 2 | Production abilities the guideline needs. Split into pieces (order owner-approved 2026-10-08): **A** script checks (hook word limit, no question, no definition opening, genre gate); **B** picture and layout (SigLIP image-to-narration relevance gate, full-bleed default, credits and disclosure in the description, none on screen); **C** sound (Kokoro TTS, -14 LUFS mastering); **D** stock-video providers | **A done**, merged to `main` 2026-10-08. **B done**, merged to `main` 2026-10-08 (562 tests): local picture-matching check (live), no credits or disclosure on screen, credits on every platform, full-bleed default. **C done**, merged to `main` 2026-10-09: Kokoro voice Bella (owner-set), whole-video fallback to kristin, every video levelled to -14 LUFS. D not started |
 | 3 | The guideline text for Backhouse Explainers, drafted from `docs/VIDEO_QUALITY_RESEARCH.md`; the owner approves it | Not started (a test-only draft exists: `data/tests/2026-10-07-guideline-test/guideline-TEST-DRAFT.md`) |
 | Switches | Kill switch = the agent does nothing (only YouTube's required data deletion runs); new posting switch `python -m aimz posting on|off|status` pauses only posting | **Done**, merged 2026-10-08 (owner decision 2026-10-07) |
 | Constitution | Sections 1, 3, 4 and 8 rewritten (owner-approved 2026-10-07) | **Done** |
@@ -249,10 +249,23 @@ Do these in order.
        the description and the platform labels (YouTube `containsSyntheticMedia`, TikTok `is_aigc`, Bluesky
        post text). `docs/COMPLIANCE.md` is updated.
      * The default layout is now `full_bleed` when no guideline locks it.
-     * **Owner decision pending: confirm the low picture-check floor (0.00005).**
+     * **Owner confirmed the low picture-check floor (0.00005) on 2026-10-09.**
    * **Still to do:**
-     * **C, sound:** Kokoro-82M voice (Apache-2.0, CPU) as a voice option the guideline can lock; -14 LUFS
-       mastering. This is next.
+     * **C, sound: merged to `main` 2026-10-09.** Kokoro-82M (`kokoro-onnx`, optional extra `voice`, model in
+       `data/models/kokoro`, `doctor --fix` downloads it). Cleared Kokoro voice: `kokoro:af_bella` only. A voice
+       router sends `kokoro:` voices to Kokoro; if Kokoro fails, the whole video is narrated again with
+       `en_US-kristin-medium`, `video_settings` records `voice_fallback`, and `aimz status` lists
+       `voice_unavailable`. `aimz voice set|show`: the owner set Bella; the AI cannot change an owner-set voice.
+       Loudness: the spec's two-pass `loudnorm` could not meet -14 LUFS / -1 dBTP on real narration (Piper peaks
+       at 0 dBTP; ffmpeg's AAC at 128k mono adds ~4 dB of peak), so the final mix is measured, given a gain
+       (re-measured up to 3 times), run through a 4x-oversampled limiter at -2 dBFS and written as 48 kHz stereo
+       AAC 128k. Measured on all six voices and every music/sfx setting: -14.1 to -14.5 LUFS, about -4.7 dBTP.
+       Samples to listen to: `data/tests/2026-10-09-sound/`. Spec: `docs/superpowers/specs/2026-10-09-sound-design.md`;
+       plan: `docs/superpowers/plans/2026-10-09-sound.md`.
+     * **D, stock video:** next. The constitution §5 media sentence is in (2026-10-09); the owner's Pexels and
+       Pixabay keys are still needed (`docs/OWNER_TODO.md` A4).
+     * **Owner question 2026-10-09 (open):** the "X is a..." hook check also blocks some good hooks; the owner
+       asked whether it can pass good definition openings and fail bad ones. Proposal in the CEO brief.
      * **D, stock video:** stock-video providers.
      * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
    * **After piece A is merged:** the live database gets migration `0008` automatically on the next run. Back up
@@ -287,3 +300,4 @@ Do these in order.
 | 2026-10-07/08 | Test + switches | Rendered a 31 s test video in an isolated copy with a test-only guideline (`data/tests/2026-10-07-guideline-test/`). The upload failed because the YouTube login expired. Owner decided: auto-posting under guardrails, kill switch = do nothing, new posting switch; built and reviewed. Constitution sections 1/3/4/8 applied. Merged to `main` (`fb57dad`), 416 tests; live `aimz status` checked. | Section 6 (handoff) |
 | 2026-10-08 | Part 2, piece A | Split part 2 into pieces A to D (order owner-approved). Owner logged in to YouTube; test video uploaded unlisted (https://www.youtube.com/watch?v=fAO4zO8QbpY). Built piece A on `feat/script-checks`: guideline hook check keys, critic code checks for the hook, guideline genre in `identity.genre_line`, editor genre gate with `ideas.genre_checked_version` (migration `0008`). 448 tests pass; ruff and mypy clean. Not merged; live database not migrated yet. | Merge piece A (back up the database first); then spec for piece B |
 | 2026-10-08 | Part 2, piece B | Built piece B on `feat/picture-relevance`: local SigLIP 2 picture-matching check (ONNX, optional extra `vision`, `doctor --fix` downloads the model), per-beat `relevance` entries in run notes, text card when nothing passes, fallback to old picture choice with an `aimz status` warning. Calibrated on 50 hand-labelled pairs (floor 0.00005, deliberately low). Live smoke test fixed Wikimedia preview width (330 px). No credits or disclosure on screen; credit and disclosure in the description and platform labels; `docs/COMPLIANCE.md` updated; default layout `full_bleed`. Not merged. | Merge piece B (install the `vision` extra into `.venv`, run `doctor --fix`); owner confirms the floor; then spec for piece C (Kokoro voice, -14 LUFS), then D |
+| 2026-10-09 | Part 2, piece C | Owner confirmed the picture floor and approved the constitution §5 media sentence (applied). Built piece C on `feat/sound`: Kokoro provider (Bella), voice router with whole-video kristin fallback and `voice_unavailable` alert, `aimz voice set/show` (owner voice the AI cannot change), loudness levelling. Live voices showed two-pass loudnorm misses the target; replaced by measured gain + oversampled limiter + stereo AAC (-14.1 to -14.5 LUFS, ~-4.7 dBTP on all voices). Merged; `aimz voice set kokoro:af_bella` run. | Owner: hook-check answer; then piece D (needs Pexels/Pixabay keys) |

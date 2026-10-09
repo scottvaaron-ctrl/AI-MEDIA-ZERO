@@ -84,6 +84,8 @@ Notes:
 _7 Oct: sections 1, 3, 4 and 8 were rewritten for the guideline rescope with your approval. The section 1
 ad-revenue line and the section 8 items below were part of the superseded 30 Sep plan; only the section 5
 media sentence (stock photos and video) is still open._
+**Done 9 Oct: the §5 media sentence was applied with your approval (commit e0221b8). §1 and §8 below are
+superseded by the 7 Oct rescope; nothing left in A3.**
 The wording to paste is drafted in `docs/PLAN_FULL_CONTROL.md` **section 8**:
 - [ ] Replace §1 Mission: add "find a niche that earns passive ad revenue" and keep "learning first,
       never flood a platform".
