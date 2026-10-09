@@ -399,6 +399,8 @@ class RenderResult(BaseModel):
     thumbnail_path: str
     captions_path: str
     duration_s: float
+    loudness_lufs: float | None = None  # integrated loudness of the final video (target -14)
+    true_peak_dbtp: float | None = None  # true peak of the final video (target at most -1)
 
 
 class PublishResult(BaseModel):

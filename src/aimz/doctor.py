@@ -109,6 +109,18 @@ def run_checks(svc: Services, fix: bool = False) -> list[Check]:
             Check("Piper TTS", h.ok, h.detail, h.fix or "pip install piper-tts ; aimz doctor --fix")
         )
 
+    # Kokoro voice model (optional: without it, Kokoro voices fall back to Piper's kristin)
+    from aimz.providers.tts import kokoro
+
+    h = kokoro.KokoroTTSProvider(env.kokoro_model_dir, auto_download=False).health()
+    if not h.ok and fix and kokoro.packages_importable():
+        try:
+            kokoro.download_model(env.kokoro_model_dir)
+            h = kokoro.KokoroTTSProvider(env.kokoro_model_dir, auto_download=False).health()
+        except Exception as exc:
+            h.detail += f" (auto-download failed: {exc})"
+    checks.append(Check("Kokoro voice", h.ok, h.detail, h.fix, required=False))
+
     # SigLIP picture-relevance model (optional; only used when assets.relevance.enabled)
     from aimz.providers.image import relevance
 

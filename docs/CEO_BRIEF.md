@@ -1,6 +1,14 @@
 # AI Media Zero: Brief for the CEO and the CEO's AI Agent
 
-_Updated 2026-10-08: **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
+_Updated 2026-10-09: **Part 2 piece C (sound) is merged and live: new videos are narrated by the Kokoro voice
+"Bella" (owner-chosen; the AI cannot change it), and every video is levelled to YouTube's -14 LUFS (measured
+-14.1 to -14.5 on all voices, peaks well under the limit). If Kokoro fails, the whole video uses the old voice
+(kristin) and `aimz status` says so. Owner decisions 9 Oct: picture-check floor kept; constitution §5 media
+sentence applied (stock photos/video and free music allowed; Pexels/Pixabay keys still needed for piece D).
+Open owner question: the "X is a..." hook check — proposal: keep the code check as a trigger, and let an AI
+second look pass a flagged hook only when its first clause states something surprising (needs owner yes).
+Still due: YouTube screencast by Thu 15 Oct; OAuth consent screen to "In production".**
+Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
 channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but
 changes nothing until the guideline is written. **8 Oct: owner logged in to YouTube again (uploads resume; the
 consent screen still needs "In production" so it stops expiring weekly). The 7 Oct test video is up unlisted:

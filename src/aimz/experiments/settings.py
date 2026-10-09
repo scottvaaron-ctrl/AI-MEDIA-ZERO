@@ -23,7 +23,7 @@ from typing import Any
 
 from aimz.db import Database
 from aimz.providers.audio.library import music_moods, sfx
-from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES
+from aimz.providers.tts.router import cleared_voices
 from aimz.providers.video.ffmpeg_renderer import CAPTION_COLORS, CAPTION_MARGINS
 from aimz.providers.video.fonts import shipped_fonts
 from aimz.util import now_iso
@@ -72,7 +72,7 @@ CATALOG: dict[str, SettingDef] = {
         SettingDef(
             "speech_length_scale",
             "production",
-            "Narration speed as Piper's length_scale: 1.0 is the voice's normal pace, above 1 is slower, below 1 faster.",
+            "Narration speed as a length scale: 1.0 is the voice's normal pace, above 1 is slower, below 1 faster.",
             "number",
             {"min": 0.75, "max": 1.35},
         ),
@@ -96,7 +96,7 @@ CATALOG: dict[str, SettingDef] = {
             "Narration voice. Only licence-cleared voices (public-domain recordings, commercial use allowed). "
             "There is no default: until you open or lock it, every cleared voice is tried.",
             "choice",
-            {"choices": list(COMMERCIAL_SAFE_VOICES)},
+            {"choices": cleared_voices()},
             always_on=True,
         ),
         SettingDef(
@@ -205,7 +205,8 @@ CATALOG: dict[str, SettingDef] = {
             "music_volume_db",
             "production",
             "Music gain in dB before ducking. Measured under a narrator at about -16 dB RMS: -30 gives about "
-            "-43 dB (barely there), -14 about -27 dB (a quiet bed), -6 about -19 dB (clearly present).",
+            "-43 dB (barely there), -14 about -27 dB (a quiet bed), -6 about -19 dB (clearly present). This sets "
+            "the mix relative to the voice; the whole video is then levelled to -14 LUFS.",
             "number",
             {"min": -30.0, "max": -6.0},
         ),
@@ -465,6 +466,13 @@ class SettingsEngine:
         }
         best = max(options, key=lambda v: draws[enc(v)])
         return best, "bandit"
+
+    def overwrite(self, video_id: str, variable: str, value: Any, source: str) -> None:
+        """Replace a value already recorded for this video (e.g. the voice after a fallback)."""
+        self.db.execute(
+            "INSERT OR REPLACE INTO video_settings (video_id, variable, value, source, created_at) VALUES (?,?,?,?,?)",
+            [video_id, variable, enc(value), source, now_iso()],
+        )
 
     def record(self, video_id: str, variable: str, value: Any, source: str) -> None:
         """Record a value that was not assigned here (e.g. the hour a video was posted). First write wins."""

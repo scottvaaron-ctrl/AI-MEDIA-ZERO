@@ -41,7 +41,9 @@ from aimz.providers.publishers.tiktok import TikTokPackagePublisher
 from aimz.providers.publishers.tiktok_direct import TikTokClient, TikTokDirectPostPublisher
 from aimz.providers.publishers.youtube import YouTubePublisher
 from aimz.providers.research.rss import RSSResearchProvider
+from aimz.providers.tts.kokoro import KokoroTTSProvider
 from aimz.providers.tts.piper import PiperTTSProvider
+from aimz.providers.tts.router import VoiceRouterTTS
 from aimz.providers.tts.silent import SilentTTSProvider
 from aimz.providers.video.ffmpeg_renderer import FFmpegRenderer
 from aimz.settings import AppConfig, EnvSettings, load_app_config, load_env_settings, load_pronunciations
@@ -126,13 +128,22 @@ def build_services(
     if env.tts_provider == "silent":
         tts = SilentTTSProvider()
     else:
-        tts = PiperTTSProvider(
-            env.piper_voices_dir,
-            env.piper_voice,
-            env.piper_auto_download,
-            env.piper_length_scale,
-            load_pronunciations(env.config_dir),
-            user_agent=env.user_agent,
+        pronunciations = load_pronunciations(env.config_dir)
+        tts = VoiceRouterTTS(
+            PiperTTSProvider(
+                env.piper_voices_dir,
+                env.piper_voice,
+                env.piper_auto_download,
+                env.piper_length_scale,
+                pronunciations,
+                user_agent=env.user_agent,
+            ),
+            KokoroTTSProvider(
+                env.kokoro_model_dir,
+                env.kokoro_auto_download,
+                pronunciations,
+                length_scale=env.piper_length_scale,
+            ),
         )
 
     # ---- visuals ---------------------------------------------------------------------

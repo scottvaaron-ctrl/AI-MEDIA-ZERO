@@ -343,7 +343,9 @@ def test_capability_gated_dial_records_guideline_fallback(svc) -> None:  # noqa:
         "g5", IDEA, {**DEFAULTS, "clip_scenes": "off"}, [], random.Random(1), unavailable={"clip_scenes"}
     )
     assert (a.values["clip_scenes"], a.sources["clip_scenes"]) == ("off", "guideline_fallback")
-    row = svc.db.one("SELECT value, source FROM video_settings WHERE video_id='g5' AND variable='clip_scenes'")
+    row = svc.db.one(
+        "SELECT value, source FROM video_settings WHERE video_id='g5' AND variable='clip_scenes'"
+    )
     assert row["source"] == "guideline_fallback" and json.loads(row["value"]) == "off"
 
 

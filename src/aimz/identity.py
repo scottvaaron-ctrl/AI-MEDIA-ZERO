@@ -71,6 +71,9 @@ def propose(
 ) -> str | None:
     """Apply the strategist's identity change. Returns why it was refused, or None when applied."""
     current = load(db)
+    voice = proposal.get("voice")
+    if current.get("owner_voice") and voice not in (None, "") and voice != current.get("voice"):
+        return "the owner set the voice"
     new = {**current}
     for key in ("genre", "genre_note", "voice", "template", "palette_hue"):
         value = proposal.get(key)
@@ -113,6 +116,34 @@ def propose(
     return None
 
 
+def set_owner_voice(db: Database, name: str, voice: str, catalog: dict[str, Any]) -> str | None:
+    """The owner fixes the channel's voice (``aimz voice set``); the AI cannot change it afterwards.
+
+    Returns why it was refused (not a cleared voice, or another channel's), or None when set."""
+    value, why = catalog["voice"].check(voice)
+    if why:
+        return why
+    for other, ident in others(name).items():
+        if ident.get("voice") == value:
+            return f"voice {value} is channel '{other}''s; choose a different one"
+    current = load(db)
+    history = list(current.get("history") or [])
+    history.append({"voice": current.get("voice"), "until": now_iso(), "set_by": "owner"})
+    db.set_state(
+        IDENTITY_KEY,
+        json.dumps(
+            {
+                **current,
+                "voice": value,
+                "owner_voice": True,
+                "history": history[-10:],
+                "updated_at": now_iso(),
+            }
+        ),
+    )
+    return None
+
+
 def fixed_settings(db: Database) -> dict[str, Any]:
     """The identity's voice and look, used for every video of this channel."""
     ident = load(db)
@@ -151,6 +182,8 @@ def prompt_text(db: Database, name: str, starting_genres: list[str]) -> str:
                 for k, v in taken.items()
             )
         )
+    if ident.get("owner_voice"):
+        lines.append(f"The voice {ident.get('voice')} is set by the owner: do not propose a different voice.")
     rejected = db.get_state(REJECTED_KEY)
     if rejected:
         lines.append(f"Your last identity change that was refused: {rejected}")

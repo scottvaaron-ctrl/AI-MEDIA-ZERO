@@ -1,0 +1,165 @@
+"""Every final video is levelled to -14 LUFS with true peak at or below -1 dBTP (two-pass loudnorm)."""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from aimz.core.errors import ProviderError
+from aimz.domain.models import Scene, Timeline
+from aimz.providers.audio.library import music_moods, track_for
+from aimz.providers.video.ffmpeg_renderer import (
+    LIMIT_DBFS,
+    LOUDNORM,
+    FFmpegRenderer,
+    level_chain,
+    parse_loudnorm_json,
+    resolve_ffmpeg,
+)
+
+SAMPLE = """[Parsed_loudnorm_0 @ 000001]
+{
+\t"input_i" : "-23.50",
+\t"input_tp" : "-5.20",
+\t"input_lra" : "1.00",
+\t"input_thresh" : "-33.80",
+\t"output_i" : "-14.02",
+\t"output_tp" : "-1.00",
+\t"output_lra" : "1.00",
+\t"output_thresh" : "-24.30",
+\t"normalization_type" : "linear",
+\t"target_offset" : "0.02"
+}
+"""
+
+
+def test_parse_loudnorm_json() -> None:
+    m = parse_loudnorm_json("size=N/A time=00:00:02\n" + SAMPLE)
+    assert m == {
+        "input_i": -23.5,
+        "input_tp": -5.2,
+        "input_lra": 1.0,
+        "input_thresh": -33.8,
+        "target_offset": 0.02,
+    }
+    assert parse_loudnorm_json(SAMPLE.replace('"-23.50"', '"-inf"')) is None  # silent audio
+    assert parse_loudnorm_json("no json here") is None
+    assert parse_loudnorm_json("{ not json") is None
+
+
+def test_level_chain_string() -> None:
+    s = level_chain(6.5)
+    assert s.startswith("aformat=sample_fmts=flt,volume=6.50dB,aresample=192000,alimiter=limit=")
+    assert f"limit={10 ** (LIMIT_DBFS / 20):.4f}" in s and "level=disabled" in s
+    assert s.endswith("aresample=48000")
+
+
+def _tone(path: Path, gain_db: float | None, seconds: float = 3.0) -> None:
+    """A sine at ``gain_db``; None gives "peaky" audio like real narration: a quiet body with full-scale clicks."""
+    ffmpeg = resolve_ffmpeg("")
+    assert ffmpeg
+    src = (
+        f"sine=frequency=440:duration={seconds}"
+        if gain_db is not None
+        else rf"aevalsrc=0.03*sin(2*PI*440*t)+if(lt(mod(t\,0.25)\,0.003)\,0.95\,0):s=24000:d={seconds}"
+    )
+    af = f"volume={gain_db}dB" if gain_db is not None else "anull"
+    subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", src, "-af", af,
+         "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(path)],
+        check=True,
+    )  # fmt: skip
+
+
+def _timeline(svc: Any, gain_db: float | None, music: bool) -> Timeline:
+    ctx = svc.ctx()
+    scenes, cursor = [], 0.0
+    for i in range(2):
+        wav = svc.env.data_dir / f"tone{i}.wav"
+        _tone(wav, gain_db)
+        png = svc.cards.render_card(
+            ctx, {"kind": "text_card", "seed": "v", "headline": f"Scene {i}"}, svc.env.data_dir / f"s{i}.png"
+        )
+        scenes.append(
+            Scene(idx=i, start_s=cursor, duration_s=3.0, narration="Tone.", caption="", audio_path=str(wav),
+                  image_path=str(png), caption_chunks=[(0.0, 3.0, "Tone.")], zoom="none")
+        )  # fmt: skip
+        cursor += 3.0
+    extra: dict[str, Any] = {}
+    if music:
+        track = track_for(music_moods()[0])
+        assert track is not None
+        extra = {"music_path": str(track), "music_volume_db": -16.0}
+    return Timeline(video_id="v", title="t", scenes=scenes, total_duration_s=cursor, fps=24, **extra)
+
+
+@pytest.mark.parametrize("gain_db", [-6.0, 12.0, None], ids=["quiet", "loud", "peaky"])
+@pytest.mark.parametrize("music", [False, True], ids=["no-music", "music"])
+def test_quiet_and_loud_tones_land_at_minus_14(
+    svc, ffmpeg_available: bool, gain_db: float | None, music: bool
+) -> None:  # noqa: ANN001
+    if not ffmpeg_available:
+        pytest.skip("ffmpeg not available")
+    renderer = FFmpegRenderer(svc.env.ffmpeg_bin, svc.env.ffprobe_bin)
+    result = renderer.render(svc.ctx(), _timeline(svc, gain_db, music), svc.env.data_dir / "render")
+    assert result.loudness_lufs is not None and result.true_peak_dbtp is not None
+    assert -15.0 <= result.loudness_lufs <= -13.0
+    assert result.true_peak_dbtp <= -1.0
+    assert renderer.measure_loudness(Path(result.video_path)) == pytest.approx(
+        (result.loudness_lufs, result.true_peak_dbtp)
+    )
+
+
+def test_pass1_failure_falls_back_to_single_pass(
+    svc, ffmpeg_available: bool, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:  # noqa: ANN001
+    if not ffmpeg_available:
+        pytest.skip("ffmpeg not available")
+    renderer = FFmpegRenderer(svc.env.ffmpeg_bin, svc.env.ffprobe_bin)
+    real_capture = renderer._run_capture
+    seen: list[list[str]] = []
+
+    def capture(args: list[str], cwd: Path, label: str) -> str:
+        if "-vn" in args:  # pass 1 of the final mix
+            raise ProviderError("ffmpeg loudness pass 1 failed")
+        return real_capture(args, cwd, label)
+
+    real_run = renderer._run
+
+    def run(args: list[str], cwd: Path, label: str) -> None:
+        seen.append(args)
+        real_run(args, cwd, label)
+
+    monkeypatch.setattr(renderer, "_run_capture", capture)
+    monkeypatch.setattr(renderer, "_run", run)
+    with caplog.at_level(logging.INFO):
+        renderer.render(svc.ctx(), _timeline(svc, -6.0, False), svc.env.data_dir / "render")
+    final = next(a for a in seen if "list.txt" in a)
+    graph = final[final.index("-filter_complex") + 1]
+    assert LOUDNORM in graph and "alimiter" not in graph
+    assert "48000" in final and final[final.index("-ac") + 1] == "2"
+    assert any("single-pass loudnorm" in r.getMessage() for r in caplog.records)
+
+
+def test_near_silent_audio_is_not_boosted_into_hiss(
+    svc, ffmpeg_available: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001
+    if not ffmpeg_available:
+        pytest.skip("ffmpeg not available")
+    from aimz.providers.video import ffmpeg_renderer
+
+    renderer = FFmpegRenderer(svc.env.ffmpeg_bin, svc.env.ffprobe_bin)
+    gains: list[float] = []
+    real_chain = ffmpeg_renderer.level_chain
+
+    def spy(gain_db: float) -> str:
+        gains.append(gain_db)
+        return real_chain(gain_db)
+
+    monkeypatch.setattr(ffmpeg_renderer, "level_chain", spy)
+    renderer.render(svc.ctx(), _timeline(svc, -45.0, False), svc.env.data_dir / "render")
+    assert gains and max(gains) <= ffmpeg_renderer.MAX_GAIN_DB == 20.0

@@ -74,7 +74,7 @@ def main() -> int:
         if definition.kind != "production" or (args.only and var != args.only):
             continue
         for value, skip in sample_values(var, definition, present):
-            name = f"{var}={value}".replace("/", "_")
+            name = f"{var}={value}".replace("/", "_").replace(":", "_")  # ":" (kokoro:...) is not allowed in Windows paths
             if skip:
                 results.append({"sample": name, "ok": None, "problems": [skip]})
                 print(f"SKIP {name}: {skip}")

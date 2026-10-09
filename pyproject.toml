@@ -36,6 +36,7 @@ youtube = [
     "google-auth-httplib2>=0.2",
 ]
 vision = ["tokenizers>=0.20", "onnxruntime>=1.17"]
+voice = ["kokoro-onnx>=0.4"]
 dev = [
     "pytest>=8.2",
     "pytest-cov>=5.0",
@@ -43,7 +44,7 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML",
 ]
-all = ["ai-media-zero[tts,youtube,vision,dev]"]
+all = ["ai-media-zero[tts,youtube,vision,voice,dev]"]
 
 [project.scripts]
 aimz = "aimz.cli:app"

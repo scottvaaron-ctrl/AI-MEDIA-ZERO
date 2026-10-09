@@ -97,6 +97,11 @@ approval, plus the kill switch).
   commercial purpose"; used by every video up to 1 Oct 2026), `joe` (CC0 data but fine-tuned from
   lessac), `bryce` (fine-tuned from an unreleased voice), `ryan`, `hfc_female`, `hfc_male`
   (CC BY-NC-SA).
+- **Kokoro voice (2026-10-09).** Kokoro-82M's weights and voicepacks are Apache-2.0 (hexgrad/Kokoro-82M),
+  run locally through `kokoro-onnx` (MIT); espeak-ng (GPL) is used locally for phonemes, as Piper already does,
+  and does not affect the audio's licence. Kokoro voices are cleared by the owner's ear test: only
+  `kokoro:af_bella` (`COMMERCIAL_SAFE_KOKORO_VOICES` in `providers/tts/kokoro.py`); any other id is refused.
+  It is the channel's owner-set voice (`aimz voice set`). AI disclosure is unchanged (description and labels).
 - **Caption fonts.** Only fonts listed in `assets/fonts/licenses.json` with a free licence (OFL,
   Apache, UFL, CC0) are offered; each font ships with its licence text. The renderer's own default
   font (`FONT_FILE`, Arial on Windows) is used from the system and not redistributed.

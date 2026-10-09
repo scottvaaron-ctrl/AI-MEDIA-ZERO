@@ -733,3 +733,20 @@ def test_cooldown_after_guideline_won_or_safety_stop(svc, conclusion: str) -> No
     _published(svc, 5)
     assert eng.cooldown_left("G-hook") == 15
     assert eng.validate(_gp("G-hook", "Open on a question.")) == "G-hook is cooling down for 15 more videos"
+
+
+def test_videos_narrated_with_the_fallback_voice_are_left_out(svc) -> None:  # noqa: ANN001
+    # A Kokoro outage narrates a video with kristin: voice would become a hidden second variable.
+    eng = ExperimentEngine(svc.db, default_min_sample=2, max_concurrent=2, min_confidence=0.85)
+    eid = eng.propose(PROP)
+    assert eid
+    rows = _rows(eid, [30, 31, 32], [70, 72, 71])
+    for i, row in enumerate(rows):
+        row["video_id"] = f"vid_{i}"
+    svc.db.execute(
+        "INSERT INTO video_settings (video_id, variable, value, source, created_at) VALUES (?,?,?,?,?)",
+        ["vid_3", "voice_fallback", '"kokoro:af_bella"', "voice_fallback", "2026-10-09T00:00:00+00:00"],
+    )
+    res = eng.evaluate(dict(svc.db.get("experiments", eid)), rows)
+    assert res["control"]["n"] == 3 and res["treatment"]["n"] == 2
+    assert res["excluded_voice_fallback"] == 1

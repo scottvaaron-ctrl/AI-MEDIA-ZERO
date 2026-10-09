@@ -13,7 +13,9 @@ relative paths; this sidesteps Windows drive-letter escaping inside filter strin
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -62,6 +64,45 @@ def _fmt_ass_time(t: float) -> str:
     m = int((t % 3600) // 60)
     s = t % 60
     return f"{h:d}:{m:02d}:{s:05.2f}"
+
+
+# Final loudness (YouTube plays back at about -14 LUFS and only turns loud audio down).
+LOUDNORM = "loudnorm=I=-14:TP=-1:LRA=11"  # the fallback leveller, and the loudness meter
+LOUDNESS_TARGET = -14.0
+_LOUDNORM_KEYS = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+
+
+def parse_loudnorm_json(stderr: str) -> dict[str, float] | None:
+    """The measured values from loudnorm's ``print_format=json`` block; None if absent or not finite (silence)."""
+    start = stderr.rfind("{")
+    end = stderr.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        data = json.loads(stderr[start : end + 1])
+        out = {k: float(data[k]) for k in _LOUDNORM_KEYS}
+    except (ValueError, KeyError, TypeError):
+        return None
+    return out if all(math.isfinite(v) for v in out.values()) else None
+
+
+# Real narration peaks near full scale while its body is quiet, so loudnorm alone cannot reach -14 LUFS without
+# exceeding the peak limit (it falls back to dynamic mode, which lands near -15.5 on a Short). Instead: one measured
+# gain, then a limiter run at 4x the sample rate (close to a true-peak limiter). Measured on the live voices
+# 2026-10-09: -14.1 to -14.6 LUFS, true peak about -4.5 dBTP after AAC.
+LIMIT_DBFS = -2.0
+LEVEL_TOLERANCE_LU = 0.3  # stop correcting the gain once this close to the target
+LEVEL_CORRECTIONS = 3  # the limiter takes some loudness back; re-measure at most this many times
+# Near-silent audio (a failed voice, a music-only bed) would otherwise be boosted by 50 dB into audible hiss.
+MAX_GAIN_DB = 20.0
+
+
+def level_chain(gain_db: float) -> str:
+    """Gain in float (16-bit input would clip before the limiter), then the oversampled peak limiter."""
+    return (
+        f"aformat=sample_fmts=flt,volume={gain_db:.2f}dB,aresample=192000,"
+        f"alimiter=limit={10 ** (LIMIT_DBFS / 20):.4f}:attack=2:release=80:level=disabled,aresample=48000"
+    )
 
 
 RENDER_TIMEOUT_S = 1800  # a 60-90 s Short renders in a few minutes; this is only a hang guard
@@ -187,6 +228,71 @@ class FFmpegRenderer(VideoProvider):
         if proc.returncode != 0:
             raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
 
+    def _mix_loudness(self, timeline: Timeline, work: Path, chain: str | None) -> float | None:
+        """Integrated loudness of the final audio mix, optionally after ``chain``; None for silence."""
+        tail = (f"{chain}," if chain else "") + LOUDNORM + ":print_format=json"
+        inputs, args = self._audio_mix(timeline, work, None, tail)
+        err = self._run_capture(
+            ["-f", "concat", "-safe", "0", "-i", "list.txt", *inputs, *args, "-vn", "-f", "null", "-"],
+            work,
+            "loudness measurement",
+        )
+        m = parse_loudnorm_json(err)
+        return m["input_i"] if m else None
+
+    def _level_gain(self, timeline: Timeline, work: Path) -> float | None:
+        """The gain that brings the mix, after the limiter, to -14 LUFS; None when it cannot be measured."""
+        try:
+            first = self._mix_loudness(timeline, work, None)
+            if first is None:
+                return None
+            gain = min(MAX_GAIN_DB, LOUDNESS_TARGET - first)
+            for _ in range(LEVEL_CORRECTIONS):
+                now = self._mix_loudness(timeline, work, level_chain(gain))
+                if now is None or abs(LOUDNESS_TARGET - now) <= LEVEL_TOLERANCE_LU:
+                    break
+                gain = min(MAX_GAIN_DB, gain + LOUDNESS_TARGET - now)
+            return gain
+        except ProviderError as exc:
+            log.warning("loudness measurement: %s", exc)
+            return None
+
+    def _run_capture(self, args: list[str], cwd: Path, label: str) -> str:
+        """Like ``_run`` at log level info, returning ffmpeg's stderr (where loudnorm prints its JSON)."""
+        assert self.ffmpeg
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "info", "-nostats", "-y", *args]
+        try:
+            proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=RENDER_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(f"ffmpeg {label} did not finish within {RENDER_TIMEOUT_S} s") from exc
+        if proc.returncode != 0:
+            raise ProviderError(f"ffmpeg {label} failed ({proc.returncode}): {proc.stderr[-1500:]}")
+        return proc.stderr
+
+    def measure_loudness(self, path: Path) -> tuple[float, float] | None:
+        """(integrated LUFS, true peak dBTP) of a file's audio, or None when it cannot be measured."""
+        try:
+            err = self._run_capture(
+                [
+                    "-i",
+                    str(Path(path).resolve()),
+                    "-map",
+                    "0:a",
+                    "-af",
+                    LOUDNORM + ":print_format=json",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                Path(path).parent,
+                "loudness check",
+            )
+        except ProviderError as exc:
+            log.warning("loudness check failed: %s", exc)
+            return None
+        m = parse_loudnorm_json(err)
+        return (m["input_i"], m["input_tp"]) if m else None
+
     def probe_duration(self, path: Path) -> float:
         if self.ffprobe:
             try:
@@ -271,8 +377,11 @@ class FFmpegRenderer(VideoProvider):
 
     # -- audio bed ---------------------------------------------------------------------
     @staticmethod
-    def _audio_mix(timeline: Timeline, work: Path, ass_filter: str) -> tuple[list[str], list[str]]:
-        """Inputs and filter arguments for the final pass: captions, plus music and cut sounds when set.
+    def _audio_mix(
+        timeline: Timeline, work: Path, ass_filter: str | None, tail: str
+    ) -> tuple[list[str], list[str]]:
+        """Inputs and filter arguments for the final pass: captions, music and cut sounds when set, and the
+        loudness filter ``tail`` at the end of the audio. ``ass_filter=None`` builds the audio only (to measure it).
 
         Music loops for the whole video, fades in and out, and is ducked under the narration with a
         side-chain compressor, so it never covers the voice.
@@ -280,10 +389,8 @@ class FFmpegRenderer(VideoProvider):
         music = Path(timeline.music_path) if timeline.music_path else None
         sfx = Path(timeline.sfx_path) if timeline.sfx_path else None
         cuts = [c for c in timeline.sfx_times if c > 0.2] if sfx else []
-        if (music is None or not music.exists()) and not cuts:
-            return [], ["-vf", ass_filter]
         inputs: list[str] = []
-        parts = [f"[0:v]{ass_filter}[v]"]
+        parts = [f"[0:v]{ass_filter}[v]"] if ass_filter is not None else []
         audio = "[0:a]"
         n = 1
         if music is not None and music.exists():
@@ -315,7 +422,9 @@ class FFmpegRenderer(VideoProvider):
             delayed = "".join(f"[d{k}]" for k in range(len(cuts)))
             parts.append(f"{audio}{delayed}amix=inputs={len(cuts) + 1}:duration=first:normalize=0[aout]")
             audio = "[aout]"
-        return inputs, ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", audio]
+        parts.append(f"{audio}{tail}[afinal]")
+        maps = ["-map", "[v]"] if ass_filter is not None else []
+        return inputs, ["-filter_complex", ";".join(parts), *maps, "-map", "[afinal]"]
 
     # -- render ------------------------------------------------------------------------
     def render(self, ctx: ProviderContext, timeline: Timeline, out_dir: Path) -> RenderResult:
@@ -414,7 +523,11 @@ class FFmpegRenderer(VideoProvider):
                 ass_filter = "ass=captions.ass:fontsdir=fonts"
 
             final = out_dir / "video.mp4"
-            mix_inputs, mix_args = self._audio_mix(timeline, work, ass_filter)
+            gain = self._level_gain(timeline, work)
+            if gain is None:
+                log.info("loudness measurement failed; single-pass loudnorm")
+            tail = level_chain(gain) if gain is not None else LOUDNORM
+            mix_inputs, mix_args = self._audio_mix(timeline, work, ass_filter, tail)
             self._run(
                 [
                     "-f",
@@ -437,6 +550,12 @@ class FFmpegRenderer(VideoProvider):
                     "aac",
                     "-b:a",
                     "128k",
+                    "-ar",
+                    "48000",
+                    # Stereo: the upmix puts each channel 3 dB lower at the same loudness (BS.1770 sums channels); that headroom
+                    # absorbs the peak ffmpeg's AAC adds (about 4 dB on mono speech). An upmix without it loses that margin.
+                    "-ac",
+                    "2",
                     "-movflags",
                     "+faststart",
                     str(final.resolve()),
@@ -445,6 +564,11 @@ class FFmpegRenderer(VideoProvider):
                 "concat+captions",
             )
             duration = self.probe_duration(final)
+            loudness = self.measure_loudness(final)
+            if loudness is not None and (abs(loudness[0] - LOUDNESS_TARGET) > 1.0 or loudness[1] > -1.0):
+                log.warning(
+                    "final loudness %.1f LUFS / %.1f dBTP is off target (-14 LUFS, -1 dBTP)", *loudness
+                )
             poster = out_dir / "poster.png"
             self._run(
                 ["-ss", "0.5", "-i", str(final.resolve()), "-frames:v", "1", str(poster.resolve())],
@@ -462,4 +586,6 @@ class FFmpegRenderer(VideoProvider):
             thumbnail_path=str(poster),
             captions_path=str(srt_path),
             duration_s=duration,
+            loudness_lufs=loudness[0] if loudness else None,
+            true_peak_dbtp=loudness[1] if loudness else None,
         )

@@ -545,8 +545,17 @@ class ExperimentEngine:
         arms: dict[str, list[float]] = {"control": [], "treatment": []}
         # One sample per video: a video measured on two platforms is not two independent results.
         per_video: dict[tuple[str, str], list[float]] = {}
+        # A video narrated with the fallback voice (Kokoro unavailable) differs in a second variable: left out.
+        fallback = {
+            str(r["video_id"])
+            for r in self.db.query("SELECT video_id FROM video_settings WHERE variable='voice_fallback'")
+        }
+        excluded: set[str] = set()
         for row in perf_rows:
             if row.get("experiment_id") != experiment["id"] or row.get("experiment_arm") not in arms:
+                continue
+            if row.get("video_id") is not None and str(row["video_id"]) in fallback:
+                excluded.add(str(row["video_id"]))
                 continue
             v = kpi_value(row, kpi)
             if v is not None:
@@ -565,6 +574,7 @@ class ExperimentEngine:
             "p_treatment_better": round(conf, 4),
             "min_sample": min_n,
             "enough_sample": enough,
+            "excluded_voice_fallback": len(excluded),
         }
         status = experiment["status"]
         conclusion = experiment.get("conclusion")
