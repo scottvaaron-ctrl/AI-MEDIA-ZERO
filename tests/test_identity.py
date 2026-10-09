@@ -107,3 +107,54 @@ def test_the_strategist_prompt_offers_the_owners_starting_genres(svc) -> None:  
         "Starting options from the owner (take one, adapt it, or name your own): none"
         in identity.prompt_text(svc.db, "main", [])
     )
+
+
+# ---- owner-set voice (plan part 2, piece C) -----------------------------------------------------------
+
+
+def test_owner_sets_a_cleared_voice(svc) -> None:  # noqa: ANN001
+    db = svc.db
+    assert identity.propose(db, "main", {"genre": "Maps", "voice": "en_US-kristin-medium"}, CATALOG) is None
+    assert identity.set_owner_voice(db, "main", "kokoro:af_bella", CATALOG) is None
+    ident = identity.load(db)
+    assert ident["voice"] == "kokoro:af_bella" and ident["owner_voice"] is True
+    assert ident["genre"] == "Maps"  # the rest of the identity is kept
+    last = ident["history"][-1]
+    assert last["set_by"] == "owner" and last["voice"] == "en_US-kristin-medium"
+    assert identity.fixed_settings(db)["voice"] == "kokoro:af_bella"
+
+
+def test_owner_voice_refuses_uncleared(svc) -> None:  # noqa: ANN001
+    assert identity.set_owner_voice(svc.db, "main", "kokoro:am_fenrir", CATALOG)
+    assert "voice" not in identity.load(svc.db)
+
+
+def test_owner_voice_refuses_another_channels_voice(svc) -> None:  # noqa: ANN001
+    _other_channel("Space explainers", "kokoro:af_bella")
+    assert "space" in (identity.set_owner_voice(svc.db, "main", "kokoro:af_bella", CATALOG) or "")
+    assert "voice" not in identity.load(svc.db)
+
+
+def test_ai_cannot_change_owner_voice(svc) -> None:  # noqa: ANN001
+    db = svc.db
+    assert identity.set_owner_voice(db, "main", "kokoro:af_bella", CATALOG) is None
+    refused = identity.propose(db, "main", {"genre": "maps", "voice": "en_US-john-medium"}, CATALOG)
+    assert refused == "the owner set the voice"
+    assert identity.load(db)["voice"] == "kokoro:af_bella"
+    # A proposal that keeps the owner's voice (or names none) is still applied.
+    assert identity.propose(db, "main", {"genre": "maps"}, CATALOG) is None
+    assert "set by the owner" in identity.prompt_text(db, "main", [])
+
+
+def test_cli_voice_set_and_show(svc) -> None:  # noqa: ANN001
+    from typer.testing import CliRunner
+
+    from aimz.cli import app
+
+    runner = CliRunner()
+    bad = runner.invoke(app, ["voice", "set", "kokoro:am_fenrir"])
+    assert bad.exit_code != 0
+    out = runner.invoke(app, ["voice", "set", "kokoro:af_bella"])
+    assert out.exit_code == 0, out.output
+    shown = runner.invoke(app, ["voice", "show"])
+    assert shown.exit_code == 0 and "kokoro:af_bella" in shown.output and "owner" in shown.output

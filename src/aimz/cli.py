@@ -45,6 +45,8 @@ app.add_typer(strategy_app, name="strategy")
 app.add_typer(instance_app, name="instance")
 app.add_typer(guideline_app, name="guideline")
 app.add_typer(posting_app, name="posting")
+voice_app = typer.Typer(help="The channel's narration voice (owner).", no_args_is_help=True)
+app.add_typer(voice_app, name="voice")
 console = Console()
 
 
@@ -1222,3 +1224,34 @@ def instance_list() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     app()
+
+
+@voice_app.command("set")
+def voice_set(voice: Annotated[str, typer.Argument(help="A cleared voice, e.g. kokoro:af_bella")]) -> None:
+    """Set this channel's voice for every video. The AI cannot change it afterwards (a guideline lock still wins)."""
+    from aimz import identity
+    from aimz.experiments.settings import CATALOG
+
+    svc = _svc(quiet=True)
+    try:
+        why = identity.set_owner_voice(svc.db, svc.env.instance, voice, CATALOG)
+        if why:
+            console.print(f"[red]refused:[/] {why}", highlight=False)
+            raise typer.Exit(1)
+        console.print(f"voice set to [green]{voice}[/] by the owner", highlight=False)
+    finally:
+        svc.close()
+
+
+@voice_app.command("show")
+def voice_show() -> None:
+    """Show this channel's voice and who set it."""
+    from aimz import identity
+
+    svc = _svc(quiet=True)
+    try:
+        ident = identity.load(svc.db)
+        who = "set by the owner" if ident.get("owner_voice") else "chosen by the AI"
+        console.print(f"voice {ident.get('voice') or 'not chosen'} ({who})", markup=False, highlight=False)
+    finally:
+        svc.close()
