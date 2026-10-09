@@ -74,6 +74,8 @@ class EnvSettings:
     piper_length_scale: float
     siglip_model_dir: Path
     siglip_auto_download: bool
+    kokoro_model_dir: Path
+    kokoro_auto_download: bool
 
     ffmpeg_bin: str
     ffprobe_bin: str
@@ -151,6 +153,8 @@ def load_env_settings(project_root: Path | None = None, env_file: Path | None = 
         piper_length_scale=_env_float("PIPER_LENGTH_SCALE", 1.0),
         siglip_model_dir=_resolve(root, _env("SIGLIP_MODEL_DIR"), "data/models/siglip2"),
         siglip_auto_download=_env_bool("SIGLIP_AUTO_DOWNLOAD", True),
+        kokoro_model_dir=_resolve(root, _env("KOKORO_MODEL_DIR"), "data/models/kokoro"),
+        kokoro_auto_download=_env_bool("KOKORO_AUTO_DOWNLOAD", True),
         ffmpeg_bin=_env("FFMPEG_BIN", ""),
         ffprobe_bin=_env("FFPROBE_BIN", ""),
         font_file=_env("FONT_FILE", "C:/Windows/Fonts/arialbd.ttf"),
