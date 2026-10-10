@@ -324,7 +324,7 @@ class ProducerAgent(Agent):
                     asset = self._pick_asset(ctx, beat, title, out_dir / "assets", i)
                 if clips_on and search_assets and beat.visual_type in {"image", "text_card"}:
                     for query in asset_queries(beat.visual_query, title):
-                        clip = self._find_clip(ctx, query, out_dir / "assets")
+                        clip = self._find_clip(ctx, query, out_dir / "assets", self._match_text(beat))
                         if clip is not None:
                             break
                 if reuse is not None:
@@ -435,7 +435,16 @@ class ProducerAgent(Agent):
             if self.svc.db.get_state(state):
                 self.svc.db.set_state(state, "")
 
-    def _find_clip(self, ctx: Any, query: str, dest: Path) -> AssetRecord | None:
+    def _find_clip(
+        self, ctx: Any, query: str, dest: Path, text: str | tuple[str, str] | None = None
+    ) -> AssetRecord | None:
+        """One query's stock clip. With the picture check up, clips are scored by their thumbnails like photos
+        and only the best one that passes is downloaded (none passing means no clip; the beat keeps its photo).
+        Without the check, the first clip that downloads wins."""
+        scorer = self._gate_scorer(ctx) if text is not None else None
+        pool: list[tuple[Any, AssetCandidate, Any]] = []
+        firsts: list[tuple[Any, AssetCandidate]] = []
+        width = int(self._relevance_cfg().get("preview_width") or 320)
         for provider in self.svc.assets:
             if not hasattr(provider, "search_videos"):
                 continue
@@ -445,10 +454,36 @@ class ProducerAgent(Agent):
                 self.log.warning("clip search failed on %s: %s", provider.name, exc)
                 continue
             for cand in cands:
-                rec = provider.fetch(ctx, cand, dest)
-                if rec is not None:
-                    self.svc.db.update("assets", rec.id, {"query": query[:200]})
-                    return rec
+                firsts.append((provider, cand))
+                if scorer is not None:
+                    img = provider.preview(ctx, cand, width=width)
+                    if img is not None:
+                        pool.append((provider, cand, img))
+        if scorer is not None and text is not None:
+            images = [img for _, _, img in pool]
+            try:
+                texts = (text,) if isinstance(text, str) else text
+                per_text = [scorer.score_many(images, t) for t in texts] if images else []
+                scores = [max(col) for col in zip(*per_text, strict=True)] if per_text else []
+            except Exception as exc:
+                self._gate_down(ctx, f"{type(exc).__name__}: {exc}")
+            else:
+                cfg = self._relevance_cfg()
+                owner = {id(cand): provider for provider, cand, _ in pool}
+                ranked = rank_candidates(
+                    [(c, s) for (_, c, _), s in zip(pool, scores, strict=True)],
+                    float(cfg.get("threshold") or 0.0),
+                    float(cfg.get("by_sa_penalty", 0.05) or 0.0),
+                )
+                firsts = [(owner[id(c)], c) for c in ranked]
+            finally:
+                for img in images:
+                    img.close()
+        for provider, cand in firsts:
+            rec = provider.fetch(ctx, cand, dest)
+            if rec is not None:
+                self.svc.db.update("assets", rec.id, {"query": query[:200]})
+                return rec
         return None
 
     def produce(self, run: RunContext, script_id: str) -> str:

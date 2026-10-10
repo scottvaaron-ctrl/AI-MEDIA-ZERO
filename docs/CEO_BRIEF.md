@@ -14,8 +14,10 @@ _Updated 2026-10-09 (end of day)._
   (3 of 16 past openings pass).
 - **Owner decisions 9 Oct:** picture-check floor kept; constitution section 5 allows stock photos/video and free music.
 - **Google login:** consent screen set to "In production"; the re-login during the screencast makes the login last.
+- **Stock video (piece D) is live:** free Pixabay clips and photos, each checked against the narration before use;
+  AI-generated clips are never used. Pexels has paused new keys, so it waits.
 - **Still due:** the YouTube screencast by Thu 15 Oct (the agent records it; the owner checks it before upload and
-  before the reply is sent); Pexels/Pixabay keys (the owner adds them to `.env`) for stock video (piece D).
+  before the reply is sent).
 
 _Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
 channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but

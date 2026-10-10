@@ -167,7 +167,7 @@ assets:
   # amending the constitution's media rule (docs/PLAN_FULL_CONTROL.md section 8) and putting
   # PEXELS_API_KEY / PIXABAY_API_KEY in .env. Until then these providers are never registered.
   stock:
-    enabled: false
+    enabled: true  # 9 Oct: constitution section 5 allows it; Pixabay key in .env (Pexels keys paused by Pexels)
   owner_library_dir: ./assets/owner
   cache_dir: ./data/assets
 

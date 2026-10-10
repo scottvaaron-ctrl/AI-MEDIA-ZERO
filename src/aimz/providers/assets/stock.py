@@ -100,8 +100,14 @@ class StockAssetProvider(AssetProvider):
     def preview(
         self, ctx: ProviderContext, candidate: AssetCandidate, width: int = 320
     ) -> Image.Image | None:
-        if candidate.mime.startswith("video/"):
-            return None
+        if candidate.mime.startswith(
+            "video/"
+        ):  # a clip is scored by its thumbnail; none means it cannot pass
+            return (
+                self._http_preview(ctx, self._client, candidate.preview_url)
+                if candidate.preview_url
+                else None
+            )
         return self._http_preview(ctx, self._client, candidate.preview_url or candidate.file_url)
 
     # -- download ---------------------------------------------------------------------------------
@@ -237,6 +243,7 @@ class PexelsAssetProvider(StockAssetProvider):
                     title=f"Pexels video {v.get('id')}",
                     page_url=str(v.get("url") or ""),
                     file_url=str(f.get("link") or ""),
+                    preview_url=str(v.get("image") or ""),
                     license=self.license_name,
                     license_url=self.license_url,
                     author=author,
@@ -292,6 +299,9 @@ class PixabayAssetProvider(StockAssetProvider):
     def _videos(self, data: dict[str, Any]) -> list[AssetCandidate]:
         out = []
         for h in data.get("hits") or []:
+            # AI-made footage shown as real would mislead viewers; low-quality clips look like slop.
+            if h.get("isAiGenerated") or h.get("isLowQuality"):
+                continue
             sizes = h.get("videos") or {}
             f = _pick_video_file([sizes[k] for k in ("large", "medium", "small", "tiny") if sizes.get(k)])
             if not f:
@@ -303,6 +313,7 @@ class PixabayAssetProvider(StockAssetProvider):
                     title=str(h.get("tags") or f"Pixabay video {h.get('id')}")[:120],
                     page_url=str(h.get("pageURL") or ""),
                     file_url=str(f.get("url") or ""),
+                    preview_url=str(f.get("thumbnail") or ""),
                     license=self.license_name,
                     license_url=self.license_url,
                     author=author,
