@@ -16,11 +16,10 @@ code, a real upload, the saved request and response, the live Short and its YouT
       your submission"). It shows you the email first.
 - Then Google completes the review in its own time. Until then: no new channels (promise in the 2 Oct reply).
 
-### A2. Stock video (piece D): the free keys
-- [ ] Sign in at https://www.pexels.com/api/ ("Log in with Google" works) and copy your API key.
-- [ ] Sign in at https://pixabay.com/api/docs/ (the key is shown on that page) and copy it.
-- [ ] Add two lines to `.env`: `PEXELS_API_KEY=...` and `PIXABAY_API_KEY=...`, then tell the agent.
-      The agent turns stock media on and runs check B2. (Constitution section 5 already allows it, 9 Oct.)
+### A2. Stock video (piece D): done 9 Oct
+- [x] Pixabay key added to `.env`; stock photos and clips are live.
+- [ ] Optional, later: Pexels has paused new API keys. If https://www.pexels.com/api/key/ offers a key again,
+      add `PEXELS_API_KEY=...` to `.env`; it is used automatically.
 
 ### A3. Scripts waiting for your sensitive-topic review (11 on 9 Oct)
 The rules require your yes or no on scripts that mention, for example, real people and allegations.
@@ -54,7 +53,7 @@ For each channel (about 5 minutes; the agent runs the commands and checks):
   analytics --collect`, then confirm the newest YouTube metrics' `raw_json` has `revenue` or a clean
   `revenue_error`, and the other metrics still arrive. The login no longer expires weekly (consent screen in
   production since 9 Oct).
-- **B2, after A2 (stock keys):** a live check of each provider: one photo search, one video search and one
+- **B2, done 9 Oct for Pixabay; repeat for Pexels if a key is added:** a live check of each provider: one photo search, one video search and one
   download each, with the fields as parsed; the Pexels video endpoint (`https://api.pexels.com/videos/search`);
   `scripts\render_matrix.py --only clip_scenes`, plus one real cycle that uses a clip; attribution in the
   description. Then set `assets.stock.enabled: true`; `clip_scenes` becomes available.

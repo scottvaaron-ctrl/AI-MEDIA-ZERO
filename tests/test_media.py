@@ -140,15 +140,28 @@ def test_pixabay_requests_and_parsing(svc) -> None:  # noqa: ANN001
 def test_stock_is_never_registered_without_the_owners_switch(
     svc, project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # noqa: ANN001
+    import re
+
     from aimz.providers.registry import build_services
 
     monkeypatch.setenv("PEXELS_API_KEY", "k")
     monkeypatch.setenv("PIXABAY_API_KEY", "k")
+    cfg = project / "config" / "config.yaml"
+    text = cfg.read_text(encoding="utf-8")
+    switched_on = text  # the shipped config has the owner's switch on since 2026-10-09
+    cfg.write_text(re.sub(r"(  stock:\n    enabled: )true[^\n]*", r"\1false", text), encoding="utf-8")
     s = build_services(project, quiet_logs=True)
     try:
         assert not any("Pexels" in p.name or "Pixabay" in p.name for p in s.assets)
         assert "stock_video" not in capabilities(s)
         assert "clip_scenes" not in SettingsEngine(s.db, caps=capabilities(s)).space()
+    finally:
+        s.close()
+    cfg.write_text(switched_on, encoding="utf-8")
+    s = build_services(project, quiet_logs=True)
+    try:
+        assert {"PexelsAssetProvider", "PixabayAssetProvider"} <= {p.name for p in s.assets}
+        assert "stock_video" in capabilities(s)
     finally:
         s.close()
 
