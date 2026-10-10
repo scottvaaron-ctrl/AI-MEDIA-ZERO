@@ -1,6 +1,6 @@
 # AI Media Zero: Brief for the CEO and the CEO's AI Agent
 
-_Updated 2026-10-09: **Part 2 piece C (sound) is merged and live: new videos are narrated by the Kokoro voice
+_Updated 2026-10-09 (late): **The channel now follows the owner-approved guideline v1** (genre "the surprising true stories behind real places: local history, unusual historical events, odd borders and lost places"; Bella voice; 25-45 s; full-screen photos, 3-word captions, calm music; five writing rules). The AI's free creative control is over: it may test one change at a time on any part of the guideline (genre and voice included, owner decision 9 Oct), and nothing changes without the owner's approval. Earlier the same day: **Part 2 piece C (sound) is merged and live: new videos are narrated by the Kokoro voice
 "Bella" (owner-chosen; the AI cannot change it), and every video is levelled to YouTube's -14 LUFS (measured
 -14.1 to -14.5 on all voices, peaks well under the limit). If Kokoro fails, the whole video uses the old voice
 (kristin) and `aimz status` says so. Owner decisions 9 Oct: picture-check floor kept; constitution §5 media
