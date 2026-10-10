@@ -114,7 +114,13 @@ def _serve(fail_on: str | None = None) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_download_model_uses_part_files(tmp_path: Path) -> None:
+def test_download_model_uses_part_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    from aimz.providers.tts import kokoro
+
+    served = {n: hashlib.sha256(b"model bytes " + n.encode()).hexdigest() for n in MODEL_FILES}
+    monkeypatch.setattr(kokoro, "MODEL_SHA256", served)  # the fake bytes, not the real release
     download_model(tmp_path / "ok", http=_serve())
     assert model_present(tmp_path / "ok")
     bad = tmp_path / "bad"

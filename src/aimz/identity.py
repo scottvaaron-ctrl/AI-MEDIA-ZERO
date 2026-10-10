@@ -190,12 +190,17 @@ def prompt_text(db: Database, name: str, starting_genres: list[str]) -> str:
     return "\n".join(lines)
 
 
-def genre_line(db: Database, g: Guideline | None = None) -> str:
-    """The genre sentence for the ideation prompt: the owner guideline's genre wins over the AI-chosen one."""
+def genre_line(db: Database, g: Guideline | None = None, test_variant: bool = False) -> str:
+    """The genre sentence for the ideation prompt: the owner guideline's genre wins over the AI-chosen one.
+
+    ``test_variant``: ``g.genre`` is a genre experiment's variant, not the owner's genre."""
     if g is not None and g.genre:
-        return (
-            f"This channel's genre is '{g.genre}' (owner guideline v{g.version}). Every idea must fit it.\n"
+        whose = (
+            "a genre under test in this channel's experiment"
+            if test_variant
+            else f"owner guideline v{g.version}"
         )
+        return f"This channel's genre is '{g.genre}' ({whose}). Every idea must fit it.\n"
     ident = load(db)
     if not ident.get("genre"):
         return ""

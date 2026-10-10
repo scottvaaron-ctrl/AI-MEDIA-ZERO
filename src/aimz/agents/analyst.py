@@ -324,6 +324,11 @@ class AnalystAgent(Agent):
             for k, v in g.checks.items()
             if k in guideline.CHECK_KEYS
         ]
+        other = {k: v for k, v in g.checks.items() if k not in guideline.CHECK_KEYS}
+        if other:  # owner-written checks the code does not enforce: shown, not testable
+            lines.append(
+                "Other code checks (not testable): " + "; ".join(f"{k}={v}" for k, v in other.items())
+            )
         lines += [f"- {r.id} [{r.stage} stage] {r.title}: {r.text}" for r in g.rules.values()]
         if g.unavailable:
             lines.append(

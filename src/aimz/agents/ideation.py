@@ -142,7 +142,7 @@ class IdeationAgent(Agent):
         ) -> str:
             return (
                 f"{self.strategy.prompt_summary(strategy_state)}\n\n"
-                f"{identity.genre_line(self.svc.db, g)}"
+                f"{identity.genre_line(self.svc.db, g, test_variant=g is not g_all)}"
                 f"Generate {n} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
                 "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
                 "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "

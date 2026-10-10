@@ -20,6 +20,7 @@ RELEVANCE_FIX_STATE = (
 DEFAULT_RELEVANCE_FIX = "python -m aimz doctor --fix"
 # State keys the producer writes when the Kokoro voice fails and a video falls back to Piper.
 VOICE_STATE = "voice_unavailable"  # why Kokoro failed (cleared when it next narrates a video)
+LOUDNESS_STATE = "loudness_off_target"  # the last video whose final loudness missed -14 LUFS / -1 dBTP
 VOICE_FIX_STATE = "voice_unavailable_fix"  # the command that clears it (Kokoro's health fix)
 
 
@@ -111,6 +112,14 @@ def attention(db: Database) -> dict[str, list[dict[str, Any]]]:
             {
                 "why": f"Kokoro voice unavailable: {voice}",
                 "fix": db.get_state(VOICE_FIX_STATE) or DEFAULT_RELEVANCE_FIX,
+            }
+        ]
+    loud = db.get_state(LOUDNESS_STATE)
+    if loud:
+        out["loudness_off_target"] = [
+            {
+                "why": f"final loudness off target (-14 LUFS, true peak -1 dBTP): {loud}",
+                "fix": "none needed for that video; clears when the next video lands on target. If it repeats, check the render log",
             }
         ]
     # Local import: guideline_proposals imports the experiment settings, which this module does not need.
