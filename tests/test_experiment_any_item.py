@@ -225,3 +225,93 @@ def test_critic_review_applies_the_treatment_check_end_to_end(svc) -> None:  # n
         c = orch.critic.review(run, "scr_c", _draft(eighteen), _treatment_idea(svc, eid, "control"), ok, [])
     assert not any(r.startswith("Hook is") for r in t.required_revisions)
     assert any(r.startswith("Hook is 18 words") for r in c.required_revisions)
+
+
+# ---- review findings ----------------------------------------------------------------------------------
+
+
+def test_variant_genre_pass_is_not_stamped_as_fitting_the_real_genre(
+    svc, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001
+    from aimz.agents.editor import EditorInChief
+    from aimz.domain.models import GenreFit
+
+    eng = _geng(svc)
+    eid = eng.propose(_gp("G-genre", NEW_GENRE))
+    editor = EditorInChief(svc, None, eng)
+    monkeypatch.setattr(editor, "ask", lambda *a, **k: GenreFit(fits=True))
+    t, c = _treatment_idea(svc, eid), _treatment_idea(svc, eid, "control")
+    with svc.tracker.run("t") as run:
+        passing = editor._genre_gate(run, eng.guideline, [t, c], [10])  # type: ignore[arg-type]
+    assert {p["id"] for p in passing} == {t["id"], c["id"]}
+    assert svc.db.get("ideas", t["id"])["genre_checked_version"] is None  # judged against the variant only
+    assert svc.db.get("ideas", c["id"])["genre_checked_version"] == eng.guideline.version  # type: ignore[union-attr]
+
+
+def test_genre_treatment_ideas_are_not_held_to_the_topic_rules(svc, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from tests.test_reliability import _idea, _orch
+
+    _activate(svc)
+    orch = _orch(svc)
+    eid = orch.experiments.propose(_gp("G-genre", NEW_GENRE))
+    t = _idea(svc, family="f", experiment_id=eid, experiment_arm="treatment")
+    c = _idea(svc, family="f", experiment_id=eid, experiment_arm="control")
+
+    def fake_ask(ctx: Any, role: str, user: str, schema: Any, *a: Any, **kw: Any) -> Any:
+        return schema.model_validate({"selected_idea_ids": [t], "breaks": [f"{t}:G-topic", f"{c}:G-topic"]})
+
+    monkeypatch.setattr(orch.editor, "ask", fake_ask)
+    cands = [dict(svc.db.get("ideas", i)) for i in (t, c)]
+    with svc.tracker.run("test") as run:
+        orch.editor._choose(run, orch.strategy.current(), cands, "exploit", "r")
+    assert svc.db.get("ideas", t)["status"] == "candidate"
+    assert svc.db.get("ideas", c)["status"] == "rejected"
+
+
+def test_genre_treatment_half_is_written_without_the_topic_rules(
+    svc, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001
+    from tests.test_reliability import _orch
+
+    from aimz.domain.models import SourceItemView
+
+    _activate(svc)
+    orch = _orch(svc)
+    assert orch.experiments.propose(_gp("G-genre", NEW_GENRE))
+    seen: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        orch.ideation, "_generate", lambda run, span, prompt, pl, *rest: seen.append((prompt, rest[4])) or []
+    )
+    leads = [SourceItemView(id=f"src_{i}", title=f"t{i}", url="u", source_name="s") for i in range(4)]
+    with svc.tracker.run("t") as run:
+        orch.ideation.run(run, orch.strategy.current(), n_ideas=4, leads=leads)
+    by_arm = {label.get("experiment_arm"): p for p, label in seen}
+    assert "Pick a single named thing" in by_arm["control"]
+    assert "Pick a single named thing" not in by_arm["treatment"]
+
+
+def test_banned_openings_variant_accepts_commas() -> None:
+    assert guideline.check_variant("banned_openings", "Did you know, Imagine") == (
+        ["Did you know", "Imagine"],
+        None,
+    )
+
+
+def test_strategist_is_told_the_variant_formats(svc) -> None:  # noqa: ANN001
+    from aimz.agents.analyst import AnalystAgent
+
+    eng = _geng(svc)
+    text = AnalystAgent(svc, None, eng).guideline_prompt(eng.guideline, [])  # type: ignore[arg-type]
+    assert "G-genre: the new genre line" in text and "5-40" in text and "true or false" in text
+
+
+def test_no_genre_means_no_genre_item(svc) -> None:  # noqa: ANN001
+    text = GSAMPLE.replace("  genre: explainer\n", '  genre: ""\n')
+    assert "G-genre" not in guideline.parse(text, CATALOG, set()).item_ids()
+
+
+@pytest.mark.parametrize("rid", ["G-genre", "G-runtime", "G-hook_max_words", "G-voice"])
+def test_rule_ids_may_not_shadow_other_items(rid: str) -> None:
+    text = GSAMPLE + f"\n### {rid}: Clash\nstage: script\nSome text.\n"
+    with pytest.raises(guideline.GuidelineError, match="reserved"):
+        guideline.parse(text, CATALOG, set())

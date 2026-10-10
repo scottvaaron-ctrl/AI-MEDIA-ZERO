@@ -183,17 +183,24 @@ class IdeationAgent(Agent):
                 replace: dict[str, str] | None = None
                 label: dict[str, Any] = {}
                 g_part = g_all
+                topic_rules = True
                 if topic is not None and arm is not None:
                     label = {"experiment_id": topic["id"], "experiment_arm": arm}
                     if arm == "treatment" and topic["variable"] == "G-genre" and g_all is not None:
                         # This half is written under the variant genre (owner decision 2026-10-09).
                         g_part = guideline.with_variant(g_all, "G-genre", str(topic["treatment"]))
+                        topic_rules = False  # they restate the guideline's genre, the control
                     elif arm == "treatment":
                         replace = {str(topic["variable"]): str(topic["treatment"])}
                 created += self._generate(
                     run,
                     span,
-                    prompt(size, self.guideline_text(("topic",), replace), part_leads, g_part),
+                    prompt(
+                        size,
+                        self.guideline_text(("topic",), replace) if topic_rules else "",
+                        part_leads,
+                        g_part,
+                    ),
                     part_leads,
                     families,
                     amap,

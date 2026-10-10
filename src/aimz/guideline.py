@@ -61,7 +61,8 @@ class Guideline:
     def item_ids(self) -> set[str]:
         """Every testable item: rules, locked settings, runtime, the genre and each known code check."""
         checks = {f"G-{k}" for k in self.checks if k in CHECK_KEYS}
-        return {*self.rules, *(f"G-{k}" for k in self.locked), "G-runtime", "G-genre", *checks}
+        genre = {"G-genre"} if self.genre.strip() else set()
+        return {*self.rules, *(f"G-{k}" for k in self.locked), "G-runtime", *genre, *checks}
 
     def rules_for(self, stage: str, replace: dict[str, str] | None = None) -> list[Rule]:
         """Rules of a stage; ``replace`` maps a rule id to variant text used instead of the rule's own."""
@@ -190,7 +191,8 @@ def check_variant(key: str, text: str) -> tuple[Any, str | None]:
         return None, f"{key}: {raw!r} is not true or false"
     if key == "banned_openings":
         try:
-            items = json.loads(raw) if raw.startswith("[") else [s.strip() for s in raw.split(";")]
+            sep = ";" if ";" in raw else ","  # the strategist may write either
+            items = json.loads(raw) if raw.startswith("[") else [s.strip() for s in raw.split(sep)]
         except ValueError:
             return None, f"{key}: {raw!r} is not a list"
         items = [str(s).strip() for s in items if str(s).strip()] if isinstance(items, list) else []
@@ -258,6 +260,8 @@ def _parse_rules(body: str) -> dict[str, Rule]:
             raise GuidelineError(f"{rid}: empty rule text")
         if rid in rules:
             raise GuidelineError(f"duplicate rule id {rid}")
+        if rid in ("G-genre", "G-runtime") or rid[2:] in CATALOG or rid[2:] in CHECK_KEYS:
+            raise GuidelineError(f"{rid}: reserved for a guideline item; choose another rule id")
         rules[rid] = Rule(rid, title, stage, text)
     return rules
 

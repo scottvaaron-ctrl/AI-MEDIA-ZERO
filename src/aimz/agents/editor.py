@@ -272,10 +272,13 @@ class EditorInChief(Agent):
                     continue
                 span.output_refs["fits"] = verdict.fits
             if verdict.fits:
-                self.svc.db.update(
-                    "ideas", c["id"], {"genre_checked_version": g.version, "updated_at": now_iso()}
-                )
-                c["genre_checked_version"] = g.version
+                # Only a pass against the guideline's own genre is remembered: a pass against a genre
+                # experiment's variant says nothing once the experiment ends.
+                if genre == g.genre:
+                    self.svc.db.update(
+                        "ideas", c["id"], {"genre_checked_version": g.version, "updated_at": now_iso()}
+                    )
+                    c["genre_checked_version"] = g.version
                 passing.append(c)
                 continue
             prev = loads(c.get("guideline_breaks"), [])
@@ -359,7 +362,9 @@ class EditorInChief(Agent):
             by_id = {c["id"]: c for c in shortlist}
             broken = self._topic_breaks(decision, by_id, {r.id for r in topic_rules})
             for cid in variant_ideas & set(broken):
-                broken[cid] = [rid for rid in broken[cid] if rid != tested_rule]
+                # A genre experiment's treatment ideas are not held to the topic rules (they restate the
+                # genre under test); a topic-rule experiment's are not held to the rule under test.
+                broken[cid] = [rid for rid in broken[cid] if rid != tested_rule and tested_rule != "G-genre"]
             broken = {k: v for k, v in broken.items() if v}
             turned_down: set[str] = set()
             for cid, ids in broken.items():
