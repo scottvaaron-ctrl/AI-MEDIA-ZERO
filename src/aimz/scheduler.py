@@ -12,6 +12,21 @@ from xml.sax.saxutils import escape
 
 TASK_PREFIX = "AI Media Zero"
 MAIN = "main"  # the original channel, at the repository root
+# The daily run times (local). The live task has run at these since 2026-10-07; at least 2.5 h apart (posting limit).
+DEFAULT_TIMES: tuple[str, ...] = ("09:00", "15:30")
+
+
+def staggered_times(offset_minutes: int) -> str:
+    """``DEFAULT_TIMES`` shifted by ``offset_minutes``, as ``schedule install --times`` takes them (one channel
+    is staggered after another so their cycles rarely wait for the GPU)."""
+    out = []
+    for t in DEFAULT_TIMES:
+        h, m = (int(x) for x in t.split(":"))
+        total = (h * 60 + m + offset_minutes) % (24 * 60)
+        out.append(f"{total // 60:02d}:{total % 60:02d}")
+    return ",".join(out)
+
+
 _DOMAIN_SEP = chr(92)  # backslash, kept out of f-strings
 
 # Windows Smart App Control refuses to start the unsigned console-script shim

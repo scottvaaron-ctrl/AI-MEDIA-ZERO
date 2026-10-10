@@ -65,7 +65,7 @@ research -> ideas -> editor picks -> script -> fact-check -> critic -> render ->
     ^                                                                               |
     +-------------- metrics -> experiments -> strategy memory <----------------------+
 ```
-Twice a day (09:00 and 18:00 since 1 Oct; four times on 30 Sep-1 Oct) the laptop runs a full cycle without
+Twice a day (09:00 and 15:30 since 7 Oct; 09:00 and 18:00 from 1 Oct; four times on 30 Sep-1 Oct) the laptop runs a full cycle without
 anyone touching it, and posts within your limits. All the
 software is free and runs on that one laptop: a local AI model, a local voice, licensed images from
 Wikimedia and free video tools. The only outside services are the platforms' official posting APIs.
@@ -206,7 +206,7 @@ Checked against the live YouTube API: your current login still works, and the AI
 - Anything not allowed to post waits, oldest first, for the next run. If more than 2 days of videos
   pile up, the AI stops making new ones until the queue drains.
 - Your own re-sends (`aimz publish retry`) follow the same limits and say so when they have to wait.
-- With your approval the schedule is now **09:00 and 18:00** (since 1 Oct).
+- The schedule is **09:00 and 15:30** (the live task's times since 7 Oct; 09:00 and 18:00 from 1 Oct).
 - Each video records the hour it went out, so the AI can learn which times work.
 - `aimz status` now shows posting runs today and whether the next run may post.
 
@@ -396,7 +396,7 @@ python -m aimz analytics         # per-video views / retention / score
 python -m aimz kill --reason "..."   # blocks all outbound writes; `aimz resume` undoes it
 python -m aimz approve video <id> --reject
 ```
-Scheduler: **one** Windows task, "AI Media Zero", with triggers at 09:00 and 18:00
+Scheduler: **one** Windows task, "AI Media Zero", with triggers at 09:00 and 15:30
 (since 2026-10-01), runs
 `scripts/run-cycle.ps1` (log: `data\logs\scheduled.log`; a copy that starts while a cycle is running
 exits and notes it in `data\logs\scheduled-skipped.log`). The old tasks "AI Media Zero 0900"/"1800"

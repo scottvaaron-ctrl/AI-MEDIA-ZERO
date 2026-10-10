@@ -138,7 +138,7 @@ For a **fully hands-off** setup (automatic uploads and automatic metrics on both
 [AUTONOMOUS_SETUP.md](AUTONOMOUS_SETUP.md) instead of Parts 3.3–3.4; then schedule with one command:
 
 ```powershell
-aimz schedule install --times 09:00,18:00
+aimz schedule install --times 09:00,15:30
 ```
 
 Manual alternative:

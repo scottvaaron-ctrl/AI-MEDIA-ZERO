@@ -166,7 +166,7 @@ or you approve the video.
 ## Part D — Schedule (2 minutes)
 
 ```powershell
-aimz schedule install --times 09:00,18:00
+aimz schedule install --times 09:00,15:30
 ```
 
 The times must fit the owner's posting limits in `config.yaml` `publishing.limits` (at most 4 runs a
@@ -183,7 +183,7 @@ The task is registered at the root of the Task Scheduler Library (not inside a s
 Task Scheduler, click **Task Scheduler Library** itself, and look in the middle pane for
 "AI Media Zero". It already has "Wake the computer to run this task" and "Run task as soon as
 possible after a scheduled start is missed" set (see `_task_xml`). If it is missing, run
-`python -m aimz schedule install --times 09:00,18:00` again. A copy that starts while a cycle is
+`python -m aimz schedule install --times 09:00,15:30` again. A copy that starts while a cycle is
 still running exits at once and notes it in `data\logs\scheduled-skipped.log`.
 
 `scripts/run-cycle.ps1` starts `ollama serve` itself if the Ollama API is not answering, and waits

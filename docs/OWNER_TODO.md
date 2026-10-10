@@ -42,7 +42,7 @@ For each channel (about 5 minutes; the agent runs the commands and checks):
 
 ### A6. Keep the laptop on
 - The laptop is the always-on host (decision D-015, confirmed 9 Oct). The scheduled task asks Windows to wake it
-  for the 09:00 and 18:00 runs and catches up a missed run, but keep it plugged in and on: wake timers can be
+  for the 09:00 and 15:30 runs and catches up a missed run, but keep it plugged in and on: wake timers can be
   off in Windows power settings.
 
 ---

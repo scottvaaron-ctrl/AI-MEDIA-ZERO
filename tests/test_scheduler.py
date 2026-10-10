@@ -123,3 +123,11 @@ def test_runner_starts_ollama_before_the_cycle(project: Path) -> None:
     # The guard must run before the cycle, and give up loudly rather than run without a model.
     assert body.index("Test-Ollama") < body.index("-m aimz run")
     assert "FATAL: ollama did not answer" in body
+
+
+def test_default_times_are_the_live_schedule_and_channels_stagger_from_them() -> None:
+    # The live task runs at 09:00 and 15:30 (since 7 Oct; docs and defaults aligned 10 Oct).
+    assert scheduler.DEFAULT_TIMES == ("09:00", "15:30")
+    assert scheduler.staggered_times(0) == "09:00,15:30"
+    assert scheduler.staggered_times(15) == "09:15,15:45"
+    assert scheduler.staggered_times(45) == "09:45,16:15"

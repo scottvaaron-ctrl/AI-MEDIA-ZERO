@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from aimz import __version__
+from aimz import __version__, scheduler
 from aimz.core.attention import attention
 from aimz.util import iso_ago
 
@@ -1099,7 +1099,9 @@ def publish_poll() -> None:
 
 @schedule_app.command("install")
 def schedule_install(
-    times: Annotated[str, typer.Option(help="Comma-separated HH:MM local times")] = "09:00,18:00",
+    times: Annotated[str, typer.Option(help="Comma-separated HH:MM local times")] = ",".join(
+        scheduler.DEFAULT_TIMES
+    ),
 ) -> None:
     """Register daily Task Scheduler jobs that run `aimz run`, within the owner's posting limits."""
     from aimz import instances, scheduler
@@ -1183,7 +1185,7 @@ def instance_create(
     console.print(f"  python -m aimz instance consent {name}             (allow automatic uploads to it)")
     # Stagger each channel 15 minutes after the one before, so their cycles rarely wait for the GPU.
     offset = 15 * (instances.list_instances().index(name) if name in instances.list_instances() else 1)
-    times = ",".join(f"{h + (offset // 60):02d}:{offset % 60:02d}" for h in (9, 18))
+    times = scheduler.staggered_times(offset)
     console.print(f"  python -m aimz --instance {name} schedule install --times {times}")
 
 
