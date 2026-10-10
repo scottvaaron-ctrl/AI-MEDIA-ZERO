@@ -318,14 +318,18 @@ class AnalystAgent(Agent):
         ]
         lines += [f"- G-{k} (locked setting): {v}" for k, v in sorted(g.locked.items())]
         lines.append(f"- G-runtime: {g.runtime_min}-{g.runtime_max} s")
+        lines.append(f"- G-genre: {g.genre}")
+        lines += [
+            f"- G-{k} (code check): {guideline.encode_check(v)}"
+            for k, v in g.checks.items()
+            if k in guideline.CHECK_KEYS
+        ]
         lines += [f"- {r.id} [{r.stage} stage] {r.title}: {r.text}" for r in g.rules.values()]
         if g.unavailable:
             lines.append(
                 "Not available on this machine (cannot be tested): "
                 + "; ".join(f"G-{k}: {why}" for k, why in sorted(g.unavailable.items()))
             )
-        if g.checks:
-            lines.append("Code checks: " + "; ".join(f"{k}={v}" for k, v in g.checks.items()))
         running = self.experiments.running()
         lines.append(
             "Running experiment: "

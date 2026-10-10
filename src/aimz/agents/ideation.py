@@ -135,10 +135,14 @@ class IdeationAgent(Agent):
         others_text = shared.other_channels_text(self.svc.env.instance)
         sf = cfg.short_form
 
-        def prompt(n: int, gtext: str, leads: list[SourceItemView]) -> str:
+        g_all = guideline.for_services(self.svc)
+
+        def prompt(
+            n: int, gtext: str, leads: list[SourceItemView], g: guideline.Guideline | None = g_all
+        ) -> str:
             return (
                 f"{self.strategy.prompt_summary(strategy_state)}\n\n"
-                f"{identity.genre_line(self.svc.db, guideline.for_services(self.svc))}"
+                f"{identity.genre_line(self.svc.db, g)}"
                 f"Generate {n} candidate vertical video ideas ({sf.get('min_seconds', 10)}-{sf.get('max_seconds', 180)} seconds) from the leads below. "
                 "Each idea must be built on at least one lead (cite its id in source_refs) and must be about what that lead actually reports; do not invent an angle, cause, or consequence the lead does not state. "
                 "content_family is the idea's niche: the subject area a viewer would follow a channel for. angle is the kind of story "
@@ -178,14 +182,18 @@ class IdeationAgent(Agent):
                     continue
                 replace: dict[str, str] | None = None
                 label: dict[str, Any] = {}
+                g_part = g_all
                 if topic is not None and arm is not None:
                     label = {"experiment_id": topic["id"], "experiment_arm": arm}
-                    if arm == "treatment":
+                    if arm == "treatment" and topic["variable"] == "G-genre" and g_all is not None:
+                        # This half is written under the variant genre (owner decision 2026-10-09).
+                        g_part = guideline.with_variant(g_all, "G-genre", str(topic["treatment"]))
+                    elif arm == "treatment":
                         replace = {str(topic["variable"]): str(topic["treatment"])}
                 created += self._generate(
                     run,
                     span,
-                    prompt(size, self.guideline_text(("topic",), replace), part_leads),
+                    prompt(size, self.guideline_text(("topic",), replace), part_leads, g_part),
                     part_leads,
                     families,
                     amap,

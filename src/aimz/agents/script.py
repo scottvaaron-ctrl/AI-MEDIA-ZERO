@@ -55,7 +55,7 @@ class ScriptAgent(Agent):
         cfg = self.svc.config
         sf = cfg.short_form
         min_s, max_s = int(sf.get("min_seconds", 10)), int(sf.get("max_seconds", 180))
-        g = guideline.for_services(self.svc)
+        g = guideline.for_idea(guideline.for_services(self.svc), idea, self.svc.db)
         tested_runtime = guideline.runtime_variant(idea, self.svc.db)
         if (
             g is not None and tested_runtime is None

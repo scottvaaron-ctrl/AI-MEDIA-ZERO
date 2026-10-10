@@ -12,6 +12,7 @@ import contextlib
 import random
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import GenreFit, SelectionDecision, SelectionDecisionWithBreaks
@@ -247,8 +248,9 @@ class EditorInChief(Agent):
             if budget[0] <= 0:
                 continue  # out of judge calls: only ideas already judged under this version can pass
             budget[0] -= 1
+            genre = (guideline.for_idea(g, c, self.svc.db) or g).genre  # a genre experiment's variant arm
             user = (
-                f"Channel genre: {g.genre}\n\n"
+                f"Channel genre: {genre}\n\n"
                 f"Idea: {c['title']}\nPremise: {(c.get('premise') or '')[:300]}\nHook: {(c.get('hook') or '')[:200]}\n\n"
                 "Does this idea fit the channel genre? Answer fits true or false and a one-line reason."
             )

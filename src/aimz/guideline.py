@@ -59,7 +59,9 @@ class Guideline:
     content: str = ""
 
     def item_ids(self) -> set[str]:
-        return {*self.rules, *(f"G-{k}" for k in self.locked), "G-runtime"}
+        """Every testable item: rules, locked settings, runtime, the genre and each known code check."""
+        checks = {f"G-{k}" for k in self.checks if k in CHECK_KEYS}
+        return {*self.rules, *(f"G-{k}" for k in self.locked), "G-runtime", "G-genre", *checks}
 
     def rules_for(self, stage: str, replace: dict[str, str] | None = None) -> list[Rule]:
         """Rules of a stage; ``replace`` maps a rule id to variant text used instead of the rule's own."""
@@ -165,6 +167,60 @@ def parse(text: str, catalog: dict[str, SettingDef], caps: set[str]) -> Guidelin
 
 _CHECK_POSITIVE_INTS = ("title_max_chars", "hook_max_words")
 _CHECK_BOOLS = ("hook_no_question", "hook_no_definition")
+CHECK_KEYS = (*_CHECK_POSITIVE_INTS, *_CHECK_BOOLS, "banned_openings")
+# Bounds an experiment may test a whole-number check within (owner decision 2026-10-09: any item is testable).
+CHECK_VARIANT_BOUNDS = {"hook_max_words": (5, 40), "title_max_chars": (30, 100)}
+_TRUE, _FALSE = {"true", "yes", "on", "1"}, {"false", "no", "off", "0"}
+
+
+def check_variant(key: str, text: str) -> tuple[Any, str | None]:
+    """(value, why not) for an experiment's variant of the code check ``key``, given as text."""
+    raw = str(text).strip()
+    if key in _CHECK_POSITIVE_INTS:
+        lo, hi = CHECK_VARIANT_BOUNDS[key]
+        try:
+            n = int(raw)
+        except ValueError:
+            return None, f"{key}: {raw!r} is not a whole number"
+        return (n, None) if lo <= n <= hi else (None, f"{key}: {n} is outside {lo}-{hi}")
+    if key in _CHECK_BOOLS:
+        low = raw.lower()
+        if low in _TRUE or low in _FALSE:
+            return low in _TRUE, None
+        return None, f"{key}: {raw!r} is not true or false"
+    if key == "banned_openings":
+        try:
+            items = json.loads(raw) if raw.startswith("[") else [s.strip() for s in raw.split(";")]
+        except ValueError:
+            return None, f"{key}: {raw!r} is not a list"
+        items = [str(s).strip() for s in items if str(s).strip()] if isinstance(items, list) else []
+        return (
+            (items, None)
+            if items
+            else (None, f"{key}: give at least one phrase (a JSON list or ';'-separated)")
+        )
+    return None, f"{key} is not a code check"
+
+
+def encode_check(value: Any) -> str:
+    """A check value as an experiment or proposal stores it: true/false, a number, or a JSON list."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return json.dumps(value)
+    return str(value)
+
+
+def with_variant(g: Guideline, item: str, value: str) -> Guideline:
+    """``g`` with the genre or one code check set to ``value``; other items are returned unchanged."""
+    if item == "G-genre":
+        return replace(g, genre=value)
+    key = item[2:] if item.startswith("G-") else ""
+    if key in CHECK_KEYS:
+        parsed, why = check_variant(key, value)
+        if why is None:
+            return replace(g, checks={**g.checks, key: parsed})
+    return g
 
 
 def _validate_checks(checks: dict[str, Any]) -> None:
@@ -342,6 +398,17 @@ def for_services(svc: Any) -> Guideline | None:
     return load(svc.db, svc.env.config_dir, CATALOG, capabilities(svc))
 
 
+def for_idea(g: Guideline | None, idea: dict[str, Any], db: Database) -> Guideline | None:
+    """The guideline as ``idea`` sees it: on the treatment arm of a running genre or code-check experiment,
+    that item is the variant; everything else (and every control idea) follows the guideline."""
+    if g is None or not idea.get("experiment_id") or idea.get("experiment_arm") != "treatment":
+        return g
+    exp = db.get("experiments", idea["experiment_id"])
+    if not exp or exp["status"] != "running":
+        return g
+    return with_variant(g, str(exp["variable"]), str(exp["treatment"]))
+
+
 def variant_for(idea: dict[str, Any], db: Database) -> dict[str, str]:
     """``{rule_id: variant_text}`` when the idea is on the treatment arm of a running craft-rule experiment.
 
@@ -355,7 +422,12 @@ def variant_for(idea: dict[str, Any], db: Database) -> dict[str, str]:
     if not exp or exp["status"] != "running":
         return {}
     var = str(exp["variable"])
-    if not var.startswith("G-") or var == "G-runtime" or var[2:] in CATALOG:
+    if (
+        not var.startswith("G-")
+        or var in ("G-runtime", "G-genre")
+        or var[2:] in CATALOG
+        or var[2:] in CHECK_KEYS
+    ):
         return {}
     return {var: str(exp["treatment"])}
 
