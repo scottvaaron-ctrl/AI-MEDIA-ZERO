@@ -132,7 +132,7 @@ safety:
     - medical claims
     - legal claims
     - financial advice
-    - politics or persuasion
+    - political advocacy (the script argues for one side; neutral explanation of politics is fine)
     - emergencies or disasters in progress
     - allegations involving real, living people
   banned_patterns:
