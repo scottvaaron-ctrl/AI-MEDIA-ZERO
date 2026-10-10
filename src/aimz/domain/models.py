@@ -109,6 +109,13 @@ class SelectionDecisionWithBreaks(SelectionDecision):
     )
 
 
+class HookSurprise(BaseModel):
+    """The critic's second look at a hook the code flagged as a definition ("X is a ...")."""
+
+    surprising: bool
+    reason: str = ""
+
+
 class GenreFit(BaseModel):
     """The editor's verdict on whether one idea fits the channel guideline's genre."""
 

@@ -13,8 +13,9 @@ Commands run from `C:\Users\scott\Documents\Agentic_Youtube` in PowerShell. `py`
 
 ### A0a. YouTube login: **renewed 8 Oct**; one step left
 - [x] Run `.\.venv\Scripts\python.exe -m aimz youtube auth` and pick **Backhouse Explainers** (done 8 Oct).
-- [ ] In Google Cloud Console → APIs & Services → OAuth consent screen, set the status to **In production** so
-      the login stops expiring every 7 days.
+- [x] In Google Cloud Console → APIs & Services → OAuth consent screen, set the status to **In production** so
+      the login stops expiring every 7 days. (Done 9 Oct by an agent with your OK; project belongs to
+      backhousegroupnj@gmail.com. The next `youtube auth` gives a login that no longer expires weekly.)
 - [x] The 7 Oct test video is up unlisted: https://www.youtube.com/watch?v=fAO4zO8QbpY (8 Oct).
 
 ### A0. YouTube API compliance review: **record a screencast, reply by Thu 15 Oct**

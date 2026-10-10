@@ -682,3 +682,63 @@ def test_select_note_unchanged_without_gate(svc, monkeypatch) -> None:  # noqa: 
     with svc.tracker.run("test") as run:
         orch.editor.select(run, orch.strategy.current(), [], k=1)
     assert "genre" not in run.summary["selection"]
+
+
+# ---- second look at definition openings (owner approved 2026-10-09) --------------------------------------
+
+MISTI = "Misti is a volcano only 12 kilometers from Arequipa, home to over a million people."
+NORDLINGEN = "The Battle of Nordlingen was a decisive clash during the Thirty Years' War."
+
+
+def _judged(g: guideline.Guideline, opening: str, verdict: bool | None) -> tuple[list[str], list[str]]:
+    asked: list[str] = []
+
+    def judge(text: str) -> bool | None:
+        asked.append(text)
+        return verdict
+
+    return _gate(_draft(opening), g, definition_judge=judge).required_revisions, asked
+
+
+def test_flagged_definition_passes_when_the_second_look_finds_a_surprise(g) -> None:  # noqa: ANN001
+    out, asked = _judged(g, MISTI, True)
+    assert not any(x.startswith("Hook opens with a definition") for x in out)
+    assert asked == [MISTI]  # hook line and first sentence are the same text: asked once
+
+
+def test_flagged_definition_fails_when_the_second_look_finds_none(g) -> None:  # noqa: ANN001
+    out, _ = _judged(g, NORDLINGEN, False)
+    assert any(x.startswith("Hook opens with a definition") for x in out)
+
+
+def test_unreadable_second_look_fails_closed(g) -> None:  # noqa: ANN001
+    out, _ = _judged(g, NORDLINGEN, None)
+    assert any(x.startswith("Hook opens with a definition") for x in out)
+
+
+def test_second_look_only_for_definition_openings(g) -> None:  # noqa: ANN001
+    _, asked = _judged(g, "Amalthea hid in plain sight for centuries and nobody noticed.", True)
+    assert asked == []
+
+
+def test_critic_judge_asks_the_model_and_fails_closed(svc: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aimz.agents.critic import CriticAgent
+
+    critic = CriticAgent(svc, None)
+    seen: list[str] = []
+    real = svc.llm.complete_model
+
+    def spy(ctx: Any, system: str, user: str, schema: Any, purpose: str, **kw: Any) -> Any:
+        seen.append(purpose)
+        assert MISTI in user and "Ashton-under-Lyne" in user  # the hook and the owner's examples
+        return real(ctx, system, user, schema, purpose, **kw)
+
+    monkeypatch.setattr(svc.llm, "complete_model", spy)
+    assert critic.judge_definition(svc.ctx(), MISTI) is False  # the fixture model says no surprise
+    assert seen == ["critic_hook_second_look"]
+
+    def broken(*a: Any, **kw: Any) -> Any:
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(svc.llm, "complete_model", broken)
+    assert critic.judge_definition(svc.ctx(), MISTI) is None

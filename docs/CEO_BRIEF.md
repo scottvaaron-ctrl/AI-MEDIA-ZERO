@@ -5,9 +5,10 @@ _Updated 2026-10-09: **Part 2 piece C (sound) is merged and live: new videos are
 -14.1 to -14.5 on all voices, peaks well under the limit). If Kokoro fails, the whole video uses the old voice
 (kristin) and `aimz status` says so. Owner decisions 9 Oct: picture-check floor kept; constitution §5 media
 sentence applied (stock photos/video and free music allowed; Pexels/Pixabay keys still needed for piece D).
-Open owner question: the "X is a..." hook check — proposal: keep the code check as a trigger, and let an AI
-second look pass a flagged hook only when its first clause states something surprising (needs owner yes).
-Still due: YouTube screencast by Thu 15 Oct; OAuth consent screen to "In production".**
+Hook check (owner-approved): a flagged "X is a..." opening now gets an AI second look and passes only if it
+states something surprising (on past scripts: 3 of 16 pass). Google login: consent screen set to "In production"
+(9 Oct); the re-login during the screencast makes it last. Still due: YouTube screencast by Thu 15 Oct (the
+agent records it with owner checks before upload/send); Pexels/Pixabay keys (owner pastes into .env).**
 Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
 channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but
 changes nothing until the guideline is written. **8 Oct: owner logged in to YouTube again (uploads resume; the

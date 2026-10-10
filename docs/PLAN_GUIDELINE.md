@@ -266,8 +266,12 @@ Do these in order.
        plan: `docs/superpowers/plans/2026-10-09-sound.md`.
      * **D, stock video:** next. The constitution §5 media sentence is in (2026-10-09); the owner's Pexels and
        Pixabay keys are still needed (`docs/OWNER_TODO.md` A4).
-     * **Owner question 2026-10-09 (open):** the "X is a..." hook check also blocks some good hooks; the owner
-       asked whether it can pass good definition openings and fail bad ones. Proposal in the CEO brief.
+     * **Hook second look (owner-approved 2026-10-09, merged):** when `hook_no_definition` flags an "X is a..."
+       opening, the critic asks the model once (`CriticAgent.judge_definition`, purpose `critic_hook_second_look`,
+       prompt `HOOK_SECOND_LOOK` with the channel's own good and bad openings) whether it states something
+       surprising; only a clear yes passes, an unreadable answer fails. On the 16 distinct openings the check
+       caught in past scripts, qwen3:8b passed 3 (Misti 12 km from a city of a million, Typhoid Mary, the 18-minute
+       silent film) and failed 13 (Nordlingen, Ashton-under-Lyne, the beetle, the zodiacal light, ...).
      * Licence and source notes for all of these are in `docs/VIDEO_QUALITY_RESEARCH.md`.
    * **After piece A is merged:** the live database gets migration `0008` automatically on the next run. Back up
      `data/aimz.sqlite3` first (copy it into `data/backups/`).
@@ -302,3 +306,4 @@ Do these in order.
 | 2026-10-08 | Part 2, piece A | Split part 2 into pieces A to D (order owner-approved). Owner logged in to YouTube; test video uploaded unlisted (https://www.youtube.com/watch?v=fAO4zO8QbpY). Built piece A on `feat/script-checks`: guideline hook check keys, critic code checks for the hook, guideline genre in `identity.genre_line`, editor genre gate with `ideas.genre_checked_version` (migration `0008`). 448 tests pass; ruff and mypy clean. Not merged; live database not migrated yet. | Merge piece A (back up the database first); then spec for piece B |
 | 2026-10-08 | Part 2, piece B | Built piece B on `feat/picture-relevance`: local SigLIP 2 picture-matching check (ONNX, optional extra `vision`, `doctor --fix` downloads the model), per-beat `relevance` entries in run notes, text card when nothing passes, fallback to old picture choice with an `aimz status` warning. Calibrated on 50 hand-labelled pairs (floor 0.00005, deliberately low). Live smoke test fixed Wikimedia preview width (330 px). No credits or disclosure on screen; credit and disclosure in the description and platform labels; `docs/COMPLIANCE.md` updated; default layout `full_bleed`. Not merged. | Merge piece B (install the `vision` extra into `.venv`, run `doctor --fix`); owner confirms the floor; then spec for piece C (Kokoro voice, -14 LUFS), then D |
 | 2026-10-09 | Part 2, piece C | Owner confirmed the picture floor and approved the constitution §5 media sentence (applied). Built piece C on `feat/sound`: Kokoro provider (Bella), voice router with whole-video kristin fallback and `voice_unavailable` alert, `aimz voice set/show` (owner voice the AI cannot change), loudness levelling. Live voices showed two-pass loudnorm misses the target; replaced by measured gain + oversampled limiter + stereo AAC (-14.1 to -14.5 LUFS, ~-4.7 dBTP on all voices). Merged; `aimz voice set kokoro:af_bella` run. | Owner: hook-check answer; then piece D (needs Pexels/Pixabay keys) |
+| 2026-10-09 | Hook second look; owner items | Owner approved the hook second look: built, tested on the 16 real caught openings (3 pass, 13 fail), merged. Consent screen set to In production (backhousegroupnj account) with owner OK. Screencast scheduled for just after midnight (needs a fresh posting day for the live upload). | Screencast; owner adds Pexels/Pixabay keys; piece D |
