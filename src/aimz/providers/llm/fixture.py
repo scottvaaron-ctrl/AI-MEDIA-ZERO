@@ -117,6 +117,9 @@ class FixtureLLMProvider(LLMProvider):
             )
         return {"ideas": ideas}
 
+    def _gen_HookSurprise(self, user: str) -> dict[str, Any]:  # noqa: N802
+        return {"surprising": False, "reason": "fixture"}
+
     def _gen_GenreFit(self, user: str) -> dict[str, Any]:  # noqa: N802
         return {"fits": True, "reason": "fixture"}
 

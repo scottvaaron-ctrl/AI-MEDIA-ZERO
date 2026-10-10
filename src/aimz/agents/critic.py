@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from aimz import guideline
@@ -10,7 +11,7 @@ from aimz.agents.base import Agent
 from aimz.agents.script import WORDS_PER_SECOND
 from aimz.core.errors import TechnicalFailure
 from aimz.core.runs import RunContext
-from aimz.domain.models import CriticResult, FactCheckResult, ScriptDraft, SourceItemView
+from aimz.domain.models import CriticResult, FactCheckResult, HookSurprise, ScriptDraft, SourceItemView
 from aimz.guideline import Guideline
 from aimz.util import dumps, now_iso
 
@@ -67,6 +68,30 @@ REASK = (
     "made (fixable using only the sources). If you find no concrete problem, return empty lists."
 )
 
+# The code flags any "<subject> is/was a ..." opening. Most are flat (they only classify the subject), but some
+# put the surprise right in the definition. The examples are real openings from this channel's scripts, sorted by
+# the owner's rule (2026-10-09): the opening must make a viewer want to know more within its first clause.
+HOOK_SECOND_LOOK = """A video's opening line starts like a definition ("X is a ..."). Decide whether it still works as a hook.
+
+It WORKS (surprising true) only if the line itself states something surprising, specific or tense: an unexpected
+fact, a striking number with stakes, a contradiction, or a consequence. It does NOT work (surprising false) if it
+mainly tells you what category the subject belongs to, however vivid the adjectives.
+
+Works:
+- "Misti is a volcano only 12 kilometers from Arequipa, home to over a million people."
+- "Mary Mallon was an Irish-born cook who unknowingly infected dozens of people with typhoid fever."
+Does not work:
+- "The Battle of Nordlingen was a decisive clash during the Thirty Years' War."
+- "Ashton-under-Lyne is a market town in Tameside, Greater Manchester, England."
+- "The huhu beetle is a longhorn beetle, reaching up to 5 cm in length."
+- "The zodiacal light is a faint glow visible in the night sky, often mistaken for the false dawn."
+
+When unsure, answer false.
+
+Opening line: {hook}
+
+Answer surprising true or false and a one-line reason."""
+
 
 def _norm(s: str) -> str:
     return " ".join(re.sub(r"[^\w\s$%.]", " ", s.lower()).split())
@@ -121,11 +146,14 @@ def allegation_sentences(text: str) -> list[str]:
     return out
 
 
-def hook_revisions(texts: list[str], checks: dict[str, Any]) -> list[str]:
+def hook_revisions(
+    texts: list[str], checks: dict[str, Any], definition_judge: Callable[[str], bool | None] | None = None
+) -> list[str]:
     """Guideline hook checks on the hook line and the first narration sentence.
 
     Each distinct text is checked for banned openings, the word limit, a question and a definition;
-    identical messages are reported once."""
+    identical messages are reported once. A definition-shaped text passes only if ``definition_judge``
+    says it states a surprise (owner decision 2026-10-09); None (no judge, or an unreadable answer) fails."""
     out: list[str] = []
     seen: set[str] = set()
     for raw in texts:
@@ -147,6 +175,7 @@ def hook_revisions(texts: list[str], checks: dict[str, Any]) -> list[str]:
             checks.get("hook_no_definition")
             and words[0].lower().strip(_QUOTES + ",.;:!?") not in ("there", "here")
             and _DEFINITION_RE.match(text)
+            and not (definition_judge is not None and definition_judge(text) is True)
         ):
             quoted = " ".join(words[:8]).rstrip(".,;:!?")
             out.append(f'Hook opens with a definition ("{quoted}..."); state the surprise instead')
@@ -215,6 +244,14 @@ class CriticAgent(Agent):
                     # retried later instead of being rejected as if the script were bad.
                     raise TechnicalFailure(f"critic model call failed: {type(exc).__name__}: {exc}") from exc
 
+            looked: dict[str, bool | None] = {}  # one second look per hook text, however often gate() runs
+
+            def judge(text: str) -> bool | None:
+                if text not in looked:
+                    looked[text] = self.judge_definition(self.pctx(run, script_id, span), text)
+                    span.output_refs["hook_second_look"] = looked[text]
+                return looked[text]
+
             def gate(r: CriticResult, waive: bool = False) -> CriticResult:
                 return self._overrides(
                     r.model_copy(deep=True),
@@ -227,6 +264,7 @@ class CriticAgent(Agent):
                     guideline=g,
                     replace=replace,
                     runtime_override=tested_runtime,
+                    definition_judge=judge,
                 )
 
             raw = ask(user)
@@ -258,6 +296,25 @@ class CriticAgent(Agent):
             span.output_refs["score"] = result.score
         return result
 
+    def judge_definition(self, ctx: Any, text: str) -> bool | None:
+        """Second look at a hook shaped like a definition: True when it states something surprising or specific,
+        False when it only classifies its subject, None when the answer is unreadable (the hook then fails)."""
+        user = HOOK_SECOND_LOOK.format(hook=text)
+        try:
+            verdict = self.ask(
+                ctx,
+                "Critic / QA agent",
+                user,
+                HookSurprise,
+                "critic_hook_second_look",
+                temperature=0.0,
+                max_tokens=200,
+            )
+        except Exception as exc:  # the LLM layer already retried
+            self.log.warning("hook second look unreadable (%s); the hook fails", exc)
+            return None
+        return verdict.surprising
+
     @staticmethod
     def _unexplained(result: CriticResult) -> bool:
         """The model named no problem and no required change (its own output, before any override)."""
@@ -273,6 +330,7 @@ class CriticAgent(Agent):
         g: Guideline,
         replace: dict[str, str] | None,
         runtime_override: int | None = None,
+        definition_judge: Callable[[str], bool | None] | None = None,
     ) -> list[str]:
         """Required revisions from the owner's guideline: broken rules and the code checks.
 
@@ -290,7 +348,7 @@ class CriticAgent(Agent):
         if runtime_override is None and not g.runtime_min <= seconds <= g.runtime_max:
             out.append(f"Runtime {seconds:.0f}s is outside the guideline's {g.runtime_min}-{g.runtime_max}s")
         first = _SENTENCES.split(narration.strip(), maxsplit=1)[0]
-        out += hook_revisions([draft.hook_line, first], g.checks)
+        out += hook_revisions([draft.hook_line, first], g.checks, definition_judge)
         limit = g.checks.get("title_max_chars")
         if limit is not None and len(draft.title) > int(limit):
             out.append(f"Title is {len(draft.title)} characters; the guideline allows {int(limit)}")
@@ -309,6 +367,7 @@ class CriticAgent(Agent):
         guideline: Guideline | None = None,
         replace: dict[str, str] | None = None,
         runtime_override: int | None = None,
+        definition_judge: Callable[[str], bool | None] | None = None,
     ) -> CriticResult:
         """Apply the deterministic gate. ``waive_unexplained`` drops the two gates that need no stated
         reason (the score threshold and the deserves-video verdict); every other gate still applies."""
@@ -333,7 +392,7 @@ class CriticAgent(Agent):
         if guideline is not None:
             result.required_revisions.extend(
                 CriticAgent._guideline_revisions(
-                    result, draft, narration, guideline, replace, runtime_override
+                    result, draft, narration, guideline, replace, runtime_override, definition_judge
                 )
             )
         # The V0 pipeline renders archival photos and generated cards only; it cannot produce synthetic
