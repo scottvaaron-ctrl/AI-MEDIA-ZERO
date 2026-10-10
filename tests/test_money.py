@@ -20,13 +20,14 @@ ROW = {
 }
 
 
-def test_new_parts_are_shown_but_weightless_by_default(svc) -> None:  # noqa: ANN001
+def test_watch_time_counts_and_revenue_is_weightless_by_default(svc) -> None:  # noqa: ANN001
     weights = score_weights(svc.config)
-    assert weights["watch_time"] == 0 and weights["revenue"] == 0
+    assert weights["watch_time"] == pytest.approx(0.15)  # owner decision 2026-10-09
+    assert weights["revenue"] == 0
     parts = score_parts({**ROW, "revenue_usd": 0.05})
     assert parts is not None and parts["watch_time"] == pytest.approx(0.4)
     assert parts["revenue"] == pytest.approx(0.05 * 1000 / 1200 / 0.20)
-    base = {k: v for k, v in weights.items() if k not in {"watch_time", "revenue"}}
+    base = {k: v for k, v in weights.items() if k != "revenue"}
     assert performance_score({**ROW, "revenue_usd": 0.05}, weights) == pytest.approx(
         performance_score(ROW, base)
     )

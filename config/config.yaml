@@ -41,7 +41,7 @@ scoring:
     subs: 0.20
     completion: 0.20
     reach: 0.20
-    watch_time: 0.0
+    watch_time: 0.15  # owner decision 2026-10-09: count how long people watch
     revenue: 0.0
 
 allocation:

@@ -174,7 +174,7 @@ def test_requeue_refuses_publications_that_did_not_fail(svc) -> None:  # noqa: A
     with svc.tracker.run("publish") as run:
         stage.publish(run, vid)
     pub_id = svc.db.one("SELECT * FROM publications")["id"]
-    with pytest.raises(ValueError, match="only failed, blocked or abandoned"):
+    with pytest.raises(ValueError, match="only failed, blocked, abandoned or dropped"):
         stage.requeue(pub_id)
     with pytest.raises(ValueError, match="not found"):
         stage.requeue("pub_does_not_exist")

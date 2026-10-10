@@ -341,6 +341,25 @@ def publish_retry(
     _print_json(res)
 
 
+@publish_app.command("drop")
+def publish_drop(
+    publication_id: str,
+    reason: Annotated[str, typer.Option("--reason", help="Why (recorded with the publication)")] = "",
+) -> None:
+    """Let an upload that never went out go for good: never retried, no longer listed in `aimz status`.
+
+    `aimz publish retry <id>` still undoes it.
+    """
+    svc = _svc(quiet=True)
+    try:
+        _orch(svc).publisher.drop(publication_id, reason)
+        console.print(f"dropped publication {publication_id}")
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    finally:
+        svc.close()
+
+
 @publish_app.command("mark-posted")
 def publish_mark_posted(
     publication_id: str, url: str | None = None, platform_video_id: str | None = None

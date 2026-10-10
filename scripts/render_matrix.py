@@ -45,6 +45,14 @@ def sample_values(var: str, definition: Any, present_voices: set[str]) -> list[t
     return out
 
 
+def sample_voice(present: list[str], preferred: str | None) -> str | None:
+    """The voice for a sample that is not about the voice: the channel's own when present, else the first
+    present cleared voice (there is no default voice since 2026-10-01), else None."""
+    if preferred and preferred in present:
+        return preferred
+    return present[0] if present else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="one setting name")
@@ -63,6 +71,10 @@ def main() -> int:
     svc = build_services(quiet_logs=True)
     producer = ProducerAgent(svc, None)
     present = set(getattr(svc.tts, "present_voices", lambda: [])())
+    from aimz import guideline, identity
+
+    g = guideline.for_services(svc)
+    channel_voice = (g.locked.get("voice") if g else None) or identity.load(svc.db).get("voice")
     beats = [Beat.model_validate(b) for b in BEATS]
     ffmpeg = getattr(svc.renderer, "ffmpeg", None)
     if not ffmpeg:
@@ -74,12 +86,23 @@ def main() -> int:
         if definition.kind != "production" or (args.only and var != args.only):
             continue
         for value, skip in sample_values(var, definition, present):
-            name = f"{var}={value}".replace("/", "_").replace(":", "_")  # ":" (kokoro:...) is not allowed in Windows paths
+            name = f"{var}={value}".replace("/", "_").replace(
+                ":", "_"
+            )  # ":" (kokoro:...) is not allowed in Windows paths
             if skip:
                 results.append({"sample": name, "ok": None, "problems": [skip]})
                 print(f"SKIP {name}: {skip}")
                 continue
             chosen = {**producer.default_settings(), var: definition.check(value)[0]}
+            if var != "voice":
+                voice = sample_voice(
+                    sorted(present), producer.default_settings().get("voice") or channel_voice
+                )
+                if voice is None:
+                    results.append({"sample": name, "ok": None, "problems": ["no voice downloaded"]})
+                    print(f"SKIP {name}: no voice downloaded")
+                    continue
+                chosen["voice"] = voice
             out_dir = out_root / name
             try:
                 ctx = svc.ctx()
