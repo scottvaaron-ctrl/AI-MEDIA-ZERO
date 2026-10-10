@@ -62,8 +62,12 @@ platform data where a platform's policy requires it. Only the owner can resume.
 
 Content touching any of the following is never auto-published and is routed to
 the owner for review: realistic depictions of real people, altered real-world
-events, medical claims, legal claims, financial advice, politics or persuasion,
-emergencies in progress, and allegations involving real, living people.
+events, medical claims, legal claims, financial advice, emergencies in progress,
+and allegations involving real, living people.
+
+Politics is a subject, not a risk: content may explain political events, institutions
+and ideas when it stays neutral. Political advocacy (content that argues for one
+side) is never published; it is rewritten to be neutral or dropped.
 
 ## 7. Audience conduct
 

@@ -109,6 +109,14 @@ class SelectionDecisionWithBreaks(SelectionDecision):
     )
 
 
+class AdvocacyCheck(BaseModel):
+    """The critic's second look at a script that touches politics: does it argue for one side?"""
+
+    takes_side: bool
+    quote: str = ""  # the sentence that takes a side, copied from the script
+    reason: str = ""
+
+
 class HookSurprise(BaseModel):
     """The critic's second look at a hook the code flagged as a definition ("X is a ...")."""
 

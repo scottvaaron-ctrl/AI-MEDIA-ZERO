@@ -117,6 +117,9 @@ class FixtureLLMProvider(LLMProvider):
             )
         return {"ideas": ideas}
 
+    def _gen_AdvocacyCheck(self, user: str) -> dict[str, Any]:  # noqa: N802
+        return {"takes_side": False, "quote": "", "reason": "fixture"}
+
     def _gen_HookSurprise(self, user: str) -> dict[str, Any]:  # noqa: N802
         return {"surprising": False, "reason": "fixture"}
 

@@ -12,6 +12,7 @@ _Updated 2026-10-09 (end of day)._
   on all voices). If Kokoro fails, the whole video uses a backup voice and `aimz status` says so.
 - **Hooks:** an "X is a..." opening gets an AI second look and passes only if it states something surprising
   (3 of 16 past openings pass).
+- **Politics rule (owner, 10 Oct):** talking about politics is fine; only taking a side fails. Neutral political scripts are no longer sent for owner review; a focused AI check catches scripts that argue for one side and sends them back for a neutral rewrite (constitution section 6 updated). A future channel is planned as political science explainers. Owner reviewed the 11 waiting scripts: 6 approved (one more failed the genre check), 5 rejected.
 - **Owner decisions 9 Oct:** picture-check floor kept; constitution section 5 allows stock photos/video and free music.
 - **Google login:** consent screen set to "In production"; the re-login during the screencast makes the login last.
 - **Stock video (piece D) is live:** free Pixabay clips and photos, each checked against the narration before use;

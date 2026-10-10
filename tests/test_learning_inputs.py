@@ -96,7 +96,6 @@ ALL_TOPICS = [
     "medical claims",
     "legal claims",
     "financial advice",
-    "politics or persuasion",
     "emergencies or disasters in progress",
     "allegations involving real, living people",
 ]
@@ -524,3 +523,101 @@ def test_without_guideline_prompt_unchanged(svc) -> None:  # noqa: ANN001
     assert "guideline_item" not in prompt and "follows the guideline" not in prompt
     assert svc.db.get_state(identity.REJECTED_KEY) != "identity is set by the guideline"
     assert orch.strategy.current().get("guideline_version") is None
+
+
+# -- politics: neutral passes, taking a side fails (owner rule 2026-10-10) -------------------------------
+
+
+def test_neutral_politics_is_not_flagged_by_words_alone() -> None:
+    text = "The president signed the accords after the election; each party in parliament voted on it."
+    r = _review(_draft(text), [], [])
+    assert not r.elevated_review_required and r.passed
+
+
+def test_taking_a_side_fails_and_asks_for_a_neutral_rewrite() -> None:
+    from aimz.agents.critic import ADVOCACY_TOPIC
+
+    text = "The accords are the only sensible policy and every voter should back the party that wrote them."
+    r = _review(_draft(text), [ADVOCACY_TOPIC], ["every voter should back the party"])
+    assert not r.passed
+    assert any("neutral" in x.lower() for x in r.required_revisions)
+    assert ADVOCACY_TOPIC not in r.elevated_review_reasons  # a fail and a rewrite, not an owner review
+
+
+def test_an_unquoted_advocacy_flag_is_dropped() -> None:
+    from aimz.agents.critic import ADVOCACY_TOPIC
+
+    r = _review(_draft("The president signed the accords in 2020."), [ADVOCACY_TOPIC], [])
+    assert r.passed and not r.required_revisions
+
+
+def test_config_and_constitution_name_advocacy_not_politics(svc) -> None:  # noqa: ANN001
+    from aimz.agents.critic import ADVOCACY_TOPIC
+
+    topics = svc.config.get("safety.elevated_review_topics")
+    assert ADVOCACY_TOPIC in topics and "politics or persuasion" not in topics
+    constitution = (svc.env.config_dir / "constitution.md").read_text(encoding="utf-8")
+    assert "political advocacy" in constitution.lower() and "politics or persuasion" not in constitution
+
+
+def _judged(text: str, verdict: str | None, calls: list[str]) -> CriticResult:
+    draft = _draft(text)
+    narration = " ".join(b.narration for b in draft.beats)
+    base = CriticResult.model_validate(
+        {"pass": True, "score": 85, "hook_strength": 8, "originality": 8, "factual_support": 8, "pacing": 8,
+         "payoff": 8, "clarity": 8}
+    )  # fmt: skip
+
+    def judge(t: str) -> str | None:
+        calls.append(t)
+        return verdict
+
+    return CriticAgent._overrides(
+        base,
+        draft,
+        narration.lower(),
+        FactCheckResult(verdicts=[], overall="pass"),
+        70,
+        [],
+        advocacy_judge=judge,
+    )
+
+
+def test_political_scripts_get_an_advocacy_second_look() -> None:
+    calls: list[str] = []
+    slant = "voters should punish leaders who oppose it"
+    r = _judged(f"The president signed the accords. {slant.capitalize()}.", slant, calls)
+    assert len(calls) == 1 and not r.passed
+    assert any("Takes a side" in x and slant in x for x in r.required_revisions)
+
+
+def test_neutral_verdict_passes_and_non_political_scripts_are_not_asked() -> None:
+    calls: list[str] = []
+    r = _judged("The president signed the accords after a vote in parliament.", "", calls)
+    assert len(calls) == 1 and r.passed
+    calls.clear()
+    r = _judged("Amalthea was found by telescope in 1892.", "anything", calls)
+    assert calls == [] and r.passed
+
+
+def test_unreadable_advocacy_answer_fails_closed_and_invented_quotes_do_not_count() -> None:
+    r = _judged("The president signed the accords.", None, [])
+    assert not r.passed and any("could not be checked" in x for x in r.required_revisions)
+    r = _judged("The president signed the accords.", "everyone must vote for the green party", [])
+    assert r.passed  # the quote is not in the script
+
+
+def test_critic_advocacy_judge_asks_the_model(svc, monkeypatch) -> None:  # noqa: ANN001
+    from aimz.agents.critic import CriticAgent as C
+
+    critic = C(svc, None)
+    seen: list[str] = []
+    real = svc.llm.complete_model
+
+    def spy(ctx, system, user, schema, purpose, **kw):  # noqa: ANN001, ANN202
+        seen.append(purpose)
+        return real(ctx, system, user, schema, purpose, **kw)
+
+    monkeypatch.setattr(svc.llm, "complete_model", spy)
+    assert critic.judge_advocacy(svc.ctx(), "The president signed it.") == ""  # fixture: neutral
+    assert seen == ["critic_advocacy_check"]

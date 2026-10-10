@@ -11,9 +11,41 @@ from aimz.agents.base import Agent
 from aimz.agents.script import WORDS_PER_SECOND
 from aimz.core.errors import TechnicalFailure
 from aimz.core.runs import RunContext
-from aimz.domain.models import CriticResult, FactCheckResult, HookSurprise, ScriptDraft, SourceItemView
+from aimz.domain.models import (
+    AdvocacyCheck,
+    CriticResult,
+    FactCheckResult,
+    HookSurprise,
+    ScriptDraft,
+    SourceItemView,
+)
 from aimz.guideline import Guideline
 from aimz.util import dumps, now_iso
+
+# Owner rule 2026-10-10: talking about politics is not political. Neutral explanation passes; a script that argues
+# for one side fails and is rewritten. No keyword list: words cannot tell explaining from arguing, so the critic
+# judges it and must quote the script.
+ADVOCACY_TOPIC = (
+    "political advocacy (the script argues for one side; neutral explanation of politics is fine)"
+)
+# Words that make a script political enough for the advocacy second look (a trigger only: the look decides).
+POLITICS_TRIGGERS = (
+    "election", "vote", "voter", "senator", "president", "party", "parliament", "congress", "government",
+    "minister", "campaign", "policy", "policies", "treaty", "accords", "left-wing", "right-wing", "democrat",
+    "republican", "communist", "socialist", "conservative", "liberal", "legislat", "ballot",
+)  # fmt: skip
+ADVOCACY_SECOND_LOOK = """Read this short video script. Does it argue for one side of a political question?
+
+It TAKES A SIDE if it tells the viewer what to think, support or oppose, praises or condemns a party, leader,
+policy or country as right or wrong, or calls one side correct ("the only sensible policy", "should back",
+"on the wrong side of history"). It is NEUTRAL if it explains what happened, what each side holds, or what an
+institution or symbol means, even when the topic is political.
+
+If it takes a side, copy the one sentence that does it, exactly as written, into quote. If it is neutral, leave
+quote empty.
+
+Script:
+{script}"""
 
 ELEVATED_KEYWORDS = {
     "medical claims": ["cure", "treatment", "diagnos", "vaccine", "dosage", "symptom", "disease", "cancer"],
@@ -29,15 +61,6 @@ ELEVATED_KEYWORDS = {
         "guaranteed return",
         "crypto",
         "trading strategy",
-    ],
-    "politics or persuasion": [
-        "election",
-        "vote for",
-        "senator",
-        "president",
-        "party",
-        "left-wing",
-        "right-wing",
     ],
     "emergencies or disasters in progress": [
         "breaking",
@@ -253,6 +276,14 @@ class CriticAgent(Agent):
                     span.output_refs["hook_second_look"] = looked[text]
                 return looked[text]
 
+            checked: dict[str, str | None] = {}  # one advocacy look per script text
+
+            def advocacy(text: str) -> str | None:
+                if text not in checked:
+                    checked[text] = self.judge_advocacy(self.pctx(run, script_id, span), text)
+                    span.output_refs["advocacy_check"] = checked[text]
+                return checked[text]
+
             def gate(r: CriticResult, waive: bool = False) -> CriticResult:
                 return self._overrides(
                     r.model_copy(deep=True),
@@ -266,6 +297,7 @@ class CriticAgent(Agent):
                     replace=replace,
                     runtime_override=tested_runtime,
                     definition_judge=judge,
+                    advocacy_judge=advocacy,
                 )
 
             raw = ask(user)
@@ -296,6 +328,24 @@ class CriticAgent(Agent):
             span.output_refs["pass"] = result.passed
             span.output_refs["score"] = result.score
         return result
+
+    def judge_advocacy(self, ctx: Any, script: str) -> str | None:
+        """Second look at a script that touches politics (owner rule 2026-10-10: neutral passes, taking a side
+        fails). Returns the sentence that takes a side, "" when neutral, None when the answer is unreadable."""
+        try:
+            verdict = self.ask(
+                ctx,
+                "Critic / QA agent",
+                ADVOCACY_SECOND_LOOK.format(script=script[:4000]),
+                AdvocacyCheck,
+                "critic_advocacy_check",
+                temperature=0.0,
+                max_tokens=300,
+            )
+        except Exception as exc:  # the LLM layer already retried
+            self.log.warning("advocacy check unreadable (%s); the script fails", exc)
+            return None
+        return verdict.quote.strip() if verdict.takes_side else ""
 
     def judge_definition(self, ctx: Any, text: str) -> bool | None:
         """Second look at a hook shaped like a definition: True when it states something surprising or specific,
@@ -369,6 +419,7 @@ class CriticAgent(Agent):
         replace: dict[str, str] | None = None,
         runtime_override: int | None = None,
         definition_judge: Callable[[str], bool | None] | None = None,
+        advocacy_judge: Callable[[str], str | None] | None = None,
     ) -> CriticResult:
         """Apply the deterministic gate. ``waive_unexplained`` drops the two gates that need no stated
         reason (the score threshold and the deserves-video verdict); every other gate still applies."""
@@ -410,6 +461,33 @@ class CriticAgent(Agent):
         )
         if result.elevated_review_reasons and not quoted:
             result.problems.append("elevated-review flags dropped: no supporting quote from the script")
+        advocacy = {r for r in reasons if "politic" in r.lower()}
+        full = " ".join([draft.title, draft.hook_line, *(b.narration for b in draft.beats)])
+        if (
+            not advocacy
+            and advocacy_judge is not None
+            and any(re.search(r"\b" + re.escape(k), full.lower()) for k in POLITICS_TRIGGERS)
+        ):
+            verdict = advocacy_judge(full)
+            if verdict is None:
+                result.required_revisions.append(
+                    "Political content could not be checked for taking a side; rewrite it to state facts neutrally."
+                )
+                result.passed = False
+            elif len(_norm(verdict)) >= 4 and _norm(verdict) in _norm(full):
+                result.required_revisions.append(
+                    f'Takes a side on a political question ("{verdict.strip()[:120]}"); present it neutrally: '
+                    "explain what each side holds and what happened, without arguing for one."
+                )
+                result.passed = False
+        if advocacy:
+            reasons -= advocacy
+            quote = next((q for q in result.elevated_review_evidence if len(_norm(q)) >= 4), "")
+            result.required_revisions.append(
+                f'Takes a side on a political question ("{quote[:120]}"); present it neutrally: explain what each '
+                "side holds and what happened, without arguing for one."
+            )
+            result.passed = False
         # The keyword backstop needs no quote. Matching at word starts keeps "cure" out of "secure".
         for topic, kws in ELEVATED_KEYWORDS.items():
             if any(re.search(r"\b" + re.escape(k), low) for k in kws):
@@ -418,10 +496,8 @@ class CriticAgent(Agent):
         if alleged:
             reasons.add("allegations involving real, living people")
             result.elevated_review_evidence = [*result.elevated_review_evidence, *alleged[:3]]
-        result.elevated_review_required = False
-        if reasons:
-            result.elevated_review_required = True
-            result.elevated_review_reasons = sorted(reasons)
+        result.elevated_review_required = bool(reasons)
+        result.elevated_review_reasons = sorted(reasons)
         if (
             result.policy_risk == "high"
             or result.deceptive_media_risk == "high"
