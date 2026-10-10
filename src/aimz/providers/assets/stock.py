@@ -50,8 +50,13 @@ class StockAssetProvider(AssetProvider):
     photo_url = ""
     video_url = ""
 
-    def __init__(self, api_key: str, user_agent: str, client: httpx.Client | None = None):
+    def __init__(
+        self, api_key: str, user_agent: str, client: httpx.Client | None = None, photos: bool = False
+    ):
         self.api_key = api_key
+        # Stock photos are off unless switched on (assets.stock.photos): generic, polished stock beat real archival
+        # pictures on the picture check and filled a 1692 Salem video with fantasy art (10 Oct). Clips stay on.
+        self.photos = photos
         self._client = client or httpx.Client(
             headers={"User-Agent": user_agent}, timeout=30, follow_redirects=True
         )
@@ -92,6 +97,8 @@ class StockAssetProvider(AssetProvider):
         return found[:max_results]
 
     def search(self, ctx: ProviderContext, query: str, max_results: int = 5) -> list[AssetCandidate]:
+        if not self.photos:
+            return []
         return self._search(ctx, query, "image", max_results)
 
     def search_videos(self, ctx: ProviderContext, query: str, max_results: int = 3) -> list[AssetCandidate]:

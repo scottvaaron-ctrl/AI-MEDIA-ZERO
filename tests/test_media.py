@@ -116,7 +116,7 @@ def _client(seen: list[httpx.Request]) -> httpx.Client:
 
 def test_pexels_requests_and_parsing(svc) -> None:  # noqa: ANN001
     seen: list[httpx.Request] = []
-    pex = PexelsAssetProvider("KEY", "ua", _client(seen))
+    pex = PexelsAssetProvider("KEY", "ua", _client(seen), photos=True)
     photos = pex.search(svc.ctx(), "moon")
     assert photos[0].file_url.endswith("1.jpg") and photos[0].license == "Pexels License"
     assert photos[0].attribution.startswith("Photo by Ann Lee on Pexels")
@@ -130,7 +130,7 @@ def test_pexels_requests_and_parsing(svc) -> None:  # noqa: ANN001
 
 def test_pixabay_requests_and_parsing(svc) -> None:  # noqa: ANN001
     seen: list[httpx.Request] = []
-    pix = PixabayAssetProvider("KEY", "ua", _client(seen))
+    pix = PixabayAssetProvider("KEY", "ua", _client(seen), photos=True)
     photos = pix.search(svc.ctx(), "moon")
     assert photos[0].license == "Pixabay Content License" and "from Pixabay" in photos[0].attribution
     assert seen[0].url.params["key"] == "KEY" and seen[0].url.params["orientation"] == "vertical"

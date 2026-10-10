@@ -128,3 +128,26 @@ def test_without_the_check_the_first_clip_that_downloads_is_used(svc) -> None:  
     svc.assets = [videos]
     rec = _producer(svc)._find_clip(svc.ctx("run_1"), "lighthouse", svc.env.data_dir, None)
     assert rec is not None and rec.title == "deer"
+
+
+def test_stock_photos_are_off_unless_switched_on_but_clips_still_search(project, monkeypatch) -> None:  # noqa: ANN001
+    # 10 Oct: stock photos (generic, polished) beat real archival pictures on the picture check and filled a
+    # Salem witch-trial video with fantasy art; history needs archival photos. Clips stay on.
+    from aimz.providers.registry import build_services
+
+    monkeypatch.setenv("PIXABAY_API_KEY", "k")
+    s = build_services(project, quiet_logs=True)
+    try:
+        pix = next(p for p in s.assets if p.name == "PixabayAssetProvider")
+        calls: list[str] = []
+        monkeypatch.setattr(pix, "_search", lambda ctx, q, kind, n: calls.append(kind) or [])
+        assert pix.search(s.ctx(), "salem") == [] and calls == []
+        pix.search_videos(s.ctx(), "salem")
+        assert calls == ["video"]
+    finally:
+        s.close()
+    p = PixabayAssetProvider("k", "ua", photos=True)
+    seen: list[str] = []
+    monkeypatch.setattr(p, "_search", lambda ctx, q, kind, n: seen.append(kind) or [])
+    p.search(None, "salem")  # type: ignore[arg-type]
+    assert seen == ["image"]

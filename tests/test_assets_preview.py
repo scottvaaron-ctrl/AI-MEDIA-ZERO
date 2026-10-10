@@ -117,7 +117,7 @@ def test_pexels_preview_url_small(svc) -> None:  # noqa: ANN001
             }
         ]
     }
-    pex = PexelsAssetProvider("KEY", "ua", _client(lambda req: httpx.Response(200, json=data)))
+    pex = PexelsAssetProvider("KEY", "ua", _client(lambda req: httpx.Response(200, json=data)), photos=True)
     c = pex.search(svc.ctx(), "moon")[0]
     assert c.preview_url == "https://i/1-small.jpg" and c.file_url == "https://i/1-large2x.jpg"
 
@@ -134,7 +134,7 @@ def test_pixabay_preview_url_webformat(svc) -> None:  # noqa: ANN001
     }
     only_prev = {**hit, "id": 2, "webformatURL": ""}
     pix = PixabayAssetProvider(
-        "KEY", "ua", _client(lambda req: httpx.Response(200, json={"hits": [hit, only_prev]}))
+        "KEY", "ua", _client(lambda req: httpx.Response(200, json={"hits": [hit, only_prev]})), photos=True
     )
     got = pix.search(svc.ctx(), "moon")
     assert got[0].preview_url == "https://i/web.jpg"

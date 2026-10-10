@@ -168,6 +168,7 @@ assets:
   # PEXELS_API_KEY / PIXABAY_API_KEY in .env. Until then these providers are never registered.
   stock:
     enabled: true  # 9 Oct: constitution section 5 allows it; Pixabay key in .env (Pexels keys paused by Pexels)
+    photos: false  # 10 Oct: stock photos crowded out archival pictures on history stories; stock clips only
   owner_library_dir: ./assets/owner
   cache_dir: ./data/assets
 

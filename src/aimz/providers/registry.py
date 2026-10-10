@@ -160,10 +160,11 @@ def build_services(
     # Pexels / Pixabay licences are outside the constitution's original PD/CC list: only after the owner has
     # amended it and switched this on in config.yaml, and only with the owner's keys in .env.
     if config.get("assets.stock.enabled", False):
+        stock_photos = bool(config.get("assets.stock.photos", False))
         if env.pexels_api_key:
-            assets.append(PexelsAssetProvider(env.pexels_api_key, env.user_agent))
+            assets.append(PexelsAssetProvider(env.pexels_api_key, env.user_agent, photos=stock_photos))
         if env.pixabay_api_key:
-            assets.append(PixabayAssetProvider(env.pixabay_api_key, env.user_agent))
+            assets.append(PixabayAssetProvider(env.pixabay_api_key, env.user_agent, photos=stock_photos))
 
     # ---- research --------------------------------------------------------------------
     rss = RSSResearchProvider(env.user_agent)
