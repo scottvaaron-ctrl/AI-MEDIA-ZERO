@@ -14,6 +14,7 @@ from aimz import guideline, identity
 from aimz.agents.base import Agent
 from aimz.core.attention import (  # picture-check states (aimz status)
     DEFAULT_RELEVANCE_FIX,
+    LOUDNESS_STATE,
     PREVIEWS_STATE,
     RELEVANCE_FIX_STATE,
     RELEVANCE_STATE,
@@ -34,6 +35,21 @@ from aimz.util import loads, new_id, now_iso, slugify
 SCENE_PAD_S = 0.35
 # Narration voice used for a whole video when the Kokoro voice fails (owner decision 2026-10-08).
 FALLBACK_VOICE = "en_US-kristin-medium"
+LOUDNESS_TARGET_LUFS = -14.0
+
+
+def fallback_voice(instance: str) -> str:
+    """The voice a video falls back to when Kokoro fails: kristin, or the first cleared Piper voice no other
+    channel holds (channels stay distinct in voice, owner decision 2026-10-01)."""
+    from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES
+
+    taken = identity.taken_voices(instance)
+    for voice in (FALLBACK_VOICE, *COMMERCIAL_SAFE_VOICES):
+        if voice not in taken:
+            return voice
+    return FALLBACK_VOICE
+
+
 _STOP = {"the", "a", "an", "of", "and", "in", "on", "for", "to", "with", "by", "at", "from", "over", "about"}
 
 
@@ -192,6 +208,8 @@ class ProducerAgent(Agent):
         self._previews_warned: tuple[str | None] | None = None
         # (run id,) once that run has warned that the Kokoro voice is unavailable.
         self._voice_warned: tuple[str | None] | None = None
+        # Per-beat (picture, clip) chosen while producing one video; None outside produce().
+        self._beat_visuals: dict[int, tuple[AssetRecord | None, AssetRecord | None]] | None = None
         self._relevance_beats: list[dict[str, Any]] = []
         self._relevance_fallback = 0
         self._query_log: list[dict[str, Any]] | None = None
@@ -285,8 +303,10 @@ class ProducerAgent(Agent):
         cursor = 0.0
         shot_idx = 0
         first_image: str | None = None
-        self._relevance_beats = []
-        self._relevance_fallback = 0
+        reuse = self._beat_visuals  # set by produce(): a voice-fallback pass keeps the first pass's pictures
+        if not reuse:
+            self._relevance_beats = []
+            self._relevance_fallback = 0
         for i, beat in enumerate(beats):
             # ---- narration --------------------------------------------------
             wav = out_dir / f"scene_{i:02d}.wav"
@@ -296,14 +316,19 @@ class ProducerAgent(Agent):
             # ---- visual ------------------------------------------------------
             # Try a licensed photo for every beat except quotes; the card renders on top of it.
             asset: AssetRecord | None = None
-            if search_assets and beat.visual_type != "quote_card":
-                asset = self._pick_asset(ctx, beat, title, out_dir / "assets", i)
             clip: AssetRecord | None = None
-            if clips_on and search_assets and beat.visual_type in {"image", "text_card"}:
-                for query in asset_queries(beat.visual_query, title):
-                    clip = self._find_clip(ctx, query, out_dir / "assets")
-                    if clip is not None:
-                        break
+            if reuse is not None and i in reuse:
+                asset, clip = reuse[i]
+            else:
+                if search_assets and beat.visual_type != "quote_card":
+                    asset = self._pick_asset(ctx, beat, title, out_dir / "assets", i)
+                if clips_on and search_assets and beat.visual_type in {"image", "text_card"}:
+                    for query in asset_queries(beat.visual_query, title):
+                        clip = self._find_clip(ctx, query, out_dir / "assets")
+                        if clip is not None:
+                            break
+                if reuse is not None:
+                    reuse[i] = (asset, clip)
             # Card text that only repeats the narration is dropped: the subtitles already show those words.
             options = [beat.caption, beat.visual_query] if beat.visual_type != "image" else [beat.caption]
             if beat.visual_type not in {"stat_card", "quote_card", "image"} or not beat.caption:
@@ -399,7 +424,11 @@ class ProducerAgent(Agent):
         self.svc.db.set_state(VOICE_FIX_STATE, (fix or DEFAULT_RELEVANCE_FIX)[:200])
         if self._voice_warned != (run.id,):
             self._voice_warned = (run.id,)
-            self.log.warning("Kokoro voice unavailable (%s); narrating with %s", reason, FALLBACK_VOICE)
+            self.log.warning(
+                "Kokoro voice unavailable (%s); narrating with %s",
+                reason,
+                fallback_voice(self.svc.env.instance),
+            )
 
     def _voice_up(self) -> None:
         for state in (VOICE_STATE, VOICE_FIX_STATE):
@@ -463,6 +492,7 @@ class ProducerAgent(Agent):
                 run, self.name, "produce", {"script_id": script_id, "video_id": video_id}
             ) as span:
                 ctx = self.pctx(run, video_id, span)
+                self._beat_visuals = {}
                 try:
                     scenes, attributions, first_image, cursor = self.assemble(
                         ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
@@ -472,12 +502,14 @@ class ProducerAgent(Agent):
                 except VoiceUnavailable as exc:
                     # One video never mixes voices: the whole video is narrated again with the fallback.
                     self._voice_down(run, exc)
-                    self.settings.overwrite(video_id, "voice", FALLBACK_VOICE, "voice_fallback")
+                    backup = fallback_voice(self.svc.env.instance)
+                    self.settings.overwrite(video_id, "voice", backup, "voice_fallback")
                     self.settings.overwrite(video_id, "voice_fallback", chosen.get("voice"), "voice_fallback")
-                    chosen = {**chosen, "voice": FALLBACK_VOICE}
+                    chosen = {**chosen, "voice": backup}
                     scenes, attributions, first_image, cursor = self.assemble(
                         ctx, beats, chosen, out_dir, video_id, script["title"], disclosure
                     )
+                self._beat_visuals = None
                 relevance_note = self.relevance_note()
                 if relevance_note is not None:
                     run.note("relevance", {**run.summary.get("relevance", {}), video_id: relevance_note})
@@ -504,6 +536,11 @@ class ProducerAgent(Agent):
                     peak = getattr(result, "true_peak_dbtp", None)
                     note = {"loudness_lufs": lufs, "true_peak_dbtp": peak}
                     run.note("loudness", {**run.summary.get("loudness", {}), video_id: note})
+                    off = abs(lufs - LOUDNESS_TARGET_LUFS) > 1.0 or (peak is not None and peak > -1.0)
+                    if off:
+                        db.set_state(LOUDNESS_STATE, f"{video_id}: {lufs:.1f} LUFS / {peak} dBTP")
+                    elif db.get_state(LOUDNESS_STATE):
+                        db.set_state(LOUDNESS_STATE, "")
                 thumb = self.svc.cards.render_thumbnail(
                     ctx, script["title"], video_id, out_dir / "thumbnail.png", first_image
                 )

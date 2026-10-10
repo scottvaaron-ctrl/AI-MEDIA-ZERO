@@ -209,7 +209,7 @@ def encode_check(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list):
-        return json.dumps(value)
+        return json.dumps(value, ensure_ascii=False)
     return str(value)
 
 

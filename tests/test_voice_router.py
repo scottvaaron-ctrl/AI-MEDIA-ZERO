@@ -97,8 +97,14 @@ def test_registry_builds_router_for_piper_and_silent_for_tests(
         svc.close()
 
 
-def test_present_voices_lists_piper_files_and_kokoro_when_its_model_is_there(tmp_path: Path) -> None:
+def test_present_voices_lists_piper_files_and_kokoro_when_its_model_is_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import numpy as np
+
+    from aimz.providers.tts import router
+
+    monkeypatch.setattr(router, "packages_importable", lambda: True)  # CI installs without kokoro-onnx
 
     from aimz.providers.tts.kokoro import MODEL_FILES, KokoroTTSProvider
     from aimz.providers.tts.piper import PiperTTSProvider

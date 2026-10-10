@@ -1250,6 +1250,16 @@ def voice_show() -> None:
 
     svc = _svc(quiet=True)
     try:
+        from aimz import guideline
+
+        g = guideline.for_services(svc)
+        if g is not None and "voice" in g.locked:
+            console.print(
+                f"voice {g.locked['voice']} (locked by the owner's guideline v{g.version})",
+                markup=False,
+                highlight=False,
+            )
+            return
         ident = identity.load(svc.db)
         who = "set by the owner" if ident.get("owner_voice") else "chosen by the AI"
         console.print(f"voice {ident.get('voice') or 'not chosen'} ({who})", markup=False, highlight=False)

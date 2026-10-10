@@ -38,9 +38,11 @@ class ScriptAgent(Agent):
             parts.append("no question")
         if g.checks.get("hook_no_definition"):
             parts.append('no definition opening such as "X is a ..."')
-        if not parts:
-            return ""
-        return "Hook limits (checked in code): " + "; ".join(parts) + ".\n\n"
+        out = "Hook limits (checked in code): " + "; ".join(parts) + ".\n" if parts else ""
+        title = g.checks.get("title_max_chars")
+        if title is not None:
+            out += f"Title: at most {int(title)} characters (checked in code).\n"
+        return out + "\n" if out else ""
 
     def write(
         self,

@@ -7,6 +7,7 @@ router can tell them from Piper's. Synthesis is sentence-chunked like Piper's, s
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import wave
 from pathlib import Path
@@ -23,6 +24,14 @@ log = logging.getLogger("aimz.tts.kokoro")
 RELEASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 MODEL_FILES: tuple[str, ...] = ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")
 PREFIX = "kokoro:"
+# SHA-256 of the release files (GitHub publishes no digest for them; taken 2026-10-09 from the working copies,
+# whose sizes match the release byte for byte: 92361271 and 28214398).
+MODEL_SHA256: dict[str, str] = {
+    "kokoro-v1.0.int8.onnx": "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+}
+# Model dirs whose download failed in this process: not retried for every video of a run.
+_FAILED_DOWNLOADS: set[str] = set()
 
 # Voices are cleared by ear (owner decision 2026-10-08); the model and its voicepacks are Apache-2.0.
 COMMERCIAL_SAFE_KOKORO_VOICES: dict[str, str] = {
@@ -52,15 +61,20 @@ def download_model(model_dir: Path, http: httpx.Client | None = None) -> None:
             d.mkdir(parents=True, exist_ok=True)
             tmp = dest.with_name(dest.name + ".part")
             log.info("downloading Kokoro model file %s", name)
+            digest = hashlib.sha256()
             try:
                 with client.stream("GET", f"{RELEASE_URL}/{name}") as r:
                     r.raise_for_status()
                     with open(tmp, "wb") as fh:
                         for chunk in r.iter_bytes(1 << 16):
                             fh.write(chunk)
+                            digest.update(chunk)
             except BaseException:
                 tmp.unlink(missing_ok=True)
                 raise
+            if digest.hexdigest() != MODEL_SHA256[name]:
+                tmp.unlink(missing_ok=True)
+                raise ProviderUnavailable(f"Kokoro model file {name} failed its checksum; not installed")
             tmp.replace(dest)
     finally:
         if owns:
@@ -129,7 +143,14 @@ class KokoroTTSProvider(TTSProvider):
             raise ProviderUnavailable(
                 f"Kokoro model files not found in {self.model_dir}. Run `python -m aimz doctor --fix`."
             )
-        download_model(self.model_dir)
+        key = str(self.model_dir)
+        if key in _FAILED_DOWNLOADS:
+            raise ProviderUnavailable("Kokoro model download already failed in this run; not retried")
+        try:
+            download_model(self.model_dir)
+        except Exception as exc:
+            _FAILED_DOWNLOADS.add(key)
+            raise ProviderUnavailable(f"Kokoro model download failed: {exc}") from exc
 
     def _load(self) -> Any:
         if self._engine is None:

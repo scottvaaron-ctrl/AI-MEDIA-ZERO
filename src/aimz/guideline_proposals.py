@@ -287,6 +287,34 @@ def _set_in_block(block: str, key: str, value: str) -> str:
     return new
 
 
+def _replace_entry(block: str, key: str, value: str) -> str:
+    """``block`` with ``key``'s whole entry (one line, or a block list / folded text under it) set to ``value``
+    on one line. Used for the genre and the code checks, which an owner may write in either style."""
+    lines = block.split("\n")
+    pat = re.compile(rf"^([ \t]+){re.escape(key)}:")
+    i = next((n for n, line in enumerate(lines) if pat.match(line)), None)
+    if i is None:
+        raise GuidelineError(f"'{key}' not found to rewrite")
+    m = pat.match(lines[i])
+    indent = m.group(1) if m else ""
+    j = i + 1
+    while (
+        j < len(lines)
+        and lines[j].strip()
+        and (len(lines[j]) - len(lines[j].lstrip()) > len(indent) or lines[j].lstrip().startswith("- "))
+    ):
+        j += 1
+    lines[i:j] = [f"{indent}{key}: {value}"]
+    return "\n".join(lines)
+
+
+def _rewrite_entry(text: str, top: str, key: str, value: str) -> str:
+    ys, ye = _yaml_span(text)
+    y = text[ys:ye]
+    bs, be, _ = _block(y, top)
+    return text[:ys] + y[:bs] + _replace_entry(y[bs:be], key, value) + y[be:] + text[ye:]
+
+
 def _rewrite_yaml(text: str, top: str, values: dict[str, str]) -> str:
     ys, ye = _yaml_span(text)
     y = text[ys:ye]
@@ -337,12 +365,12 @@ def rewrite_item(text: str, item: str, after: str) -> str:
         lo, hi = _runtime_range(after)
         new = _rewrite_yaml(text, "runtime_s", {"min": str(lo), "max": str(hi)})
     elif item == "G-genre":
-        new = _rewrite_yaml(text, "guideline", {"genre": json.dumps(after.strip())})
+        new = _rewrite_entry(text, "guideline", "genre", json.dumps(after.strip(), ensure_ascii=False))
     elif check:
         value, why = guideline.check_variant(check, after)
         if why:
             raise GuidelineError(why)
-        new = _rewrite_yaml(text, "checks", {check: guideline.encode_check(value)})
+        new = _rewrite_entry(text, "checks", check, guideline.encode_check(value))
     elif item.startswith("G-") and item[2:] in CATALOG:
         new = _rewrite_yaml(text, "locked", {item[2:]: _yaml_scalar(after)})
     else:

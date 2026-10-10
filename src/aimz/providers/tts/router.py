@@ -17,6 +17,7 @@ from aimz.providers.tts.kokoro import (
     PREFIX,
     KokoroTTSProvider,
     model_present,
+    packages_importable,
 )
 from aimz.providers.tts.piper import COMMERCIAL_SAFE_VOICES, PiperTTSProvider
 
@@ -52,7 +53,8 @@ class VoiceRouterTTS(TTSProvider):
 
     def present_voices(self) -> list[str]:
         """Voices that can be spoken now without a download: Piper's voice files, then Kokoro's when its model is in place."""
-        kokoro = list(COMMERCIAL_SAFE_KOKORO_VOICES) if model_present(self.kokoro.model_dir) else []
+        ready = model_present(self.kokoro.model_dir) and packages_importable()
+        kokoro = list(COMMERCIAL_SAFE_KOKORO_VOICES) if ready else []
         return self.piper.present_voices() + kokoro
 
     def health(self) -> HealthStatus:

@@ -1,15 +1,23 @@
 # AI Media Zero: Brief for the CEO and the CEO's AI Agent
 
-_Updated 2026-10-09 (late): **The channel now follows the owner-approved guideline v1** (genre "the surprising true stories behind real places: local history, unusual historical events, odd borders and lost places"; Bella voice; 25-45 s; full-screen photos, 3-word captions, calm music; five writing rules). The AI's free creative control is over: it may test one change at a time on any part of the guideline (genre and voice included, owner decision 9 Oct), and nothing changes without the owner's approval. Earlier the same day: **Part 2 piece C (sound) is merged and live: new videos are narrated by the Kokoro voice
-"Bella" (owner-chosen; the AI cannot change it), and every video is levelled to YouTube's -14 LUFS (measured
--14.1 to -14.5 on all voices, peaks well under the limit). If Kokoro fails, the whole video uses the old voice
-(kristin) and `aimz status` says so. Owner decisions 9 Oct: picture-check floor kept; constitution §5 media
-sentence applied (stock photos/video and free music allowed; Pexels/Pixabay keys still needed for piece D).
-Hook check (owner-approved): a flagged "X is a..." opening now gets an AI second look and passes only if it
-states something surprising (on past scripts: 3 of 16 pass). Google login: consent screen set to "In production"
-(9 Oct); the re-login during the screencast makes it last. Still due: YouTube screencast by Thu 15 Oct (the
-agent records it with owner checks before upload/send); Pexels/Pixabay keys (owner pastes into .env).**
-Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
+_Updated 2026-10-09 (end of day)._
+
+**Where things stand on 9 Oct**
+- **The channel follows the owner-approved guideline v1.** Genre: "the surprising true stories behind real places:
+  local history, unusual historical events, odd borders and lost places" (maps alone was the weakest topic). Bella
+  voice, 25-45 s, full-screen photos, 3-word captions, calm music, five writing rules. The AI's free creative control
+  is over: it may test one change at a time on **any** part of the guideline (genre and voice included), and nothing
+  changes without the owner's approval.
+- **Sound:** narrated by the Kokoro voice "Bella"; every video levelled to YouTube's -14 LUFS (measured -14.1 to -14.5
+  on all voices). If Kokoro fails, the whole video uses a backup voice and `aimz status` says so.
+- **Hooks:** an "X is a..." opening gets an AI second look and passes only if it states something surprising
+  (3 of 16 past openings pass).
+- **Owner decisions 9 Oct:** picture-check floor kept; constitution section 5 allows stock photos/video and free music.
+- **Google login:** consent screen set to "In production"; the re-login during the screencast makes the login last.
+- **Still due:** the YouTube screencast by Thu 15 Oct (the agent records it; the owner checks it before upload and
+  before the reply is sent); Pexels/Pixabay keys (the owner adds them to `.env`) for stock video (piece D).
+
+_Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
 channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but
 changes nothing until the guideline is written. **8 Oct: owner logged in to YouTube again (uploads resume; the
 consent screen still needs "In production" so it stops expiring weekly). The 7 Oct test video is up unlisted:
