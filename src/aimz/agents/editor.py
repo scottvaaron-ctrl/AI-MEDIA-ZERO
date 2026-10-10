@@ -12,6 +12,7 @@ import contextlib
 import random
 from typing import Any
 
+from aimz import guideline
 from aimz.agents.base import Agent
 from aimz.core.runs import RunContext
 from aimz.domain.models import GenreFit, SelectionDecision, SelectionDecisionWithBreaks
@@ -247,8 +248,9 @@ class EditorInChief(Agent):
             if budget[0] <= 0:
                 continue  # out of judge calls: only ideas already judged under this version can pass
             budget[0] -= 1
+            genre = (guideline.for_idea(g, c, self.svc.db) or g).genre  # a genre experiment's variant arm
             user = (
-                f"Channel genre: {g.genre}\n\n"
+                f"Channel genre: {genre}\n\n"
                 f"Idea: {c['title']}\nPremise: {(c.get('premise') or '')[:300]}\nHook: {(c.get('hook') or '')[:200]}\n\n"
                 "Does this idea fit the channel genre? Answer fits true or false and a one-line reason."
             )
@@ -270,10 +272,13 @@ class EditorInChief(Agent):
                     continue
                 span.output_refs["fits"] = verdict.fits
             if verdict.fits:
-                self.svc.db.update(
-                    "ideas", c["id"], {"genre_checked_version": g.version, "updated_at": now_iso()}
-                )
-                c["genre_checked_version"] = g.version
+                # Only a pass against the guideline's own genre is remembered: a pass against a genre
+                # experiment's variant says nothing once the experiment ends.
+                if genre == g.genre:
+                    self.svc.db.update(
+                        "ideas", c["id"], {"genre_checked_version": g.version, "updated_at": now_iso()}
+                    )
+                    c["genre_checked_version"] = g.version
                 passing.append(c)
                 continue
             prev = loads(c.get("guideline_breaks"), [])
@@ -357,7 +362,9 @@ class EditorInChief(Agent):
             by_id = {c["id"]: c for c in shortlist}
             broken = self._topic_breaks(decision, by_id, {r.id for r in topic_rules})
             for cid in variant_ideas & set(broken):
-                broken[cid] = [rid for rid in broken[cid] if rid != tested_rule]
+                # A genre experiment's treatment ideas are not held to the topic rules (they restate the
+                # genre under test); a topic-rule experiment's are not held to the rule under test.
+                broken[cid] = [rid for rid in broken[cid] if rid != tested_rule and tested_rule != "G-genre"]
             broken = {k: v for k, v in broken.items() if v}
             turned_down: set[str] = set()
             for cid, ids in broken.items():

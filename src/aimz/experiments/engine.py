@@ -18,6 +18,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
+from aimz import guideline
 from aimz.db import Database
 from aimz.domain.models import ExperimentProposal
 from aimz.experiments.settings import CATALOG
@@ -254,6 +255,22 @@ class ExperimentEngine:
                     ),
                 )
             return control, str(seconds), None
+        if item == "G-genre":
+            control = g.genre
+            if not variant.strip():
+                return control, None, "variant text required"
+            if variant.strip() == control.strip():
+                return control, None, "control and treatment are identical"
+            return control, variant.strip(), None
+        if setting in guideline.CHECK_KEYS:
+            control = guideline.encode_check(g.checks[setting])
+            value, why = guideline.check_variant(setting, variant)
+            if why:
+                return control, None, f"variant out of bounds: {why}"
+            encoded = guideline.encode_check(value)
+            if encoded == control:
+                return control, None, "control and treatment are identical"
+            return control, encoded, None
         if setting in g.locked:
             control = str(g.locked[setting])
             try:
@@ -366,7 +383,8 @@ class ExperimentEngine:
             return None
         for e in self.running():
             rule = g.rules.get(str(e["variable"]))
-            if rule is not None and rule.stage == "topic":
+            # A genre experiment is a topic experiment: ideas are written under one arm's genre or the other's.
+            if e["variable"] == "G-genre" or (rule is not None and rule.stage == "topic"):
                 return e
         return None
 

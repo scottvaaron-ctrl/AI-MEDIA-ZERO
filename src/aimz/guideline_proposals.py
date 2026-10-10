@@ -227,6 +227,11 @@ def current_value(g: Guideline, item: str) -> str | None:
     """``item``'s value in ``g`` written as a proposal's ``before`` (an experiment's control)."""
     if item == "G-runtime":
         return f"{g.runtime_min}-{g.runtime_max}"
+    if item == "G-genre":
+        return g.genre
+    if item.startswith("G-") and item[2:] in guideline.CHECK_KEYS:
+        v = g.checks.get(item[2:])
+        return None if v is None else guideline.encode_check(v)
     if item.startswith("G-") and item[2:] in CATALOG:
         v = g.locked.get(item[2:])
         return None if v is None else str(v)
@@ -327,9 +332,17 @@ def _rewrite_rule(text: str, rule_id: str, new_body: str) -> str:
 
 def rewrite_item(text: str, item: str, after: str) -> str:
     """``text`` with only ``item`` changed to ``after``; validated before it is returned."""
+    check = item[2:] if item.startswith("G-") and item[2:] in guideline.CHECK_KEYS else ""
     if item == "G-runtime":
         lo, hi = _runtime_range(after)
         new = _rewrite_yaml(text, "runtime_s", {"min": str(lo), "max": str(hi)})
+    elif item == "G-genre":
+        new = _rewrite_yaml(text, "guideline", {"genre": json.dumps(after.strip())})
+    elif check:
+        value, why = guideline.check_variant(check, after)
+        if why:
+            raise GuidelineError(why)
+        new = _rewrite_yaml(text, "checks", {check: guideline.encode_check(value)})
     elif item.startswith("G-") and item[2:] in CATALOG:
         new = _rewrite_yaml(text, "locked", {item[2:]: _yaml_scalar(after)})
     else:
@@ -337,6 +350,10 @@ def rewrite_item(text: str, item: str, after: str) -> str:
     g = guideline.parse(new, CATALOG, _all_caps())
     if item == "G-runtime":
         ok = (g.runtime_min, g.runtime_max) == _runtime_range(after)
+    elif item == "G-genre":
+        ok = g.genre == after.strip()
+    elif check:
+        ok = g.checks.get(check) == guideline.check_variant(check, after)[0]
     elif item.startswith("G-") and item[2:] in CATALOG:
         norm, _ = CATALOG[item[2:]].check(after)
         ok = str(g.locked.get(item[2:])) == str(norm)
@@ -362,6 +379,9 @@ def changed_items(old: Guideline, new: Guideline) -> set[str]:
     }
     if (old.runtime_min, old.runtime_max) != (new.runtime_min, new.runtime_max):
         out.add("G-runtime")
+    if old.genre != new.genre:
+        out.add("G-genre")
+    out |= {f"G-{k}" for k in guideline.CHECK_KEYS if old.checks.get(k) != new.checks.get(k)}
     return out
 
 

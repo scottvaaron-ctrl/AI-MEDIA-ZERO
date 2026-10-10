@@ -25,7 +25,9 @@ def _never_download_models(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 @pytest.fixture()
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A throwaway project directory with real config files and offline providers."""
-    shutil.copytree(ROOT / "config", tmp_path / "config")
+    # The live channel guideline is never copied: tests that need one write their own (and "no guideline"
+    # tests must stay without one).
+    shutil.copytree(ROOT / "config", tmp_path / "config", ignore=shutil.ignore_patterns("guideline.md"))
     (tmp_path / "data").mkdir()
     env_vars = {
         "AIMZ_PROJECT_ROOT": str(tmp_path),

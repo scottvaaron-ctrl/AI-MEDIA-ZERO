@@ -198,7 +198,8 @@ class CriticAgent(Agent):
         threshold = int(cfg.get("pipeline.qa_pass_threshold", 70))
         elevated = "\n".join(f"- {t}" for t in cfg.elevated_review_topics)
         narration = " ".join(b.narration for b in draft.beats)
-        g = guideline.for_services(self.svc)
+        # A genre or code-check experiment's treatment ideas are checked under the variant (owner decision 2026-10-09).
+        g = guideline.for_idea(guideline.for_services(self.svc), idea, self.svc.db)
         replace = guideline.variant_for(idea, self.svc.db) if g else {}
         tested_runtime = guideline.runtime_variant(idea, self.svc.db) if g else None
         gtext = self.guideline_text(GATED_STAGES, replace, g)
