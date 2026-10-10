@@ -118,9 +118,7 @@ def main() -> None:
         out = DOCS / slug / "index.html"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            TEMPLATE.format(
-                title=title, body=body, site=SITE, repo=REPO, source=source, built=built
-            ),
+            TEMPLATE.format(title=title, body=body, site=SITE, repo=REPO, source=source, built=built),
             encoding="utf-8",
             newline="\n",
         )

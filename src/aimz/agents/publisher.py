@@ -282,8 +282,10 @@ class PublishStage(Agent):
                     {"platform": platform, "status": existing["status"], "skipped": "already done"}
                 )
                 continue
-            if existing and existing["status"] in {"failed", "abandoned"}:
-                if existing["status"] == "failed" and existing["next_attempt_at"]:
+            if existing and existing["status"] in {"failed", "abandoned", "dropped"}:
+                if existing["status"] == "dropped":
+                    why = "dropped by the owner; never re-sent (aimz publish retry undoes it)"
+                elif existing["status"] == "failed" and existing["next_attempt_at"]:
                     why = f"checked retry scheduled after {existing['next_attempt_at']}"
                 else:
                     why = "closed out; the owner can re-send it (aimz publish retry)"
@@ -527,6 +529,30 @@ class PublishStage(Agent):
         return out
 
     # -- owner actions -------------------------------------------------------------------
+    def drop(self, publication_id: str, reason: str) -> None:
+        """Owner decision: an upload that never went out is let go. It is never retried and leaves
+        ``aimz status``; ``requeue`` (aimz publish retry) still undoes it."""
+        pub = self.svc.db.get("publications", publication_id)
+        if not pub:
+            raise ValueError(f"publication {publication_id} not found")
+        if pub["status"] not in {"failed", "blocked", "abandoned", "pending", "packaged"}:
+            raise ValueError(
+                f"publication {publication_id} is '{pub['status']}'; only unsent uploads are dropped"
+            )
+        note = f"dropped by the owner: {reason}".strip() + (
+            f" (was: {pub['last_error']})" if pub["last_error"] else ""
+        )
+        self.svc.db.update(
+            "publications",
+            publication_id,
+            {
+                "status": "dropped",
+                "next_attempt_at": None,
+                "last_error": note[:1000],
+                "updated_at": now_iso(),
+            },
+        )
+
     def requeue(self, publication_id: str) -> dict[str, Any]:
         """Owner-deliberate reset of a failed, blocked or abandoned publication, with a fresh set of attempts.
 
@@ -536,10 +562,10 @@ class PublishStage(Agent):
         pub = self.svc.db.get("publications", publication_id)
         if not pub:
             raise ValueError(f"publication {publication_id} not found")
-        if pub["status"] not in {"failed", "blocked", "abandoned"}:
+        if pub["status"] not in {"failed", "blocked", "abandoned", "dropped"}:
             raise ValueError(
-                f"publication {publication_id} is '{pub['status']}'; only failed, blocked or abandoned ones "
-                "are re-queued"
+                f"publication {publication_id} is '{pub['status']}'; only failed, blocked, abandoned or dropped "
+                "ones are re-queued"
             )
         self.svc.db.update(
             "publications",
