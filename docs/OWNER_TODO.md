@@ -11,9 +11,10 @@ history. Commands run from `C:\Users\scott\Documents\Agentic_Youtube` in PowerSh
 ### A1. YouTube compliance screencast: due Thu 15 Oct
 The agent records it (owner OK 9 Oct): Google's consent screen, the channel check, upload consent, the upload
 code, a real upload, the saved request and response, the live Short and its YouTube Studio details, analytics.
-- [ ] **Watch the recording** when the agent shows it, and say OK (or what to change).
-- [ ] The agent then uploads it unlisted and sends the Gmail reply (thread "YouTube API Services: Thank you for
-      your submission"). It shows you the email first.
+- [x] Recorded 11 Oct and approved by you; uploaded unlisted: https://www.youtube.com/watch?v=IQjAAgrE14Q
+      (file: `data/audit/screencast-2026-10-11.mp4`).
+- [ ] **Send the reply.** It is a draft in scottvaaron@gmail.com, in the thread "YouTube API Services: Thank you for
+      your submission", with the link filled in. Open Gmail, check it, press Send (due Thu 15 Oct).
 - Then Google completes the review in its own time. Until then: no new channels (promise in the 2 Oct reply).
 
 ### A2. Stock video (piece D): done 9 Oct

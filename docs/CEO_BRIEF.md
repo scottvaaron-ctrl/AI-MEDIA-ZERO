@@ -17,8 +17,7 @@ _Updated 2026-10-09 (end of day)._
 - **Google login:** consent screen set to "In production"; the re-login during the screencast makes the login last.
 - **Stock video (piece D) is live:** free Pixabay clips and photos, each checked against the narration before use;
   AI-generated clips are never used. Pexels has paused new keys, so it waits.
-- **Still due:** the YouTube screencast by Thu 15 Oct (the agent records it; the owner checks it before upload and
-  before the reply is sent).
+- **YouTube screencast done (11 Oct):** recorded, owner-approved, uploaded unlisted (https://www.youtube.com/watch?v=IQjAAgrE14Q); the reply to Google is a draft in the owner's Gmail with the link. **Owner: press Send by Thu 15 Oct.** The re-login during the recording means the YouTube login no longer expires weekly.
 
 _Earlier (2026-10-08): **Project rescoped (owner, 7 Oct): the AI now follows an owner-approved guideline per
 channel instead of having full creative control** (see "7-8 Oct: rescope" below). Part 1 is merged and live but
